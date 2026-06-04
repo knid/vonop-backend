@@ -15,12 +15,13 @@ import (
 
 // ServerConfig describes a single MCP server to connect to.
 type ServerConfig struct {
-	Name           string            `json:"name"`
-	URL            string            `json:"url"`
-	Headers        map[string]string `json:"headers"`
-	Enabled        bool              `json:"enabled"`
-	TimeoutSeconds int               `json:"timeout_seconds"`
-	ToolPrefix     string            `json:"tool_prefix"`
+	Name            string            `json:"name"`
+	URL             string            `json:"url"`
+	Headers         map[string]string `json:"headers"`
+	Enabled         bool              `json:"enabled"`
+	TimeoutSeconds  int               `json:"timeout_seconds"`
+	ToolPrefix      string            `json:"tool_prefix"`
+	RestrictNetwork bool              `json:"restrict_network"`
 }
 
 // Config is the top-level configuration parsed from the MCP_SERVERS_CONFIG secret.
@@ -89,25 +90,25 @@ func DiscoverTools(ctx context.Context, sc ServerConfig) ([]DiscoveredTool, erro
 }
 
 func CallTool(ctx context.Context, sc ServerConfig, toolName string, argumentsJSON string) (string, error) {
+	var args map[string]any
+	if argumentsJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+			return fmt.Sprintf("Failed to parse arguments for %s: %v", toolName, err), err
+		}
+	}
+
 	session, err := connectSession(ctx, sc)
 	if err != nil {
 		return "", err
 	}
 	defer session.Close()
 
-	var args map[string]any
-	if argumentsJSON != "" {
-		if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
-			return fmt.Sprintf("Failed to parse arguments for %s: %v", toolName, err), nil
-		}
-	}
-
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      toolName,
 		Arguments: args,
 	})
 	if err != nil {
-		return fmt.Sprintf("Tool %s is currently unavailable: %v", toolName, err), nil
+		return fmt.Sprintf("Tool %s is currently unavailable: %v", toolName, err), err
 	}
 
 	return stringifyToolResult(toolName, result), nil
@@ -122,7 +123,9 @@ func connectSession(ctx context.Context, sc ServerConfig) (*mcp.ClientSession, e
 	defer cancel()
 
 	transport := &mcp.StreamableClientTransport{Endpoint: sc.URL}
-	if len(sc.Headers) > 0 {
+	if sc.RestrictNetwork {
+		transport.HTTPClient = NewSafeHTTPClient(sc.Headers, timeout)
+	} else if len(sc.Headers) > 0 {
 		transport.HTTPClient = &http.Client{
 			Transport: &headerTransport{
 				base:    http.DefaultTransport,

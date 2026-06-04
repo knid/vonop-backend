@@ -98,7 +98,7 @@ func (c *Controller) CreateMCPConnection(project *models.AppProject, req request
 	if serverURL == "" {
 		return nil, fmt.Errorf("server_url is required")
 	}
-	if err := validateHTTPURL(serverURL); err != nil {
+	if err := validateMCPRemoteURL("server_url", serverURL); err != nil {
 		return nil, err
 	}
 
@@ -147,8 +147,11 @@ func (c *Controller) CreateMCPConnection(project *models.AppProject, req request
 }
 
 func (c *Controller) StartMCPOAuth(project *models.AppProject, req requests.StartMCPOAuthRequest) (*responses.MCPOAuthStartResponse, error) {
+	returnURL, err := c.sanitizeMCPReturnURL(req.RedirectURL)
+	if err != nil {
+		return nil, err
+	}
 	var connection *models.MCPConnection
-	var err error
 	if req.ConnectionID != "" {
 		connection, err = c.DB.GetMCPConnectionByID(req.ConnectionID)
 		if err != nil || connection.AppProjectID != project.ID {
@@ -182,8 +185,8 @@ func (c *Controller) StartMCPOAuth(project *models.AppProject, req requests.Star
 	}
 	connection.Config["oauth_state"] = state
 	connection.Config["oauth_code_verifier"] = verifier
-	if req.RedirectURL != "" {
-		connection.Config["return_url"] = req.RedirectURL
+	if returnURL != "" {
+		connection.Config["return_url"] = returnURL
 	}
 	connection.Status = models.MCPConnectionStatusPendingAuth
 	if _, err := c.DB.UpdateMCPConnection(connection); err != nil {
@@ -216,7 +219,7 @@ func (c *Controller) CompleteMCPOAuthCallback(ctx context.Context, state, code s
 	if err != nil {
 		return "", err
 	}
-	token, err := cfg.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", verifier))
+	token, err := cfg.Exchange(mcpOAuthHTTPContext(ctx), code, oauth2.SetAuthURLParam("code_verifier", verifier))
 	if err != nil {
 		connection.Status = models.MCPConnectionStatusError
 		connection.LastError = "oauth token exchange failed"
@@ -257,11 +260,12 @@ func (c *Controller) DiscoverMCPConnectionTools(ctx context.Context, project *mo
 		return nil, nil, err
 	}
 	discovered, err := mcpclient.DiscoverTools(ctx, mcpclient.ServerConfig{
-		Name:           connection.Name,
-		URL:            connection.ServerURL,
-		Headers:        headers,
-		Enabled:        true,
-		TimeoutSeconds: 30,
+		Name:            connection.Name,
+		URL:             connection.ServerURL,
+		Headers:         headers,
+		Enabled:         true,
+		TimeoutSeconds:  30,
+		RestrictNetwork: true,
 	})
 	if err != nil {
 		connection.Status = models.MCPConnectionStatusError
@@ -591,11 +595,12 @@ func (c *Controller) ExecuteMCPTool(ctx context.Context, req agent.MCPToolExecut
 	}
 	start := time.Now()
 	result, err := mcpclient.CallTool(ctx, mcpclient.ServerConfig{
-		Name:           connection.Name,
-		URL:            connection.ServerURL,
-		Headers:        headers,
-		Enabled:        true,
-		TimeoutSeconds: 30,
+		Name:            connection.Name,
+		URL:             connection.ServerURL,
+		Headers:         headers,
+		Enabled:         true,
+		TimeoutSeconds:  30,
+		RestrictNetwork: true,
 	}, req.ToolName, string(req.Arguments))
 	durationMs := int(time.Since(start).Milliseconds())
 	call.DurationMs = durationMs
@@ -733,7 +738,7 @@ func (c *Controller) oauthTokenForConnection(ctx context.Context, connection *mo
 		RefreshToken: refreshToken,
 		Expiry:       time.Unix(expiryUnix, 0),
 	}
-	fresh, err := cfg.TokenSource(ctx, tok).Token()
+	fresh, err := cfg.TokenSource(mcpOAuthHTTPContext(ctx), tok).Token()
 	if err != nil {
 		return accessToken, nil
 	}
@@ -763,6 +768,12 @@ func (c *Controller) oauthConfigForConnection(connection *models.MCPConnection) 
 	if authURL == "" || tokenURL == "" || clientID == "" {
 		return nil, fmt.Errorf("oauth authorization_endpoint, token_endpoint, and client_id are required")
 	}
+	if err := validateMCPRemoteURL("authorization_endpoint", authURL); err != nil {
+		return nil, err
+	}
+	if err := validateMCPRemoteURL("token_endpoint", tokenURL); err != nil {
+		return nil, err
+	}
 	scopes := stringSliceFromAny(connection.Config["scopes"])
 	if len(scopes) == 0 {
 		if template := resolveMCPTemplate(connection.TemplateID); template != nil {
@@ -786,6 +797,47 @@ func (c *Controller) mcpOAuthRedirectURL() string {
 		return v
 	}
 	return strings.TrimRight(constants.WEMOB_API_BASE_URL, "/") + "/v2/mcp/oauth/callback"
+}
+
+func (c *Controller) sanitizeMCPReturnURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return "", fmt.Errorf("return_url must be an absolute frontend URL")
+	}
+	if u.User != nil {
+		return "", fmt.Errorf("return_url must not include user info")
+	}
+	origin := strings.ToLower(u.Scheme + "://" + u.Host)
+	for _, allowed := range c.mcpReturnOrigins() {
+		if origin == allowed {
+			return raw, nil
+		}
+	}
+	return "", fmt.Errorf("return_url origin is not allowed")
+}
+
+func (c *Controller) mcpReturnOrigins() []string {
+	candidates := []string{
+		c.SecretManager.GetSecret("FRONTEND_URL"),
+		c.SecretManager.GetSecret("WEMOB_FRONTEND_URL"),
+	}
+	var origins []string
+	for _, raw := range candidates {
+		raw = strings.TrimSpace(strings.TrimRight(raw, "/"))
+		if raw == "" {
+			continue
+		}
+		u, err := url.Parse(raw)
+		if err != nil || !u.IsAbs() || u.Host == "" {
+			continue
+		}
+		origins = append(origins, strings.ToLower(u.Scheme+"://"+u.Host))
+	}
+	return origins
 }
 
 func (c *Controller) findMCPConnectionByOAuthState(state string) (*models.MCPConnection, error) {
@@ -905,9 +957,6 @@ func classifyMCPRisk(toolName string, annotations map[string]any) string {
 	if boolFromAny(annotations["readOnlyHint"]) {
 		return agent.ToolRiskLow
 	}
-	if boolPtrFalse(annotations["destructiveHint"]) {
-		return agent.ToolRiskHigh
-	}
 	if boolFromAny(annotations["destructiveHint"]) {
 		return agent.ToolRiskDestructive
 	}
@@ -978,15 +1027,15 @@ func sanitizeMCPConfig(config map[string]any) map[string]any {
 	return out
 }
 
-func validateHTTPURL(raw string) error {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return fmt.Errorf("server_url must be a valid URL")
-	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return fmt.Errorf("server_url must use http or https")
+func validateMCPRemoteURL(field, raw string) error {
+	if err := mcpclient.ValidateRemoteURL(raw); err != nil {
+		return fmt.Errorf("%s %s", field, err)
 	}
 	return nil
+}
+
+func mcpOAuthHTTPContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, oauth2.HTTPClient, mcpclient.NewSafeHTTPClient(nil, 30*time.Second))
 }
 
 func randomOAuthString(bytesLen int) string {
@@ -1027,11 +1076,6 @@ func stringSliceFromAny(v any) []string {
 func boolFromAny(v any) bool {
 	b, ok := v.(bool)
 	return ok && b
-}
-
-func boolPtrFalse(v any) bool {
-	b, ok := v.(bool)
-	return ok && !b
 }
 
 func int64FromAny(v any) int64 {

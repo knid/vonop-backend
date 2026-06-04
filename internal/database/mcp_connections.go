@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,17 @@ func (db *Database) UpdateMCPConnection(connection *models.MCPConnection) (*mode
 }
 
 func (db *Database) DeleteMCPConnection(connection *models.MCPConnection) error {
+	if _, err := db.DB.NewUpdate().
+		Model((*models.MCPConnection)(nil)).
+		Set("credential_data = '{}'::jsonb").
+		Set("config = '{}'::jsonb").
+		Set("credentials_encrypted_v1 = FALSE").
+		Set("last_error = ''").
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", connection.ID).
+		Exec(context.Background()); err != nil {
+		return err
+	}
 	_, err := db.DB.NewDelete().Model(connection).WherePK().Exec(context.Background())
 	return err
 }
@@ -193,7 +205,7 @@ func (db *Database) GetMCPToolApproval(id string) (*models.MCPToolApproval, erro
 }
 
 func (db *Database) UpdateMCPToolApprovalDecision(approvalID string, status string, decidedBy uuid.UUID) error {
-	_, err := db.DB.NewUpdate().
+	res, err := db.DB.NewUpdate().
 		Model((*models.MCPToolApproval)(nil)).
 		Set("status = ?", status).
 		Set("decided_by_user_id = ?", decidedBy).
@@ -202,7 +214,13 @@ func (db *Database) UpdateMCPToolApprovalDecision(approvalID string, status stri
 		Where("id = ?", approvalID).
 		Where("status = ?", models.MCPApprovalStatusPending).
 		Exec(context.Background())
-	return err
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return fmt.Errorf("approval is no longer pending")
+	}
+	return nil
 }
 
 func (db *Database) ExpireMCPToolApproval(approvalID string) error {

@@ -868,6 +868,24 @@ END $$`,
 		}
 	}
 
+	// MCP project connections landed after the main canary had already passed
+	// on production DBs. Keep these uniqueness guarantees outside
+	// alterStatements so upserts work on already-migrated schemas.
+	mcpSchemaMigrations := []string{
+		`ALTER TABLE IF EXISTS mcp_connections DROP CONSTRAINT IF EXISTS mcp_connections_project_slug`,
+		`DROP INDEX IF EXISTS mcp_connections_project_slug`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS mcp_connections_project_slug ON mcp_connections (app_project_id, slug) WHERE deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS mcp_connection_tools_connection_name ON mcp_connection_tools (connection_id, name)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS agent_mcp_grants_project_agent_connection ON agent_mcp_grants (app_project_id, agent_id, mcp_connection_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_tool_approvals_job ON mcp_tool_approvals (generation_job_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_mcp_tool_calls_job ON agent_mcp_tool_calls (generation_job_id, created_at DESC)`,
+	}
+	for _, stmt := range mcpSchemaMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("mcp schema migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
 	// Backfill IntroDiscountUsed for orgs that already have a paid subscription.
 	// These orgs are not eligible for the intro offer. Runs exactly once.
 	var introBackfillDone bool
