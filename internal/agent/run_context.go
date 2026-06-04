@@ -128,6 +128,9 @@ func matchGlob(glob, p string) bool {
 // never mutated outside the orchestrator.
 type RunContext struct {
 	RunID      uuid.UUID
+	Profile    *AgentProfile
+	Skills     []SkillFile
+	ReadOnly   bool
 	Project    *models.AppProject
 	User       *models.User
 	FileMap    *SafeFileMap

@@ -182,21 +182,18 @@ func Run(
 
 	// --- Step 9: build system messages + registry + tracker ---
 	buildState := NewBuildState(message, isFirstGen)
-	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool, isFirstGen)
-
-	// Modal commands (/plan, /explain, /review) inject an extra system block
-	// that forbids file mutations on the current turn only. We append it to
-	// the leading contiguous system run — BEFORE convertHistory — so the
-	// native Anthropic adapter's leading-system extraction picks it up as a
-	// real system message instead of demoting it to a "[System] " user
-	// prefix. History replay does NOT re-inject this: see convertHistory for
-	// the rationale.
-	if addendum := SlashCommandSystemAddendum(message); addendum != "" {
-		llmMessages = append(llmMessages, utils.Message{
-			Role:    "system",
-			Content: addendum,
-		})
-	}
+	contextPacket := CompileAgentContext(AgentContextInput{
+		Project:         project,
+		Deps:            deps,
+		AttachmentsPool: turnAttachments.Pool,
+		Message:         message,
+		IsFirstGen:      isFirstGen,
+	})
+	profile := contextPacket.Profile
+	activeSkills := contextPacket.Skills
+	llmMessages := contextPacket.SystemMessages
+	memory.RecordRuntime(profile.ID, activeSkills)
+	memory.Persist(ctx, deps.DB, runID)
 
 	llmMessages = append(llmMessages, convertHistory(history)...)
 
@@ -339,6 +336,9 @@ func Run(
 
 	rc := &RunContext{
 		RunID:      runID,
+		Profile:    profile,
+		Skills:     activeSkills,
+		ReadOnly:   contextPacket.ReadOnly,
 		Project:    project,
 		User:       user,
 		FileMap:    fileMap,
@@ -357,6 +357,10 @@ func Run(
 		Provider:  provider.Name,
 		MaxTurns:  maxTurns,
 		Tools:     registry.Names(),
+		AgentID:   profile.ID,
+		AgentName: profile.Name,
+		Skills:    skillIDs(activeSkills),
+		Handoffs:  append([]string(nil), profile.HandoffTargets...),
 	})
 	emitTodoSnapshot(rc)
 
@@ -429,6 +433,7 @@ func Run(
 			Turn:         turn,
 			ToolCallID:   toolCallID,
 			ToolName:     name,
+			RiskLevel:    ClassifyToolRisk(name),
 			InputPreview: stripToolInputForPreview(name, argsJSON),
 		})
 		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
@@ -441,6 +446,7 @@ func Run(
 			RunID:      runID,
 			ToolCallID: toolCallID,
 			ToolName:   name,
+			RiskLevel:  ClassifyToolRisk(name),
 			Status:     status,
 			DurationMs: durationMs,
 			Summary:    firstLine(result, 140),
@@ -665,12 +671,8 @@ func Run(
 			fileMap, message)
 	}
 
-	if !SlashCommandIsReadOnly(message) {
-		projectType := ""
-		if project != nil {
-			projectType = project.ProjectType
-		}
-		if validationErr := validateGeneratedApp(fileMap, buildState, message, isFirstGen, projectType); validationErr != nil {
+	if !contextPacket.ReadOnly {
+		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, activeSkills); validationErr != nil {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
 				CodeValidationFailed, validationErr.Error(), validationErr,
 				tracker, runStart,

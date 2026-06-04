@@ -32,6 +32,10 @@ type RunStartEvent struct {
 	Provider  string    `json:"provider"`
 	MaxTurns  int       `json:"max_turns"`
 	Tools     []string  `json:"tools"`
+	AgentID   string    `json:"agent_id,omitempty"`
+	AgentName string    `json:"agent_name,omitempty"`
+	Skills    []string  `json:"skills,omitempty"`
+	Handoffs  []string  `json:"handoffs,omitempty"`
 }
 
 type TurnStartEvent struct {
@@ -50,6 +54,7 @@ type ToolCallStartEvent struct {
 	Turn         int             `json:"turn"`
 	ToolCallID   string          `json:"tool_call_id"`
 	ToolName     string          `json:"tool_name"`
+	RiskLevel    string          `json:"risk_level,omitempty"`
 	InputPreview json.RawMessage `json:"input_preview,omitempty"`
 }
 
@@ -61,6 +66,7 @@ type ToolCallResultEvent struct {
 	RunID      uuid.UUID `json:"run_id"`
 	ToolCallID string    `json:"tool_call_id"`
 	ToolName   string    `json:"tool_name"`
+	RiskLevel  string    `json:"risk_level,omitempty"`
 	Status     string    `json:"status"`
 	DurationMs int       `json:"duration_ms"`
 	Summary    string    `json:"summary"`

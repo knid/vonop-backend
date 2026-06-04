@@ -19,6 +19,8 @@ const agentMemoryMarker = "AGENT RUN MEMORY"
 type AgentRunMemory struct {
 	OriginalRequest string    `json:"original_request,omitempty"`
 	CurrentGoal     string    `json:"current_goal,omitempty"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	SkillIDs        []string  `json:"skill_ids,omitempty"`
 	Completed       []string  `json:"completed,omitempty"`
 	Remaining       []string  `json:"remaining,omitempty"`
 	FilesChanged    []string  `json:"files_changed,omitempty"`
@@ -102,6 +104,15 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 	m.NextAction = "Use the latest file tree, TODO state, and recent tool results to finish the current user request."
 }
 
+func (m *AgentRunMemory) RecordRuntime(agentID string, skills []SkillFile) {
+	if m == nil {
+		return
+	}
+	m.AgentID = agentID
+	m.SkillIDs = skillIDs(skills)
+	m.UpdatedAt = time.Now()
+}
+
 func (m *AgentRunMemory) MarkCompacted() {
 	if m == nil {
 		return
@@ -119,6 +130,8 @@ func (m *AgentRunMemory) Render(todos *TodoList) string {
 	sb.WriteString("\n================\n\n")
 	writeMemoryField(&sb, "Original request", m.OriginalRequest)
 	writeMemoryField(&sb, "Current goal", m.CurrentGoal)
+	writeMemoryField(&sb, "Agent", m.AgentID)
+	writeMemoryList(&sb, "Active skills", m.SkillIDs)
 	writeMemoryList(&sb, "Completed work", m.Completed)
 	writeMemoryList(&sb, "Changed files", m.FilesChanged)
 	writeMemoryList(&sb, "Important files inspected", m.FilesRead)
