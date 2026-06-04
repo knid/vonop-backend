@@ -22,6 +22,7 @@ import (
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/mcpserver"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
@@ -1555,6 +1556,17 @@ func main() {
 	r.Use(appMiddleware.Locale)
 
 	r.Route("/", func(r chi.Router) {
+		mcpServer := mcpserver.New(controller)
+		r.Get("/.well-known/oauth-protected-resource", mcpServer.ServeProtectedResourceMetadata)
+		r.Get("/.well-known/oauth-protected-resource/mcp", mcpServer.ServeProtectedResourceMetadata)
+		r.Get("/.well-known/oauth-authorization-server", mcpServer.ServeAuthorizationServerMetadata)
+		r.Get("/.well-known/oauth-authorization-server/mcp", mcpServer.ServeAuthorizationServerMetadata)
+		r.HandleFunc("/oauth/register", mcpServer.RegisterOAuthClient)
+		r.HandleFunc("/oauth/authorize", mcpServer.Authorize)
+		r.HandleFunc("/oauth/token", mcpServer.Token)
+		r.Handle("/mcp", mcpServer)
+		r.Handle("/mcp/*", mcpServer)
+
 		r.Route("/webhooks", func(r chi.Router) {
 			r.Post("/stripe", httpViews.Controller.HandleWebhook)
 			// Fly machine state webhook (signature verified inside handler)
