@@ -23,8 +23,6 @@ func GetTemplate(path string) string {
 	return string(data)
 }
 
-
-
 // Template file paths that are managed by hardcoded templates, not LLM-generated.
 var BaseFilePaths = []string{
 	"package.json",
@@ -112,6 +110,8 @@ var UIFilePaths = []string{
 	"components/ui/input.tsx",
 	"components/ui/badge.tsx",
 	"components/ui/skeleton.tsx",
+	"components/ui/section.tsx",
+	"components/ui/surface.tsx",
 }
 
 // IsTemplateFile checks if a file path is managed by any template category.

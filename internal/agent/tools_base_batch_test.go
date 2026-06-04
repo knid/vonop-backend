@@ -124,6 +124,29 @@ func TestWriteFilesTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 	}
 }
 
+func TestWriteFilesTool_RejectsQuotedPathWithoutMutatingState(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.BuildState = NewBuildState("create landing page", false)
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/landing/page.tsx\"","content":"export default function Page() { return null }"}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected isError=true for quoted path; out=%s", out)
+	}
+	if !strings.Contains(out, "invalid or suspicious path") {
+		t.Fatalf("expected suspicious path error; got: %s", out)
+	}
+	if _, ok := rc.FileMap.Get(`app/landing/page.tsx"`); ok {
+		t.Fatal("quoted path was added to file map")
+	}
+	if rc.BuildState.Created[`app/landing/page.tsx"`] {
+		t.Fatal("quoted path was recorded in build state")
+	}
+}
+
 func TestWriteFilesTool_IsAtomicWhenAnyEntryFails(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 

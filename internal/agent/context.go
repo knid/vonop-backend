@@ -16,8 +16,11 @@ Before calling any tool, decide the complete set of files you need to read,
 write, or edit. Batch them into the fewest tool calls possible:
 - read_files (plural) for every file you need to inspect — one call, all paths.
 - create_design for DESIGN.md before broad first-generation UI work.
-- write_files for one or more full-file writes in the SAME turn.
+- write_files for one or more full-file writes in ONE call.
+- patch_files for exact-string edits across 2+ existing files in ONE call.
 - multi_edit for 2+ changes to the SAME file.
+- Parallel tool calls only when the operations are independent; for multiple
+  file writes/edits, prefer write_files/patch_files first.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier
@@ -57,22 +60,15 @@ type mobileConfigGetter interface {
 // current user's subscription tier can actually reach; passing nil degrades
 // to a conservative generic block.
 func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
-	base := BasePromptWebShared
-	modeAddendum := BasePromptWebChat
-	if project != nil {
-		switch project.ProjectType {
-		case models.ProjectTypeMobileAppNative:
-			base = BasePromptMobileNativeShared
-			modeAddendum = BasePromptMobileNativeChat
-		}
+	return BuildSystemMessagesForProfile(ResolveAgentProfile(project), project, deps, attachmentsPool, isFirstGen)
+}
+
+func BuildSystemMessagesForProfile(profile *AgentProfile, project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
+	if profile == nil {
+		profile = ResolveAgentProfile(project)
 	}
-	if isFirstGen {
-		if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
-			modeAddendum = BasePromptMobileNativeFirstGen
-		} else {
-			modeAddendum = BasePromptWebFirstGen
-		}
-	}
+	base := profile.BasePrompt
+	modeAddendum := profile.ModePrompt(isFirstGen)
 	addendum := buildAddendum(project, deps)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
@@ -96,6 +92,40 @@ func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, atta
 // Why this lives outside system messages: see BuildSystemMessages doc.
 func BuildFileTreeUserPrefix(fileMap *SafeFileMap) string {
 	return buildFileTreeBlock(fileMap)
+}
+
+const (
+	designBriefPath     = "DESIGN.md"
+	maxDesignBriefChars = 8000
+)
+
+// BuildDesignBriefUserPrefix returns the persisted design contract for the
+// current app. It rides in the user turn rather than a system block so edits to
+// DESIGN.md do not invalidate the cached base prompt.
+func BuildDesignBriefUserPrefix(fileMap *SafeFileMap) string {
+	if fileMap == nil {
+		return ""
+	}
+	content, ok := fileMap.Get(designBriefPath)
+	if !ok || strings.TrimSpace(content) == "" {
+		return ""
+	}
+	content = strings.TrimSpace(content)
+	truncated := false
+	if len(content) > maxDesignBriefChars {
+		content = content[:maxDesignBriefChars]
+		truncated = true
+	}
+	var sb strings.Builder
+	sb.WriteString("DESIGN BRIEF\n")
+	sb.WriteString("============\n\n")
+	sb.WriteString("Persisted from DESIGN.md. Treat this as the visual source of truth for this project; preserve it unless the user asks for a redesign.\n\n")
+	sb.WriteString(content)
+	if truncated {
+		sb.WriteString("\n\n[DESIGN.md truncated for context]\n")
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // buildAddendum composes project-specific prompt blocks.

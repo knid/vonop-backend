@@ -18,6 +18,7 @@ type slashCommand struct {
 	RequiresArgs   bool
 	Template       *template.Template
 	SystemAddendum string
+	SkillIDs       []string
 }
 
 // slashCommands is populated in init(). Keys are lowercase command names
@@ -28,6 +29,10 @@ var slashCommands = map[string]*slashCommand{}
 // Panics on a malformed template — templates are compile-time constants,
 // so a parse failure is a programmer error and should crash at startup.
 func registerSlashCommand(name string, requiresArgs bool, body, addendum string) {
+	registerSlashCommandWithSkills(name, requiresArgs, body, addendum, nil)
+}
+
+func registerSlashCommandWithSkills(name string, requiresArgs bool, body, addendum string, skillIDs []string) {
 	tmpl, err := template.New(name).Parse(body)
 	if err != nil {
 		panic("slash_commands: bad template for " + name + ": " + err.Error())
@@ -37,6 +42,7 @@ func registerSlashCommand(name string, requiresArgs bool, body, addendum string)
 		RequiresArgs:   requiresArgs,
 		Template:       tmpl,
 		SystemAddendum: addendum,
+		SkillIDs:       skillIDs,
 	}
 }
 
@@ -138,6 +144,26 @@ func SlashCommandIsReadOnly(text string) bool {
 		sc.SystemAddendum == addendumAuditOnly
 }
 
+// SlashCommandSkillIDs returns skill ids requested by a recognized leading
+// slash command. Unknown commands and commands missing required args fall
+// through with no skills, matching ExpandSlashCommand behavior.
+func SlashCommandSkillIDs(text string) []string {
+	cmd, args, parsed := parseSlashCommand(text)
+	if !parsed {
+		return nil
+	}
+	sc, found := slashCommands[cmd]
+	if !found {
+		return nil
+	}
+	if sc.RequiresArgs && strings.TrimSpace(args) == "" {
+		return nil
+	}
+	out := make([]string, len(sc.SkillIDs))
+	copy(out, sc.SkillIDs)
+	return out
+}
+
 // Addendums shared by multiple read-only / planning commands. Kept as
 // constants so the exact wording stays in one place.
 const (
@@ -172,14 +198,16 @@ func init() {
 		addendumAuditOnly,
 	)
 
-	registerSlashCommand("/seo", false,
+	registerSlashCommandWithSkills("/seo", false,
 		`SEO OPTIMIZATION PASS — Improve the app's SEO: meta tags (title, description, canonical), Open Graph and Twitter Card tags, sitemap.xml, robots.txt, semantic headings, and JSON-LD structured data where sensible. Do not touch visual design or business logic.`,
 		"",
+		[]string{"web-seo"},
 	)
 
-	registerSlashCommand("/a11y", false,
+	registerSlashCommandWithSkills("/a11y", false,
 		`ACCESSIBILITY PASS — Improve accessibility: ARIA labels where needed, alt text on images, semantic HTML, keyboard navigation, visible focus states, sufficient color contrast. Preserve the existing visual design — do not restyle components.`,
 		"",
+		[]string{"accessibility"},
 	)
 
 	registerSlashCommand("/seed", false,

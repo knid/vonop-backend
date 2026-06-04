@@ -22,8 +22,8 @@ func TestBuildSystemMessages_MobileAppNativeUsesExpoPrompt(t *testing.T) {
 	if !strings.Contains(joined, "NativeWind") {
 		t.Error("expected 'NativeWind' to appear in mobile_app_native system messages")
 	}
-	if !strings.Contains(joined, "react-native-reusables") {
-		t.Error("expected 'react-native-reusables' to appear in mobile_app_native system messages")
+	if !strings.Contains(joined, "mobile template") {
+		t.Error("expected compact mobile base prompt to mention the mobile template")
 	}
 }
 
@@ -210,6 +210,20 @@ func TestBuildSystemMessages_FileTreeNotInSystemBlocks(t *testing.T) {
 	}
 }
 
+func TestBuildSystemMessages_DesignBriefNotInSystemBlocks(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{},
+	}
+
+	msgs := BuildSystemMessages(project, nil, nil, false)
+	joined := concatMessages(msgs)
+
+	if strings.Contains(joined, "DESIGN BRIEF\n============") {
+		t.Error("rendered DESIGN.md context must not appear in system messages")
+	}
+}
+
 // TestBuildFileTreeUserPrefix_RendersTree verifies the file tree helper
 // returns a non-empty block when files exist, so the caller (run.go) can
 // prepend it to the user turn.
@@ -228,6 +242,36 @@ func TestBuildFileTreeUserPrefix_RendersTree(t *testing.T) {
 	}
 }
 
+func TestBuildDesignBriefUserPrefix_RendersDesignBrief(t *testing.T) {
+	fileMap := NewSafeFileMap(map[string]string{
+		"DESIGN.md": "# Design Brief\n\n## Register\nProduct\n\n## Design Direction\nQuiet operations console",
+	})
+
+	prefix := BuildDesignBriefUserPrefix(fileMap)
+	if !strings.Contains(prefix, "DESIGN BRIEF") {
+		t.Error("expected DESIGN BRIEF header")
+	}
+	if !strings.Contains(prefix, "Quiet operations console") {
+		t.Error("expected DESIGN.md content in prefix")
+	}
+}
+
+func TestRenderRunPrefixIncludesDesignBrief(t *testing.T) {
+	fileMap := NewSafeFileMap(map[string]string{
+		"app/layout.tsx": "layout",
+		"app/page.tsx":   "page",
+		"DESIGN.md":      "# Design Brief\n\n## Register\nBrand\n\n## Design Direction\nEditorial storefront",
+	})
+
+	prefix := renderRunPrefix(fileMap, NewBuildState("build", false), nil)
+	if !strings.Contains(prefix, "DESIGN BRIEF") {
+		t.Fatal("expected run prefix to include design brief")
+	}
+	if !strings.Contains(prefix, "Editorial storefront") {
+		t.Error("expected persisted design direction in run prefix")
+	}
+}
+
 func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeApp,
@@ -236,8 +280,11 @@ func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, true)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "Layout & Home First") {
-		t.Error("expected first-gen web to include Layout & Home First work order")
+	if !strings.Contains(joined, "Design Brief + Layout & Home First") {
+		t.Error("expected first-gen web to include design brief + layout/home work order")
+	}
+	if !strings.Contains(joined, "DESIGN.md") {
+		t.Error("expected first-gen web to require DESIGN.md")
 	}
 	if !strings.Contains(joined, "UI First, Wiring Second") {
 		t.Error("expected first-gen web to include UI First work order")
@@ -255,8 +302,8 @@ func TestBuildSystemMessages_ChatWebIncludesEditingDiscipline(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
-	if strings.Contains(joined, "Layout & Home First") {
-		t.Error("chat web must NOT include Layout & Home First work order")
+	if strings.Contains(joined, "Design Brief + App Shell First") {
+		t.Error("chat web must NOT include first-gen work order")
 	}
 	if !strings.Contains(joined, "EDITING DISCIPLINE") {
 		t.Error("expected chat web to include editing discipline")

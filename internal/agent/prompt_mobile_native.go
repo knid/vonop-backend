@@ -1285,8 +1285,11 @@ full content up to 200 KB.
 
 ## Tool preference
 - grep BEFORE read_files when locating a symbol or pattern.
-- write_files for creating one or more new files or complete rewrites.
-- patch_files for exact-string edits across multiple files.
+- write_files for creating one or more new files or complete rewrites. Use it
+  for single-file writes too; there is no separate single-file write tool.
+- patch_files for exact-string edits across 2+ files in one call. When your
+  next action needs to edit multiple files, use this instead of a series of
+  edit_file / multi_edit calls.
 - multi_edit for 2+ changes to the same file.
 - edit_file for a single targeted change.
 - list_files with a glob to refresh structure.

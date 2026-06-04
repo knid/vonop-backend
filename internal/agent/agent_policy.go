@@ -1,0 +1,162 @@
+package agent
+
+import (
+	"encoding/json"
+	"fmt"
+	"slices"
+
+	"github.com/knid/wemob/internal/models"
+)
+
+const (
+	ToolRiskLow         = "low"
+	ToolRiskMedium      = "medium"
+	ToolRiskHigh        = "high"
+	ToolRiskDestructive = "destructive"
+)
+
+type ToolGuardrailDecision struct {
+	Allowed bool
+	Message string
+}
+
+type ToolGuardrail func(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision
+
+type AgentValidationPolicy func(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject, skills []SkillFile) error
+
+func AllowTool() ToolGuardrailDecision {
+	return ToolGuardrailDecision{Allowed: true}
+}
+
+func BlockTool(message string) ToolGuardrailDecision {
+	return ToolGuardrailDecision{Allowed: false, Message: message}
+}
+
+func ApplyToolGuardrails(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	if rc == nil || rc.Profile == nil {
+		return AllowTool()
+	}
+	for _, guardrail := range rc.Profile.ToolGuardrails {
+		decision := guardrail(rc, toolName, input)
+		if !decision.Allowed {
+			return decision
+		}
+	}
+	return AllowTool()
+}
+
+func ReadOnlyToolGuardrail(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	if rc == nil || !rc.ReadOnly {
+		return AllowTool()
+	}
+	if toolName == "execute_sql" {
+		if readOnlySQLRequested(input) {
+			return AllowTool()
+		}
+		return BlockTool("tool blocked by read-only command policy")
+	}
+	if slices.Contains(mutatingToolNames, toolName) {
+		return BlockTool("tool blocked by read-only command policy")
+	}
+	return AllowTool()
+}
+
+func readOnlySQLRequested(input json.RawMessage) bool {
+	var args struct {
+		ReadOnly *bool `json:"readonly"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return false
+	}
+	return args.ReadOnly != nil && *args.ReadOnly
+}
+
+func HumanApprovalToolGuardrail(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	if rc == nil || rc.Project == nil || rc.Project.Settings == nil {
+		return AllowTool()
+	}
+	requireApproval, _ := rc.Project.Settings["agent_require_approval"].(bool)
+	if !requireApproval {
+		return AllowTool()
+	}
+	risk := ClassifyToolRisk(toolName)
+	if risk == ToolRiskHigh || risk == ToolRiskDestructive {
+		return BlockTool(fmt.Sprintf("tool %q requires human approval before execution", toolName))
+	}
+	return AllowTool()
+}
+
+func SkillAllowedToolsGuardrail(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	if slices.Contains(skillRuntimeToolNames, toolName) {
+		return AllowTool()
+	}
+	if rc == nil || rc.Project == nil || rc.Project.Settings == nil {
+		return AllowTool()
+	}
+	enforce, _ := rc.Project.Settings["agent_enforce_skill_tool_allowlist"].(bool)
+	if !enforce {
+		return AllowTool()
+	}
+	allowed := map[string]bool{}
+	for _, skill := range rc.Skills {
+		for _, t := range skill.AllowedTools {
+			allowed[t] = true
+		}
+	}
+	if len(allowed) == 0 || allowed[toolName] {
+		return AllowTool()
+	}
+	return BlockTool(fmt.Sprintf("tool %q is not allowed by the active skill tool allowlist", toolName))
+}
+
+func ValidateAgentOutput(profile *AgentProfile, fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject, skills []SkillFile) error {
+	if profile != nil && profile.ValidationPolicy != nil {
+		return profile.ValidationPolicy(fileMap, state, prompt, isFirstGen, project, skills)
+	}
+	projectType := ""
+	if project != nil {
+		projectType = project.ProjectType
+	}
+	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, projectType)
+}
+
+func DefaultValidationPolicy(fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject, skills []SkillFile) error {
+	projectType := ""
+	if project != nil {
+		projectType = project.ProjectType
+	}
+	return validateGeneratedApp(fileMap, state, prompt, isFirstGen, projectType)
+}
+
+var mutatingToolNames = []string{
+	"write_file",
+	"write_files",
+	"edit_file",
+	"multi_edit",
+	"patch_files",
+	"delete_file",
+	"provision_database",
+	"provision_local_database",
+	"setup_wemob_ai_gateway",
+	"setup_store",
+	"configure_mobile_bridge",
+	"trigger_build_after_fix",
+	"trigger_web_deploy",
+}
+
+var skillRuntimeToolNames = []string{"list_skills", "search_skills", "load_skill"}
+
+func ClassifyToolRisk(toolName string) string {
+	switch toolName {
+	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search", "list_skills", "search_skills", "load_skill":
+		return ToolRiskLow
+	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "generate_image", "update_todos":
+		return ToolRiskMedium
+	case "execute_sql", "provision_database", "provision_local_database", "setup_wemob_ai_gateway", "setup_store", "configure_mobile_bridge", "trigger_build_after_fix", "trigger_web_deploy":
+		return ToolRiskHigh
+	case "delete_file":
+		return ToolRiskDestructive
+	default:
+		return ToolRiskMedium
+	}
+}

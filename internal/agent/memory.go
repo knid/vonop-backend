@@ -17,17 +17,22 @@ import (
 const agentMemoryMarker = "AGENT RUN MEMORY"
 
 type AgentRunMemory struct {
-	OriginalRequest string    `json:"original_request,omitempty"`
-	CurrentGoal     string    `json:"current_goal,omitempty"`
-	Completed       []string  `json:"completed,omitempty"`
-	Remaining       []string  `json:"remaining,omitempty"`
-	FilesChanged    []string  `json:"files_changed,omitempty"`
-	FilesRead       []string  `json:"files_read,omitempty"`
-	Decisions       []string  `json:"decisions,omitempty"`
-	Errors          []string  `json:"errors,omitempty"`
-	NextAction      string    `json:"next_action,omitempty"`
-	Compactions     int       `json:"compactions,omitempty"`
-	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	OriginalRequest   string    `json:"original_request,omitempty"`
+	CurrentGoal       string    `json:"current_goal,omitempty"`
+	AgentID           string    `json:"agent_id,omitempty"`
+	SkillIDs          []string  `json:"skill_ids,omitempty"`
+	RequiredSkillIDs  []string  `json:"required_skill_ids,omitempty"`
+	LoadedSkillIDs    []string  `json:"loaded_skill_ids,omitempty"`
+	AvailableSkillIDs []string  `json:"available_skill_ids,omitempty"`
+	Completed         []string  `json:"completed,omitempty"`
+	Remaining         []string  `json:"remaining,omitempty"`
+	FilesChanged      []string  `json:"files_changed,omitempty"`
+	FilesRead         []string  `json:"files_read,omitempty"`
+	Decisions         []string  `json:"decisions,omitempty"`
+	Errors            []string  `json:"errors,omitempty"`
+	NextAction        string    `json:"next_action,omitempty"`
+	Compactions       int       `json:"compactions,omitempty"`
+	UpdatedAt         time.Time `json:"updated_at,omitempty"`
 }
 
 func NewAgentRunMemory(request string) *AgentRunMemory {
@@ -97,12 +102,41 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 		if len(paths) > 0 {
 			m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Inspected %s via %s", strings.Join(paths, ", "), name), 30)
 		}
+	case "list_skills", "search_skills":
+		m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Reviewed skill catalog via %s.", name), 30)
+	case "load_skill":
+		if id := extractToolStringArg(args, "id"); id != "" {
+			m.LoadedSkillIDs = appendUniqueLimited(m.LoadedSkillIDs, []string{id}, 40)
+			m.SkillIDs = appendUniqueLimited(m.SkillIDs, []string{id}, 40)
+			m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Loaded skill %s.", id), 30)
+		}
 	case "update_todos":
 		m.Decisions = appendLimited(m.Decisions, "Updated structured TODO state.", 30)
 	case "trigger_build_after_fix", "trigger_web_deploy":
 		m.Completed = appendLimited(m.Completed, firstNonEmpty(firstLine(result, 180), name+" completed"), 40)
 	}
 	m.NextAction = "Use the latest file tree, TODO state, and recent tool results to finish the current user request."
+}
+
+func (m *AgentRunMemory) RecordRuntime(agentID string, requiredSkills, availableSkills []SkillFile) {
+	if m == nil {
+		return
+	}
+	m.AgentID = agentID
+	m.RequiredSkillIDs = skillIDs(requiredSkills)
+	m.AvailableSkillIDs = skillIDs(availableSkills)
+	m.SkillIDs = appendUniqueLimited(append([]string(nil), m.RequiredSkillIDs...), m.LoadedSkillIDs, 80)
+	m.UpdatedAt = time.Now()
+}
+
+func (m *AgentRunMemory) RecordLoadedSkill(skill SkillFile) {
+	if m == nil || skill.ID == "" {
+		return
+	}
+	m.LoadedSkillIDs = appendUniqueLimited(m.LoadedSkillIDs, []string{skill.ID}, 40)
+	m.SkillIDs = appendUniqueLimited(m.SkillIDs, []string{skill.ID}, 80)
+	m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Loaded skill %s.", skill.ID), 30)
+	m.UpdatedAt = time.Now()
 }
 
 func (m *AgentRunMemory) MarkCompacted() {
@@ -122,6 +156,11 @@ func (m *AgentRunMemory) Render(todos *TodoList) string {
 	sb.WriteString("\n================\n\n")
 	writeMemoryField(&sb, "Original request", m.OriginalRequest)
 	writeMemoryField(&sb, "Current goal", m.CurrentGoal)
+	writeMemoryField(&sb, "Agent", m.AgentID)
+	writeMemoryList(&sb, "Active skills", m.SkillIDs)
+	writeMemoryList(&sb, "Required skills", m.RequiredSkillIDs)
+	writeMemoryList(&sb, "Loaded optional skills", m.LoadedSkillIDs)
+	writeMemoryList(&sb, "Available skills", m.AvailableSkillIDs)
 	writeMemoryList(&sb, "Completed work", m.Completed)
 	writeMemoryList(&sb, "Changed files", m.FilesChanged)
 	writeMemoryList(&sb, "Important files inspected", m.FilesRead)
@@ -311,6 +350,15 @@ func extractToolPaths(args string) []string {
 	walk(v)
 	sort.Strings(out)
 	return out
+}
+
+func extractToolStringArg(args, key string) string {
+	var v map[string]any
+	if err := json.Unmarshal([]byte(args), &v); err != nil {
+		return ""
+	}
+	s, _ := v[key].(string)
+	return strings.TrimSpace(s)
 }
 
 func addPath(out *[]string, seen map[string]bool, path string) {

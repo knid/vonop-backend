@@ -103,21 +103,35 @@ func (c *Controller) GatewayAllowedModels(user *models.User) []string {
 		rcKey = remoteconfig.GatewayModelsFree
 	}
 
-	csv := c.RemoteConfig.GetString(rcKey, user.ID.String())
-	if csv == "" {
-		if fallback, ok := constants.DefaultGatewayModels[tier]; ok {
-			return fallback
+	var result []string
+	seen := map[string]bool{}
+
+	addModel := func(raw string) {
+		m := constants.GatewayCanonicalModelID(raw)
+		known := constants.GatewayModelByID(m) != nil
+		if m != "" && known && !seen[m] {
+			result = append(result, m)
+			seen[m] = true
+		} else if m != "" && !known {
+			slog.Warn("ai_gateway: ignoring unknown model in allowlist", "model", m, "tier", tier)
 		}
-		return constants.DefaultGatewayModels["free"]
 	}
 
-	var result []string
-	for _, m := range strings.Split(csv, ",") {
-		m = strings.TrimSpace(m)
-		if m != "" {
-			result = append(result, m)
+	if fallback, ok := constants.DefaultGatewayModels[tier]; ok {
+		for _, m := range fallback {
+			addModel(m)
+		}
+	} else {
+		for _, m := range constants.DefaultGatewayModels["free"] {
+			addModel(m)
 		}
 	}
+
+	csv := c.RemoteConfig.GetString(rcKey, user.ID.String())
+	for _, m := range strings.Split(csv, ",") {
+		addModel(m)
+	}
+
 	return result
 }
 
@@ -318,6 +332,41 @@ func (c *Controller) AccumulateGatewayChatCredits(user *models.User, orgID uuid.
 			"error", terr, "user_id", user.ID, "org_id", orgID, "rolled", rolled, "owed", owed)
 	}
 	return rolled, nil
+}
+
+// RecordGatewayImageUsage writes fixed-cost image gateway usage to the same
+// project usage table that chat traffic uses. Image models do not have token
+// counts, so CreditCost is the actual charged/refunded net credits rather
+// than a token-derived estimate.
+func (c *Controller) RecordGatewayImageUsage(user *models.User, projectID, model string, generated, creditCost int) {
+	if user == nil || generated <= 0 {
+		return
+	}
+	model = constants.GatewayCanonicalModelID(model)
+	if idx := strings.LastIndex(model, "/"); idx >= 0 {
+		model = model[idx+1:]
+	}
+
+	var pid uuid.UUID
+	if projectID != "" {
+		if parsed, err := uuid.Parse(projectID); err == nil {
+			pid = parsed
+		}
+	}
+
+	if err := c.DB.CreateLLMTokenUsage(&models.LLMTokenUsage{
+		UserID:     user.ID,
+		Action:     "gateway_image",
+		Model:      model,
+		CallCount:  generated,
+		Reference:  projectID,
+		ProjectID:  pid,
+		CreditCost: creditCost,
+	}); err != nil {
+		slog.Error("gateway image: failed to record usage",
+			"error", err, "user_id", user.ID, "project_id", projectID,
+			"model", model, "generated", generated, "credit_cost", creditCost)
+	}
 }
 
 // ResolveGatewayProvider returns the LLMProvider for gateway chat traffic.

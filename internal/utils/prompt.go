@@ -3,6 +3,7 @@ package utils
 import (
 	"path"
 	"strings"
+	"unicode"
 )
 
 // SanitizePromptContent escapes characters that could be interpreted as prompt
@@ -29,9 +30,23 @@ func SanitizeFilePath(filePath string) (string, bool) {
 	if filePath == "" {
 		return "", false
 	}
+	if strings.TrimSpace(filePath) != filePath {
+		return "", false
+	}
+	for _, r := range filePath {
+		if unicode.IsControl(r) {
+			return "", false
+		}
+	}
+	if strings.ContainsAny(filePath, "\"'`\\") {
+		return "", false
+	}
 
 	// Clean the path (resolves ".." and "." components)
 	cleaned := path.Clean(filePath)
+	if cleaned == "." {
+		return "", false
+	}
 
 	// Reject absolute paths
 	if strings.HasPrefix(cleaned, "/") {

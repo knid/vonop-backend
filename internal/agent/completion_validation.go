@@ -39,12 +39,8 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 	if _, ok := fileMap.Get("app/page.tsx"); !ok {
 		return fmt.Errorf("generated app validation failed: app/page.tsx is missing")
 	}
-	design, ok := fileMap.Get(designFilePath)
-	if !ok {
-		return fmt.Errorf("generated app validation failed: DESIGN.md is missing")
-	}
-	if err := validateDesignBriefContent(design); err != nil {
-		return fmt.Errorf("generated app validation failed: %w", err)
+	if err := validateDesignBrief(fileMap); err != nil {
+		return err
 	}
 	if err := validateNoImagePlaceholders(fileMap); err != nil {
 		return err
@@ -56,6 +52,32 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 	}
 	if state != nil {
 		state.SetPhase(BuildPhaseFinal)
+	}
+	return nil
+}
+
+func validateDesignBrief(fileMap *SafeFileMap) error {
+	content, ok := fileMap.Get(designBriefPath)
+	if !ok {
+		return fmt.Errorf("generated app validation failed: DESIGN.md is missing")
+	}
+	lower := strings.ToLower(content)
+	required := []string{
+		"register",
+		"design direction",
+		"typography",
+		"color",
+		"layout",
+		"components",
+	}
+	var missing []string
+	for _, needle := range required {
+		if !strings.Contains(lower, needle) {
+			missing = append(missing, needle)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("generated app validation failed: DESIGN.md is missing required sections: %s", strings.Join(missing, ", "))
 	}
 	return nil
 }

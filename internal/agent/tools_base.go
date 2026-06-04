@@ -631,7 +631,7 @@ type EditFileTool struct{}
 
 func (EditFileTool) Name() string { return "edit_file" }
 func (EditFileTool) Description() string {
-	return "Surgically replace exactly one occurrence of old_string with new_string in an existing file. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
+	return "Surgically replace exactly one occurrence of old_string with new_string in exactly one existing file. For 2+ edits in this file, use multi_edit; for edits across 2+ files, use patch_files. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
 }
 func (EditFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -927,7 +927,7 @@ type PatchFilesTool struct{}
 
 func (PatchFilesTool) Name() string { return "patch_files" }
 func (PatchFilesTool) Description() string {
-	return "Apply exact-string edit batches to multiple files in one call. Each file entry has the same semantics as multi_edit."
+	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit."
 }
 func (PatchFilesTool) Schema() map[string]any {
 	return map[string]any{

@@ -182,21 +182,18 @@ func Run(
 
 	// --- Step 9: build system messages + registry + tracker ---
 	buildState := NewBuildState(message, isFirstGen)
-	llmMessages := BuildSystemMessages(project, deps, turnAttachments.Pool, isFirstGen)
-
-	// Modal commands (/plan, /explain, /review) inject an extra system block
-	// that forbids file mutations on the current turn only. We append it to
-	// the leading contiguous system run — BEFORE convertHistory — so the
-	// native Anthropic adapter's leading-system extraction picks it up as a
-	// real system message instead of demoting it to a "[System] " user
-	// prefix. History replay does NOT re-inject this: see convertHistory for
-	// the rationale.
-	if addendum := SlashCommandSystemAddendum(message); addendum != "" {
-		llmMessages = append(llmMessages, utils.Message{
-			Role:    "system",
-			Content: addendum,
-		})
-	}
+	contextPacket := CompileAgentContext(AgentContextInput{
+		Project:         project,
+		Deps:            deps,
+		AttachmentsPool: turnAttachments.Pool,
+		Message:         message,
+		IsFirstGen:      isFirstGen,
+	})
+	profile := contextPacket.Profile
+	activeSkills := contextPacket.Skills
+	llmMessages := contextPacket.SystemMessages
+	memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
+	memory.Persist(ctx, deps.DB, runID)
 
 	llmMessages = append(llmMessages, convertHistory(history)...)
 
@@ -254,6 +251,7 @@ func Run(
 	// orphaned from their own run's generations.
 	tracker.TraceID = runID.String()
 	tracker.RunID = runID.String()
+	tracker.SetAgentSkills(contextPacket.SkillIDs, nil)
 	// Opt-in PostHog LLM Analytics: record per-call input/output content so
 	// the $ai_generation events carry full message context, and seed the
 	// trace input with the user's prompt for the grouping $ai_trace event.
@@ -323,6 +321,7 @@ func Run(
 	compactIntervalTokens := 150_000
 	trimToolResultChars := 4_000
 	trimToolArgChars := 1_200
+	keepRecentToolRounds := 5
 	if deps.RemoteConfig != nil {
 		compactAfterTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactAfterTokens, remoteconfig.Global)
 		compactIntervalTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactIntervalTokens, remoteconfig.Global)
@@ -332,33 +331,49 @@ func Run(
 		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global); rcTrim > 0 {
 			trimToolArgChars = rcTrim
 		}
+		if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
+			keepRecentToolRounds = rcKeep
+		}
 	}
 	if compactIntervalTokens <= 0 {
 		compactIntervalTokens = compactAfterTokens
 	}
 
 	rc := &RunContext{
-		RunID:         runID,
-		Project:       project,
-		User:          user,
-		FileMap:       fileMap,
-		BuildState:    buildState,
-		Todos:         todos,
-		Emitter:       emitter,
-		Tracker:       tracker,
-		Deps:          deps,
-		ImageCache:    make(map[string]string),
-		ImageInflight: make(map[string]*imageInflightCall),
+		RunID:          runID,
+		Profile:        profile,
+		Skills:         activeSkills,
+		RequiredSkills: contextPacket.RequiredSkills,
+		SkillManifest:  contextPacket.SkillManifest,
+		ReadOnly:       contextPacket.ReadOnly,
+		Project:        project,
+		User:           user,
+		FileMap:        fileMap,
+		BuildState:     buildState,
+		Todos:          todos,
+		Emitter:        emitter,
+		Tracker:        tracker,
+		Deps:           deps,
+		ImageCache:     make(map[string]string),
+		ImageInflight:  make(map[string]*imageInflightCall),
 	}
 
 	// --- Step 10: emit run_start ---
 	emitter.Emit(EventRunStart, RunStartEvent{
-		RunID:     runID,
-		PreCommit: preCommit,
-		Model:     model,
-		Provider:  provider.Name,
-		MaxTurns:  maxTurns,
-		Tools:     registry.Names(),
+		RunID:           runID,
+		PreCommit:       preCommit,
+		Model:           model,
+		Provider:        provider.Name,
+		MaxTurns:        maxTurns,
+		Tools:           registry.Names(),
+		AgentID:         profile.ID,
+		AgentName:       profile.Name,
+		Skills:          skillIDs(activeSkills),
+		RequiredSkills:  contextPacket.SkillIDs,
+		SuggestedSkills: contextPacket.SuggestedSkillIDs,
+		AvailableSkills: contextPacket.ManifestSkillIDs,
+		LoadedSkills:    nil,
+		Handoffs:        append([]string(nil), profile.HandoffTargets...),
 	})
 	emitTodoSnapshot(rc)
 
@@ -431,6 +446,7 @@ func Run(
 			Turn:         turn,
 			ToolCallID:   toolCallID,
 			ToolName:     name,
+			RiskLevel:    ClassifyToolRisk(name),
 			InputPreview: stripToolInputForPreview(name, argsJSON),
 		})
 		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
@@ -443,6 +459,7 @@ func Run(
 			RunID:      runID,
 			ToolCallID: toolCallID,
 			ToolName:   name,
+			RiskLevel:  ClassifyToolRisk(name),
 			Status:     status,
 			DurationMs: durationMs,
 			Summary:    firstLine(result, 140),
@@ -526,12 +543,13 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:     64000,
-			NudgeAfter:    nudgeAfter,
-			StripAfter:    stripAfter,
-			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
-			MaxMessages:   25,
-			RefreshPrefix: refreshRunPrefix,
+			MaxTokens:            64000,
+			NudgeAfter:           nudgeAfter,
+			StripAfter:           stripAfter,
+			StripTools:           []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
+			MaxMessages:          25,
+			KeepRecentToolRounds: keepRecentToolRounds,
+			RefreshPrefix:        refreshRunPrefix,
 			TrimResults: func(toolName, result string) string {
 				return trimToolResultForLLM(toolName, result, trimToolResultChars)
 			},
@@ -667,12 +685,8 @@ func Run(
 			fileMap, message)
 	}
 
-	if !SlashCommandIsReadOnly(message) {
-		projectType := ""
-		if project != nil {
-			projectType = project.ProjectType
-		}
-		if validationErr := validateGeneratedApp(fileMap, buildState, message, isFirstGen, projectType); validationErr != nil {
+	if !contextPacket.ReadOnly {
+		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
 				CodeValidationFailed, validationErr.Error(), validationErr,
 				tracker, runStart,
@@ -766,7 +780,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 
 // stripToolInputForPreview drops bulky fields from the tool input JSON
 // before stamping it into ToolCallStartEvent.InputPreview. Without this,
-// every full-file/edit_file call shipped the full file body THREE times
+// every write_file/edit_file call shipped the full file body THREE times
 // over SSE: once in input_preview, once in file_written.content, and once
 // in the persisted milestone. The dashboard reads file_written.content for
 // optimistic file-tree updates, so input_preview is redundant — and the
@@ -775,7 +789,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 // For non-file tools the original args pass through unchanged.
 func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	switch name {
-	case "create_design", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 			return json.RawMessage("{}")
@@ -783,9 +797,6 @@ func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 		// Keep the path so the UI can show a meaningful "writing X" hint;
 		// drop content/old_string/new_string which can be hundreds of KB.
 		stripped := map[string]json.RawMessage{}
-		if name == "create_design" {
-			stripped["path"] = json.RawMessage(`"DESIGN.md"`)
-		}
 		if p, ok := m["path"]; ok {
 			stripped["path"] = p
 		}
@@ -1224,7 +1235,7 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 			continue
 		}
 		switch c.Name {
-		case "create_design", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+		case "write_file", "edit_file", "multi_edit", "delete_file":
 			n++
 		}
 	}

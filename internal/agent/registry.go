@@ -85,6 +85,13 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true, nil
 	}
+	if decision := ApplyToolGuardrails(rc, name, input); !decision.Allowed {
+		msg := decision.Message
+		if msg == "" {
+			msg = "tool blocked by agent policy"
+		}
+		return "<tool_output tool=\"" + name + "\">" + escapeUntrustedTag(msg, "tool_output") + "</tool_output>", true, nil
+	}
 	result, isErr, err := t.Execute(ctx, rc, input)
 	// read_attachment wraps its body in <attachment> itself (with filename/mime
 	// metadata); everything else gets the generic <tool_output> wrap. Both are
@@ -104,7 +111,53 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 // not Anthropic (OpenRouter, Google, etc.) the server tool returns nil and
 // the agent runs without web search for that project.
 func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model string) *Registry {
+	profile := ResolveAgentProfile(project)
+	if profile != nil && profile.BuildRegistry != nil {
+		return profile.BuildRegistry(project, deps, model)
+	}
+	return buildWebBuilderRegistry(project, deps, model)
+}
+
+func buildWebBuilderRegistry(project *models.AppProject, deps *RunDependencies, model string) *Registry {
 	r := NewRegistry()
+	registerBaseBuilderTools(r, deps)
+	registerServerTools(r, deps, model)
+	registerDataAndAITools(r, deps)
+
+	if project == nil || project.Status != "draft" {
+		r.Register(&ReadDeployLogsTool{Deps: deps})
+		r.Register(&TriggerWebDeployTool{Deps: deps})
+	}
+	if project != nil && project.ProjectType == "ecommerce" {
+		r.Register(SetupStoreTool{Deps: deps})
+	}
+	return r
+}
+
+func buildMobileBuilderRegistry(project *models.AppProject, deps *RunDependencies, model string) *Registry {
+	r := NewRegistry()
+	registerBaseBuilderTools(r, deps)
+	registerServerTools(r, deps, model)
+	registerDataAndAITools(r, deps)
+
+	r.Register(&ReadMobileConfigTool{})
+	r.Register(ProvisionLocalDatabaseTool{Deps: deps})
+	if project == nil || project.Status != "draft" {
+		r.Register(&ReadBuildLogsTool{Deps: deps})
+		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
+	}
+
+	if project == nil || project.Status != "draft" {
+		r.Register(&ReadDeployLogsTool{Deps: deps})
+		r.Register(&TriggerWebDeployTool{Deps: deps})
+	}
+	return r
+}
+
+func registerBaseBuilderTools(r *Registry, deps *RunDependencies) {
+	r.Register(ListSkillsTool{})
+	r.Register(SearchSkillsTool{})
+	r.Register(LoadSkillTool{})
 	r.Register(ReadFilesTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})
@@ -117,61 +170,26 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model s
 	r.Register(DeleteFileTool{})
 	r.Register(GenerateImageTool{Deps: deps})
 	r.Register(ReadAttachmentTool{Deps: deps})
+}
 
+func registerServerTools(r *Registry, deps *RunDependencies, model string) {
 	if deps != nil && deps.LLMProvider != nil {
 		if ws := deps.LLMProvider.WebSearchTool(model); ws != nil {
 			r.AddServerTool(ServerToolRef{Tool: ws, DisplayName: "web_search"})
 		}
 	}
+}
 
-	// Database tools are registered unconditionally so the model has a
-	// stable tool list across the run. provision_database is the entry
-	// point when no DB exists yet; execute_sql is the ad-hoc query path
-	// once one does. Each tool's internal state check (NeonConnString
-	// lookup) decides whether a particular call is valid at execution
-	// time. projectHasDatabase still gates the DatabaseAddendum in
-	// context.go so the addendum only injects after a DB exists.
+func registerDataAndAITools(r *Registry, deps *RunDependencies) {
+	// Database tools are registered unconditionally so the model has a stable
+	// tool list across the run. Each tool's internal state check decides
+	// whether a particular call is valid at execution time.
 	r.Register(ProvisionDatabaseTool{Deps: deps})
 	r.Register(ExecuteSQLTool{Deps: deps})
 
-	// AI gateway setup is registered unconditionally so the model can opt
-	// into AI on demand. The tool's idempotency check (Settings["has_ai"])
-	// rejects re-runs once it's wired. projectHasAI still gates the
-	// AIAddendum in context.go so the addendum only injects after setup.
+	// AI gateway setup is registered unconditionally so the model can opt into
+	// AI on demand. The addendum only injects after setup has persisted.
 	r.Register(SetupAIGatewayTool{Deps: deps})
-
-	// <P1#17> read_build_logs + trigger_build_after_fix — gated to
-	// mobile_app_native because both tools depend on the
-	// AppProject-scoped build pipeline (BuildExpoMobile only runs for
-	// this project type).
-	// Skip during initial generation so the AI doesn't auto-build newly-created apps.
-	if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
-		r.Register(&ReadMobileConfigTool{})
-		r.Register(ProvisionLocalDatabaseTool{Deps: deps})
-		if project.Status != "draft" {
-			r.Register(&ReadBuildLogsTool{Deps: deps})
-			r.Register(&TriggerBuildAfterFixTool{Deps: deps})
-		}
-	}
-
-	// read_deploy_logs + trigger_web_deploy — available for all project types
-	// that have a web deploy pipeline (web, ecommerce, and mobile_app_native
-	// which deploys a backend/ subtree to Fly).
-	// Skip during initial generation so the AI doesn't auto-deploy newly-created apps.
-	if project == nil || project.Status != "draft" {
-		r.Register(&ReadDeployLogsTool{Deps: deps})
-		r.Register(&TriggerWebDeployTool{Deps: deps})
-	}
-	// Ecommerce projects use the same generic DB tools as every other app;
-	// their tenant Neon database is seeded from
-	// internal/starters/ecommerce_schema.sql at provisioning time. On top of
-	// that they get setup_store — a one-shot seed helper that does the
-	// config UPDATE + bulk category/product INSERTs in a single transaction,
-	// saving 2 roundtrips per generation vs. three execute_sql calls.
-	if project != nil && project.ProjectType == "ecommerce" {
-		r.Register(SetupStoreTool{Deps: deps})
-	}
-	return r
 }
 
 // projectHasDatabase returns true if the project has a connected database

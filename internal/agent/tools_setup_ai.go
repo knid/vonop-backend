@@ -34,10 +34,8 @@ What is now true:
   field on wemobAI().chat.completions.create — models not listed here
   will be rejected by the gateway with HTTP 403):
 %s
-- Available image models (passed to generateImage):
-    fal-ai/flux/schnell         — fast (default)
-    fal-ai/flux-pro/v1.1        — HD
-    fal-ai/flux-pro/v1.1-ultra  — premium
+- Available image models on the user's current plan (passed to generateImage):
+%s
 
 How to wire AI into a mobile_app_native app:
 
@@ -115,10 +113,8 @@ What is now true:
   on wemobAI().chat.completions.create — models not listed here will be
   rejected by the gateway with HTTP 403):
 %s
-- Available image models (passed to generateImage):
-    fal-ai/flux/schnell         — fast (default)
-    fal-ai/flux-pro/v1.1        — HD
-    fal-ai/flux-pro/v1.1-ultra  — premium
+- Available image models on the user's current plan (passed to generateImage):
+%s
 
 How to call it:
 - One-shot text (summarize, classify, rewrite):
@@ -290,9 +286,9 @@ func (s SetupAIGatewayTool) Execute(ctx context.Context, rc *RunContext, input j
 	}
 
 	modelList := renderGatewayChatModelsBlock(allowedChat)
+	imageModelList := renderGatewayImageModelsBlock(gatewayAllowedImageModels(s.Deps))
 	defaultModel := defaultGatewayChatModel(allowedChat)
-	result := fmt.Sprintf(resultTemplate, modelList, defaultModel, defaultModel)
+	result := fmt.Sprintf(resultTemplate, modelList, imageModelList, defaultModel, defaultModel)
 
 	return result, false, nil
 }
-
