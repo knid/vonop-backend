@@ -88,7 +88,7 @@ func (v *HttpViews) StartAppMCPOAuth(w http.ResponseWriter, r *http.Request) {
 		utils.ValidationError(w, err)
 		return
 	}
-	resp, err := v.Controller.StartMCPOAuth(project, req)
+	resp, err := v.Controller.StartMCPOAuth(r.Context(), project, req)
 	if err != nil {
 		utils.JSONError(w, constants.ErrValidationRequired, err.Error(), http.StatusBadRequest, nil)
 		return
