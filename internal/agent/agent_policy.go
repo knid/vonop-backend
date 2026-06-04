@@ -87,6 +87,9 @@ func HumanApprovalToolGuardrail(rc *RunContext, toolName string, input json.RawM
 }
 
 func SkillAllowedToolsGuardrail(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	if slices.Contains(skillRuntimeToolNames, toolName) {
+		return AllowTool()
+	}
 	if rc == nil || rc.Project == nil || rc.Project.Settings == nil {
 		return AllowTool()
 	}
@@ -141,9 +144,11 @@ var mutatingToolNames = []string{
 	"trigger_web_deploy",
 }
 
+var skillRuntimeToolNames = []string{"list_skills", "search_skills", "load_skill"}
+
 func ClassifyToolRisk(toolName string) string {
 	switch toolName {
-	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search":
+	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search", "list_skills", "search_skills", "load_skill":
 		return ToolRiskLow
 	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "generate_image", "update_todos":
 		return ToolRiskMedium

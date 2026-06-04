@@ -192,7 +192,7 @@ func Run(
 	profile := contextPacket.Profile
 	activeSkills := contextPacket.Skills
 	llmMessages := contextPacket.SystemMessages
-	memory.RecordRuntime(profile.ID, activeSkills)
+	memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
 	memory.Persist(ctx, deps.DB, runID)
 
 	llmMessages = append(llmMessages, convertHistory(history)...)
@@ -251,6 +251,7 @@ func Run(
 	// orphaned from their own run's generations.
 	tracker.TraceID = runID.String()
 	tracker.RunID = runID.String()
+	tracker.SetAgentSkills(contextPacket.SkillIDs, nil)
 	// Opt-in PostHog LLM Analytics: record per-call input/output content so
 	// the $ai_generation events carry full message context, and seed the
 	// trace input with the user's prompt for the grouping $ai_trace event.
@@ -335,32 +336,38 @@ func Run(
 	}
 
 	rc := &RunContext{
-		RunID:      runID,
-		Profile:    profile,
-		Skills:     activeSkills,
-		ReadOnly:   contextPacket.ReadOnly,
-		Project:    project,
-		User:       user,
-		FileMap:    fileMap,
-		BuildState: buildState,
-		Todos:      todos,
-		Emitter:    emitter,
-		Tracker:    tracker,
-		Deps:       deps,
+		RunID:          runID,
+		Profile:        profile,
+		Skills:         activeSkills,
+		RequiredSkills: contextPacket.RequiredSkills,
+		SkillManifest:  contextPacket.SkillManifest,
+		ReadOnly:       contextPacket.ReadOnly,
+		Project:        project,
+		User:           user,
+		FileMap:        fileMap,
+		BuildState:     buildState,
+		Todos:          todos,
+		Emitter:        emitter,
+		Tracker:        tracker,
+		Deps:           deps,
 	}
 
 	// --- Step 10: emit run_start ---
 	emitter.Emit(EventRunStart, RunStartEvent{
-		RunID:     runID,
-		PreCommit: preCommit,
-		Model:     model,
-		Provider:  provider.Name,
-		MaxTurns:  maxTurns,
-		Tools:     registry.Names(),
-		AgentID:   profile.ID,
-		AgentName: profile.Name,
-		Skills:    skillIDs(activeSkills),
-		Handoffs:  append([]string(nil), profile.HandoffTargets...),
+		RunID:           runID,
+		PreCommit:       preCommit,
+		Model:           model,
+		Provider:        provider.Name,
+		MaxTurns:        maxTurns,
+		Tools:           registry.Names(),
+		AgentID:         profile.ID,
+		AgentName:       profile.Name,
+		Skills:          skillIDs(activeSkills),
+		RequiredSkills:  contextPacket.SkillIDs,
+		SuggestedSkills: contextPacket.SuggestedSkillIDs,
+		AvailableSkills: contextPacket.ManifestSkillIDs,
+		LoadedSkills:    nil,
+		Handoffs:        append([]string(nil), profile.HandoffTargets...),
 	})
 	emitTodoSnapshot(rc)
 
@@ -533,7 +540,7 @@ func Run(
 			MaxTokens:     64000,
 			NudgeAfter:    nudgeAfter,
 			StripAfter:    stripAfter,
-			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config"},
+			StripTools:    []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
 			MaxMessages:   25,
 			RefreshPrefix: refreshRunPrefix,
 			TrimResults: func(toolName, result string) string {
@@ -672,7 +679,7 @@ func Run(
 	}
 
 	if !contextPacket.ReadOnly {
-		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, activeSkills); validationErr != nil {
+		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
 				CodeValidationFailed, validationErr.Error(), validationErr,
 				tracker, runStart,

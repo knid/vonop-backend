@@ -1314,6 +1314,7 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 
 		// Per-call $ai_generation events
+		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
 		for _, entry := range tracker.Entries() {
 			// Normalize per-entry model name too (tracker records raw model from each call).
 			entryModel := entry.Model
@@ -1392,6 +1393,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if len(entry.ToolCalls) > 0 {
 				props.Set("$ai_tools_called", toolCallsToPostHog(entry.ToolCalls))
 			}
+			if len(requiredSkillIDs) > 0 {
+				props.Set("agent_required_skills", requiredSkillIDs)
+			}
+			if len(loadedSkillIDs) > 0 {
+				props.Set("agent_loaded_skills", loadedSkillIDs)
+			}
 			capture := posthog.Capture{
 				DistinctId: user.ID.String(),
 				Event:      string(constants.EVENT_AI_GENERATION),
@@ -1451,6 +1458,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 		if tools := tracker.ToolsUsed(); len(tools) > 0 {
 			traceProps.Set("$ai_tools", tools)
+		}
+		if len(requiredSkillIDs) > 0 {
+			traceProps.Set("agent_required_skills", requiredSkillIDs)
+		}
+		if len(loadedSkillIDs) > 0 {
+			traceProps.Set("agent_loaded_skills", loadedSkillIDs)
 		}
 		if tracker.TraceErrorCode != "" {
 			traceProps.Set("$ai_is_error", true)

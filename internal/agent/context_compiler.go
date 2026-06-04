@@ -6,11 +6,16 @@ import (
 )
 
 type AgentContextPacket struct {
-	Profile        *AgentProfile
-	SystemMessages []utils.Message
-	Skills         []SkillFile
-	SkillIDs       []string
-	ReadOnly       bool
+	Profile           *AgentProfile
+	SystemMessages    []utils.Message
+	Skills            []SkillFile
+	RequiredSkills    []SkillFile
+	SuggestedSkills   []SkillFile
+	SkillManifest     []SkillFile
+	SkillIDs          []string
+	SuggestedSkillIDs []string
+	ManifestSkillIDs  []string
+	ReadOnly          bool
 }
 
 type AgentContextInput struct {
@@ -33,13 +38,23 @@ func CompileAgentContext(input AgentContextInput) AgentContextPacket {
 	}
 
 	skills := ResolveSkills(profile, input.Project, input.Message, input.IsFirstGen)
+	suggestedSkills := ResolveSuggestedSkills(profile, input.Project, input.Message, input.IsFirstGen)
+	manifestSkills := ResolveCompatibleSkills(profile, input.Project)
+	if len(manifestSkills) > 0 {
+		msgs = append(msgs, RenderSkillManifestMessage(manifestSkills, skills, suggestedSkills))
+	}
 	msgs = append(msgs, RenderSkillMessages(skills)...)
 
 	return AgentContextPacket{
-		Profile:        profile,
-		SystemMessages: msgs,
-		Skills:         skills,
-		SkillIDs:       skillIDs(skills),
-		ReadOnly:       SlashCommandIsReadOnly(input.Message),
+		Profile:           profile,
+		SystemMessages:    msgs,
+		Skills:            skills,
+		RequiredSkills:    skills,
+		SuggestedSkills:   suggestedSkills,
+		SkillManifest:     manifestSkills,
+		SkillIDs:          skillIDs(skills),
+		SuggestedSkillIDs: skillIDs(suggestedSkills),
+		ManifestSkillIDs:  skillIDs(manifestSkills),
+		ReadOnly:          SlashCommandIsReadOnly(input.Message),
 	}
 }
