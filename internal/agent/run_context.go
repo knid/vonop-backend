@@ -127,16 +127,80 @@ func matchGlob(glob, p string) bool {
 // state for a single agent run. It is constructed at the top of Run() and
 // never mutated outside the orchestrator.
 type RunContext struct {
-	RunID      uuid.UUID
-	Profile    *AgentProfile
-	Skills     []SkillFile
-	ReadOnly   bool
-	Project    *models.AppProject
-	User       *models.User
-	FileMap    *SafeFileMap
-	BuildState *BuildState
-	Todos      *TodoList
-	Emitter    EventEmitter
-	Tracker    *utils.TokenTracker
-	Deps       *RunDependencies
+	RunID          uuid.UUID
+	Profile        *AgentProfile
+	Skills         []SkillFile
+	RequiredSkills []SkillFile
+	SkillManifest  []SkillFile
+	LoadedSkills   []SkillFile
+	ReadOnly       bool
+	Project        *models.AppProject
+	User           *models.User
+	FileMap        *SafeFileMap
+	BuildState     *BuildState
+	Todos          *TodoList
+	Emitter        EventEmitter
+	Tracker        *utils.TokenTracker
+	Deps           *RunDependencies
+	skillMu        sync.Mutex
+}
+
+func (rc *RunContext) ActiveSkillIDs() []string {
+	if rc == nil {
+		return nil
+	}
+	rc.skillMu.Lock()
+	defer rc.skillMu.Unlock()
+	return skillIDs(append(append([]SkillFile(nil), rc.RequiredSkills...), rc.LoadedSkills...))
+}
+
+func (rc *RunContext) LoadedSkillIDs() []string {
+	if rc == nil {
+		return nil
+	}
+	rc.skillMu.Lock()
+	defer rc.skillMu.Unlock()
+	return skillIDs(rc.LoadedSkills)
+}
+
+func (rc *RunContext) MarkSkillLoaded(skill SkillFile) bool {
+	if rc == nil || skill.ID == "" {
+		return false
+	}
+	rc.skillMu.Lock()
+	if skillSliceContains(rc.RequiredSkills, skill.ID) || skillSliceContains(rc.LoadedSkills, skill.ID) {
+		rc.Skills = append(append([]SkillFile(nil), rc.RequiredSkills...), rc.LoadedSkills...)
+		rc.skillMu.Unlock()
+		return false
+	}
+	rc.LoadedSkills = append(rc.LoadedSkills, skill)
+	sortSkills(rc.LoadedSkills)
+	rc.Skills = append(append([]SkillFile(nil), rc.RequiredSkills...), rc.LoadedSkills...)
+	activeIDs := skillIDs(rc.Skills)
+	loadedIDs := skillIDs(rc.LoadedSkills)
+	rc.skillMu.Unlock()
+
+	if rc.Tracker != nil {
+		rc.Tracker.SetAgentSkills(skillIDs(rc.RequiredSkills), loadedIDs)
+	}
+	if rc.Emitter != nil {
+		rc.Emitter.Emit(EventSkillLoaded, SkillLoadedEvent{
+			RunID:    rc.RunID,
+			SkillID:  skill.ID,
+			Name:     skill.Name,
+			Active:   activeIDs,
+			Loaded:   loadedIDs,
+			Required: skillIDs(rc.RequiredSkills),
+		})
+	}
+	return true
+}
+
+func skillSliceContains(skills []SkillFile, id string) bool {
+	for _, skill := range skills {
+		if skill.ID == id {
+			return true
+		}
+	}
+	return false
 }

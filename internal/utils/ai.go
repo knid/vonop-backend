@@ -504,6 +504,8 @@ type TokenTracker struct {
 	TraceErrorCode    string
 	TraceErrorMessage string
 	StartedAt         time.Time // wall-clock start of the generation (for accurate $ai_latency)
+	RequiredSkillIDs  []string
+	LoadedSkillIDs    []string
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.
@@ -529,6 +531,39 @@ func (t *TokenTracker) ToolsUsed() []string {
 		}
 	}
 	return deduped
+}
+
+func (t *TokenTracker) SetAgentSkills(required, loaded []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.RequiredSkillIDs = dedupeStrings(required)
+	t.LoadedSkillIDs = dedupeStrings(loaded)
+}
+
+func (t *TokenTracker) AgentSkills() (required, loaded []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	required = append([]string(nil), t.RequiredSkillIDs...)
+	loaded = append([]string(nil), t.LoadedSkillIDs...)
+	return required, loaded
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func NewTokenTracker() *TokenTracker {

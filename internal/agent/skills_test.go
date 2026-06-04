@@ -67,14 +67,31 @@ func TestResolveSkills_SlashCommandAndTriggers(t *testing.T) {
 	project := &models.AppProject{ProjectType: models.ProjectTypeApp}
 	profile := ResolveAgentProfile(project)
 
-	seoIDs := skillIDs(resolveSkillsFromCatalog(NewSkillCatalog(catalog), profile, project, "/seo", false))
+	seoIDs := skillIDs(resolveSuggestedSkillsFromCatalog(NewSkillCatalog(catalog), profile, project, "/seo", false))
 	if !slices.Contains(seoIDs, "web-seo") {
 		t.Fatalf("/seo should activate web-seo, got %v", seoIDs)
 	}
 
-	a11yIDs := skillIDs(resolveSkillsFromCatalog(NewSkillCatalog(catalog), profile, project, "improve accessibility and keyboard flow", false))
+	a11yIDs := skillIDs(resolveSuggestedSkillsFromCatalog(NewSkillCatalog(catalog), profile, project, "improve accessibility and keyboard flow", false))
 	if !slices.Contains(a11yIDs, "accessibility") {
 		t.Fatalf("accessibility trigger should activate accessibility skill, got %v", a11yIDs)
+	}
+}
+
+func TestRenderSkillManifestIncludesCompactMetadata(t *testing.T) {
+	skills := []SkillFile{
+		{ID: "foundation", Name: "Foundation", Description: "Required.", Agents: []string{AgentIDWebBuilder}},
+		{ID: "seo", Name: "SEO", Description: "SEO guidance.", Agents: []string{AgentIDWebBuilder}, Triggers: []string{"seo"}, RiskLevel: "low", Body: "full body should not appear"},
+	}
+	msg := RenderSkillManifestMessage(skills, skills[:1], skills[1:])
+	if msg.Role != "system" {
+		t.Fatalf("manifest role = %q, want system", msg.Role)
+	}
+	if !strings.Contains(msg.Content, "id: seo") || !strings.Contains(msg.Content, "triggers: seo") {
+		t.Fatalf("manifest missing seo metadata:\n%s", msg.Content)
+	}
+	if strings.Contains(msg.Content, "full body should not appear") {
+		t.Fatalf("manifest should not include full skill body:\n%s", msg.Content)
 	}
 }
 

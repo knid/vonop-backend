@@ -21,6 +21,20 @@ func TestAgentRunMemoryRecordToolTracksChangedAndReadFiles(t *testing.T) {
 	assert.Contains(t, strings.Join(mem.Completed, "\n"), "edit_file: app/page.tsx")
 }
 
+func TestAgentRunMemoryTracksRuntimeAndLoadedSkills(t *testing.T) {
+	mem := NewAgentRunMemory("improve seo")
+	mem.RecordRuntime(AgentIDWebBuilder,
+		[]SkillFile{{ID: "nextjs-app-router"}, {ID: "tailwind-v4"}},
+		[]SkillFile{{ID: "nextjs-app-router"}, {ID: "tailwind-v4"}, {ID: "web-seo"}},
+	)
+	mem.RecordTool("load_skill", `{"id":"web-seo"}`, "loaded", false)
+
+	assert.ElementsMatch(t, []string{"nextjs-app-router", "tailwind-v4"}, mem.RequiredSkillIDs)
+	assert.ElementsMatch(t, []string{"web-seo"}, mem.LoadedSkillIDs)
+	assert.Contains(t, mem.SkillIDs, "web-seo")
+	assert.Contains(t, mem.Render(nil), "Loaded optional skills")
+}
+
 func TestCompactLLMHistoryKeepsSystemMemoryPinnedAndTail(t *testing.T) {
 	mem := NewAgentRunMemory("build dashboard")
 	mem.RecordTool("edit_file", `{"path":"app/page.tsx"}`, "updated", false)

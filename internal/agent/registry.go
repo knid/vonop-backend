@@ -155,6 +155,9 @@ func buildMobileBuilderRegistry(project *models.AppProject, deps *RunDependencie
 }
 
 func registerBaseBuilderTools(r *Registry, deps *RunDependencies) {
+	r.Register(ListSkillsTool{})
+	r.Register(SearchSkillsTool{})
+	r.Register(LoadSkillTool{})
 	r.Register(ReadFilesTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})

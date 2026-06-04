@@ -26,16 +26,20 @@ type EventEmitter interface {
 // ---- Event payload types ----
 
 type RunStartEvent struct {
-	RunID     uuid.UUID `json:"run_id"`
-	PreCommit string    `json:"pre_commit"`
-	Model     string    `json:"model"`
-	Provider  string    `json:"provider"`
-	MaxTurns  int       `json:"max_turns"`
-	Tools     []string  `json:"tools"`
-	AgentID   string    `json:"agent_id,omitempty"`
-	AgentName string    `json:"agent_name,omitempty"`
-	Skills    []string  `json:"skills,omitempty"`
-	Handoffs  []string  `json:"handoffs,omitempty"`
+	RunID           uuid.UUID `json:"run_id"`
+	PreCommit       string    `json:"pre_commit"`
+	Model           string    `json:"model"`
+	Provider        string    `json:"provider"`
+	MaxTurns        int       `json:"max_turns"`
+	Tools           []string  `json:"tools"`
+	AgentID         string    `json:"agent_id,omitempty"`
+	AgentName       string    `json:"agent_name,omitempty"`
+	Skills          []string  `json:"skills,omitempty"`
+	RequiredSkills  []string  `json:"required_skills,omitempty"`
+	SuggestedSkills []string  `json:"suggested_skills,omitempty"`
+	AvailableSkills []string  `json:"available_skills,omitempty"`
+	LoadedSkills    []string  `json:"loaded_skills,omitempty"`
+	Handoffs        []string  `json:"handoffs,omitempty"`
 }
 
 type TurnStartEvent struct {
@@ -71,6 +75,15 @@ type ToolCallResultEvent struct {
 	DurationMs int       `json:"duration_ms"`
 	Summary    string    `json:"summary"`
 	IsError    bool      `json:"is_error"`
+}
+
+type SkillLoadedEvent struct {
+	RunID    uuid.UUID `json:"run_id"`
+	SkillID  string    `json:"skill_id"`
+	Name     string    `json:"name,omitempty"`
+	Active   []string  `json:"active,omitempty"`
+	Loaded   []string  `json:"loaded,omitempty"`
+	Required []string  `json:"required,omitempty"`
 }
 
 type FileWrittenEvent struct {
@@ -154,6 +167,7 @@ const (
 	EventNarration      = "narration"
 	EventToolCallStart  = "tool_call_start"
 	EventToolCallResult = "tool_call_result"
+	EventSkillLoaded    = "skill_loaded"
 	EventFileWritten    = "file_written"
 	EventFileDeleted    = "file_deleted"
 	EventTurnEnd        = "turn_end"
