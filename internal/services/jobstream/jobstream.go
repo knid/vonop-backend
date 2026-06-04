@@ -29,6 +29,10 @@ func EventsChannel(jobID string) string { return "job:events:" + jobID }
 // hits DELETE /v1/jobs/{id}.
 func CancelChannel(jobID string) string { return "job:cancel:" + jobID }
 
+// ApprovalChannel carries approval decisions from API → worker for one
+// pending MCP tool approval.
+func ApprovalChannel(approvalID string) string { return "job:approval:" + approvalID }
+
 // PublishEvent serialises an SSEEvent frame as JSON and publishes it on the
 // job's events channel. Returns the publish error (Redis network failure
 // etc.) — callers log; they do not retry. Best-effort by design: persisted
@@ -53,6 +57,13 @@ func PublishCancel(ctx context.Context, r *redis.Client, jobID string) error {
 		return fmt.Errorf("nil redis client")
 	}
 	return r.Publish(ctx, CancelChannel(jobID), []byte("1")).Err()
+}
+
+func PublishApprovalDecision(ctx context.Context, r *redis.Client, approvalID, decision string) error {
+	if r == nil {
+		return fmt.Errorf("nil redis client")
+	}
+	return r.Publish(ctx, ApprovalChannel(approvalID), []byte(decision)).Err()
 }
 
 // SubscribeEvents returns a Redis subscription bound to the job's events
@@ -80,6 +91,18 @@ func SubscribeCancel(ctx context.Context, r *redis.Client, jobID string) (*redis
 	if _, err := sub.Receive(ctx); err != nil {
 		_ = sub.Close()
 		return nil, fmt.Errorf("subscribe cancel: %w", err)
+	}
+	return sub, nil
+}
+
+func SubscribeApproval(ctx context.Context, r *redis.Client, approvalID string) (*redis.PubSub, error) {
+	if r == nil {
+		return nil, fmt.Errorf("nil redis client")
+	}
+	sub := r.Subscribe(ctx, ApprovalChannel(approvalID))
+	if _, err := sub.Receive(ctx); err != nil {
+		_ = sub.Close()
+		return nil, fmt.Errorf("subscribe approval: %w", err)
 	}
 	return sub, nil
 }

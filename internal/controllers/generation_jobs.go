@@ -63,14 +63,16 @@ var milestoneEvents = map[string]bool{
 	// Agent runtime events (2026-04 rewrite). On reconnect these get
 	// replayed so the client's timeline rebuilds past tool calls + file
 	// writes. narration/tool_call_delta/keepalive stay out.
-	"run_start":        true,
-	"turn_start":       true,
-	"tool_call_start":  true,
-	"tool_call_result": true,
-	"file_written":     true,
-	"file_deleted":     true,
-	"turn_end":         true,
-	"credits_update":   true,
+	"run_start":              true,
+	"turn_start":             true,
+	"tool_call_start":        true,
+	"tool_call_result":       true,
+	"tool_approval_required": true,
+	"tool_approval_resolved": true,
+	"file_written":           true,
+	"file_deleted":           true,
+	"turn_end":               true,
+	"credits_update":         true,
 }
 
 // CreateJob creates a new generation job, enforcing both a per-user and a

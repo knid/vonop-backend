@@ -18,7 +18,7 @@ import (
 // AgentDeps builds a per-run RunDependencies bundle for the agent package.
 // Credit lifecycle callbacks are bound to the specific user at call time.
 // This method is called once per HTTP chat/generate request from the view layer.
-func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
+func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDependencies {
 	provider := c.llmProviderForUser(user)
 	_, planName, _ := c.GetUserLimitsWithPlan(user)
 
@@ -121,6 +121,11 @@ func (c *Controller) AgentDeps(user *models.User) *agent.RunDependencies {
 		RecordLLMError: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string, latencyMs int64, errCode, errMsg string) {
 			c.RecordLLMError(user, tracker, action, model, provider, reference, appType, latencyMs, errCode, errMsg)
 		},
+		JobID:                 jobID,
+		ListMCPTools:          c.AgentMCPTools,
+		CreateMCPToolApproval: c.CreateMCPToolApproval,
+		WaitForMCPApproval:    c.WaitForMCPApproval,
+		ExecuteMCPTool:        c.ExecuteMCPTool,
 	}
 }
 

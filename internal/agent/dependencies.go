@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
@@ -130,6 +131,66 @@ type LLMErrorRecorder func(
 	errCode, errMsg string,
 )
 
+type MCPRuntimeTool struct {
+	ConnectionID string
+	ToolID       string
+	ToolName     string
+	PrefixedName string
+	DisplayName  string
+	Description  string
+	InputSchema  map[string]any
+	RiskLevel    string
+	Policy       string
+}
+
+type MCPToolApprovalRequest struct {
+	JobID        string
+	RunID        string
+	ProjectID    string
+	UserID       string
+	AgentID      string
+	ConnectionID string
+	ToolID       string
+	ToolName     string
+	PrefixedName string
+	RiskLevel    string
+	Arguments    json.RawMessage
+}
+
+type MCPToolApproval struct {
+	ID              string
+	Status          string
+	ExpiresAtUnixMs int64
+}
+
+type MCPApprovalDecision struct {
+	Approved bool
+	Status   string
+	UserID   string
+}
+
+type MCPToolExecutionRequest struct {
+	JobID            string
+	RunID            string
+	ProjectID        string
+	UserID           string
+	AgentID          string
+	ConnectionID     string
+	ToolID           string
+	ApprovalID       string
+	ToolName         string
+	PrefixedName     string
+	RiskLevel        string
+	Policy           string
+	Arguments        json.RawMessage
+	ApprovedByUserID string
+}
+
+type MCPRuntimeToolLister func(projectID, agentID string) ([]MCPRuntimeTool, error)
+type MCPToolApprovalCreator func(ctx context.Context, req MCPToolApprovalRequest) (*MCPToolApproval, error)
+type MCPToolApprovalWaiter func(ctx context.Context, approvalID string) (MCPApprovalDecision, error)
+type MCPToolExecutorFn func(ctx context.Context, req MCPToolExecutionRequest) (string, bool, error)
+
 // RunDependencies holds the external services the agent package needs.
 // Constructed from *controllers.Controller once per request via
 // Controller.AgentDeps(). The agent package never reaches into Controller
@@ -174,4 +235,10 @@ type RunDependencies struct {
 	TriggerWebDeploy     WebDeployTrigger
 	RecordLLMUsage       LLMUsageRecorder
 	RecordLLMError       LLMErrorRecorder
+
+	JobID                 string
+	ListMCPTools          MCPRuntimeToolLister
+	CreateMCPToolApproval MCPToolApprovalCreator
+	WaitForMCPApproval    MCPToolApprovalWaiter
+	ExecuteMCPTool        MCPToolExecutorFn
 }
