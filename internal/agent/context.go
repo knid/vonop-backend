@@ -10,27 +10,20 @@ import (
 )
 
 // planningDiscipline is injected as a final system message to reduce tool-round
-// churn. It reminds the model to batch operations and minimize rounds.
+// churn. The compact base prompt covers basic tool protocol; this block keeps
+// batching-specific guidance close to the registry's batch tool surface.
 const planningDiscipline = `## Planning Discipline
-Before calling any tool, decide the complete set of files you need to read,
-write, or edit. Batch them into the fewest tool calls possible:
+Before calling tools, batch independent work into the fewest calls possible:
 - read_files (plural) for every file you need to inspect — one call, all paths.
 - create_design for DESIGN.md before broad first-generation UI work.
 - write_files for one or more full-file writes in ONE call.
 - patch_files for exact-string edits across 2+ existing files in ONE call.
 - multi_edit for 2+ changes to the SAME file.
-- Parallel tool calls only when the operations are independent; for multiple
-  file writes/edits, prefer write_files/patch_files first.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier
   one (e.g., an INSERT whose RETURNING id is needed by the next INSERT).
 
-Read files you need. Prefer read_files (batch) + grep before editing.
-Use update_todos only for clearly multi-part work or discovered follow-up tasks.
-For simple one-task requests, skip todos and implement directly. When you do use
-todos, mark done only after you have concrete file, tool, or validation evidence,
-and update them at meaningful task boundaries.
 Do not narrate your plan at length — act with tools immediately.`
 
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
@@ -41,7 +34,7 @@ type mobileConfigGetter interface {
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
-//  1. Shared base prompt   (BasePromptWebShared or BasePromptMobileNativeShared — by project type)
+//  1. Profile base prompt  (CompactBasePromptWeb or CompactBasePromptMobileNative)
 //  2. Mode-specific block  (FirstGen or Chat addendum, depending on run mode)
 //  3. Variant addendum     (stable across this project's runs, if applicable)
 //  4. Project assets       (per-turn — asset uploads/deletes invalidate this block only)
