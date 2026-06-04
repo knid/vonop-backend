@@ -73,6 +73,51 @@ Next steps for this run:
 2. write_files backend/app/api/<resource>/route.ts handlers for each table the UI needs (GET list, POST create, optionally PUT/DELETE on /<id>).
 3. Wire mobile screens to call those routes via apiFetch instead of any hardcoded mock data.`
 
+const splitWebProvisionDatabaseResultTemplate = `Wemob db is ready. Tables created and seeded with realistic demo data (including AI-generated images for any image columns): %s.
+
+What is now true:
+- backend/lib/db.ts has been written. Import the database client from a Next.js API route with:
+    import { db } from '@/lib/db';
+- backend/package.json now lists @neondatabase/serverless and drizzle-orm. A minimal Next.js backend was scaffolded under backend/ if it didn't already exist.
+- You MUST now write backend/lib/schema.ts with Drizzle pgTable definitions matching every table above. backend/lib/db.ts imports './schema', so the file must exist before any backend route can build. Use snake_case column names in SQL but camelCase property names in Drizzle definitions.
+- The execute_sql tool now works against this database. Use readonly=true for SELECTs while exploring, readonly=false for ALTER TABLE / extra INSERTs.
+
+How CRUD reaches the Vite frontend:
+
+  CRITICAL ARCHITECTURE: backend/lib/db.ts MUST only be imported from Next.js
+  API routes under backend/app/api/**/route.ts. The Vite frontend (frontend/)
+  NEVER imports it — DATABASE_URL is server-side-only and must never reach
+  browser code.
+
+1. Backend route (backend/app/api/<resource>/route.ts):
+    import { db } from '@/lib/db';
+    import { %s } from '@/lib/schema';
+    import { NextRequest, NextResponse } from 'next/server';
+    export async function GET() {
+      const rows = await db.select().from(%s);
+      return NextResponse.json(rows);
+    }
+    export async function POST(req: NextRequest) {
+      const body = await req.json();
+      const [row] = await db.insert(%s).values(body).returning();
+      return NextResponse.json(row);
+    }
+
+2. Frontend component (frontend/src/...):
+    import { apiFetch } from '@/lib/api';
+    const rows = await apiFetch<Item[]>('/api/<resource>');
+
+Rules:
+1. NEVER import backend files from frontend/. NEVER add DATABASE_URL to frontend/.
+2. Backend API responses must shape the data — strip secrets, derive computed fields, paginate.
+3. In every user-facing message, call this "your database" / "wemob db" /
+   "veritabanın". NEVER say Neon, Postgres, Drizzle, Supabase, or Firebase.
+
+Next steps for this run:
+1. write_files backend/lib/schema.ts with Drizzle pgTable definitions matching the schema you just provisioned.
+2. write_files backend/app/api/<resource>/route.ts handlers for each table the UI needs.
+3. Wire frontend screens to call those routes via apiFetch instead of hardcoded mock data.`
+
 // ProvisionDatabaseTool is the agent-callable entry point for creating the
 // project's wemob db on demand. It is registered unconditionally; the tool
 // internally rejects calls when a database already exists for the project so
@@ -177,13 +222,17 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 	}
 
 	isMobileNative := rc.Project != nil && rc.Project.ProjectType == models.ProjectTypeMobileAppNative
+	isSplitWeb := rc.Project != nil && (rc.Project.UsesSplitWebRuntime() || rc.Project.FrontendRuntime == models.FrontendRuntimeNone)
 	libDBPath := "lib/db.ts"
 	pkgJSONPath := "package.json"
 	resultTemplate := genericProvisionDatabaseResultTemplate
-	if isMobileNative {
+	if isMobileNative || isSplitWeb {
 		libDBPath = "backend/lib/db.ts"
 		pkgJSONPath = "backend/package.json"
 		resultTemplate = mobileNativeProvisionDatabaseResultTemplate
+		if isSplitWeb {
+			resultTemplate = splitWebProvisionDatabaseResultTemplate
+		}
 		if _, ok := rc.FileMap.Get(pkgJSONPath); !ok {
 			scaffoldMinimalBackend(rc)
 		}
@@ -211,7 +260,7 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 	}
 
 	var result string
-	if isMobileNative {
+	if isMobileNative || isSplitWeb {
 		first := tableNames[0]
 		firstCamel := camelCaseSnake(first)
 		result = fmt.Sprintf(resultTemplate, strings.Join(tableNames, ", "), firstCamel, firstCamel, firstCamel)

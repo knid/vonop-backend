@@ -8,6 +8,25 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
+const SplitWebAddendum = `# SPLIT WEB ADDENDUM
+This project uses the split web architecture.
+
+## Source tree
+- frontend/ is a Vite + React static frontend. Write browser UI only under frontend/.
+- backend/ is optional and contains Next.js API routes only when the app needs server-side features.
+- Do not write root Next.js app files such as app/page.tsx, app/layout.tsx, next.config.mjs, or root package.json.
+- DESIGN.md is project metadata and is the only root-level file you may create or update.
+
+## Frontend rules
+- Use Vite/React imports under frontend/src/**.
+- Call server features with fetch/apiFetch against relative /api/* URLs.
+- Never put DATABASE_URL, WEMOB_AI_KEY, provider secrets, or server SDK calls in frontend/.
+
+## Backend rules
+- If the user asks for AI, database, auth, payments, uploads, webhooks, or private integrations, create backend/app/api/**/route.ts handlers.
+- Backend route handlers may import backend/lib/db.ts or backend/lib/wemob-ai.ts after the matching setup tool creates them.
+- The frontend talks to backend routes through /api/*; it never imports backend files.`
+
 // EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
 // Ecommerce projects bypass DatabaseAddendum — this addendum is the single
 // source of truth for their data-layer story.
@@ -212,7 +231,7 @@ extra fields.
 // the LLM never recommends a model the gateway would 403 at runtime. When no
 // deps callback is available (e.g. standalone tooling), the block falls back
 // to a conservative "the setup tool will list available models" line.
-func buildAIAddendum(deps *RunDependencies) string {
+func buildAIAddendum(deps *RunDependencies, project *models.AppProject) string {
 	allowedChat := gatewayAllowedChatModels(deps)
 	allowedImage := gatewayAllowedImageModels(deps)
 
@@ -225,6 +244,10 @@ func buildAIAddendum(deps *RunDependencies) string {
 	}
 	if len(allowedImage) > 0 {
 		imageModelBlock = "Available image models on the user's current plan (pass as the\nmodel field on generateImage — anything else will 403 at runtime):\n" + renderGatewayImageModelsBlock(allowedImage)
+	}
+
+	if project.UsesSplitWebRuntime() {
+		return buildAISplitWebAddendum(modelBlock, imageModelBlock, defaultModel)
 	}
 
 	return `# AI ADDENDUM
@@ -287,6 +310,44 @@ never reach the browser.
 - Do NOT call setup_wemob_ai_gateway again — the helper already exists.
 - Do NOT rewrite lib/wemob-ai.ts. It is template-managed; extend it only by
   adding new functions, never by replacing the existing exports.
+`
+}
+
+func buildAISplitWebAddendum(modelBlock, imageModelBlock, defaultModel string) string {
+	return `# AI ADDENDUM (split web + backend)
+This project has the built-in Wemob AI Gateway wired through its backend.
+In every user-facing message, call it "AI" or "yapay zeka" — never "Wemob
+Gateway", "OpenRouter", "Claude", "GPT", "Anthropic", or any underlying model
+name.
+
+The AI helper lives at backend/lib/wemob-ai.ts. Import it only from backend
+route handlers:
+
+    import { wemobAI, generateImage } from '@/lib/wemob-ai';
+
+` + modelBlock + `
+
+` + imageModelBlock + `
+
+The openai npm package is already in backend/package.json — do not add it
+again, and do not add other AI SDKs.
+
+## Server-Side Only
+WEMOB_AI_KEY and NEXT_PUBLIC_WEMOB_GATEWAY_URL are auto-injected into the
+backend deployment. NEVER import backend/lib/wemob-ai.ts from frontend/.
+
+## Pattern
+- Backend route: backend/app/api/chat/route.ts calls
+    const res = await wemobAI().chat.completions.create({
+      model: '` + defaultModel + `',
+      messages,
+    });
+  and returns JSON or a streamed Response.
+- Frontend UI under frontend/ calls apiFetch('/api/chat', { method: 'POST', json: { messages } }).
+- Image generation happens in backend routes through generateImage({ prompt });
+  the frontend renders returned URLs with a normal img element.
+
+Do not call setup_wemob_ai_gateway again — the helper already exists.
 `
 }
 
@@ -441,6 +502,29 @@ Schema changes:
   readonly=false for mutations, readonly=true for exploration.
 - Keep backend/lib/schema.ts in sync with the live database — Drizzle's TS
   types come from it.
+
+User-facing language:
+- Call this "your database" / "wemob db" / "veritabanın". NEVER say Neon,
+  Postgres, Drizzle, Supabase, or Firebase to the user.
+`
+
+const DatabaseAddendumSplitWeb = `# DATABASE ADDENDUM (split web + backend)
+
+This project has a wemob db wired through its Next.js backend. Schema files:
+- backend/lib/db.ts — Drizzle Postgres client. Imports the schema.
+- backend/lib/schema.ts — Drizzle pgTable definitions; you author this.
+- backend/app/api/<resource>/route.ts — CRUD endpoints; you author these.
+- frontend/src/lib/api.ts — Vite frontend helper; frontend screens call backend routes through apiFetch.
+
+Pattern:
+1. backend/lib/db.ts is imported ONLY from server-side code under backend/.
+2. Frontend components under frontend/ call backend routes through apiFetch:
+     const rows = await apiFetch<Item[]>('/api/<resource>');
+3. NEVER import backend files from frontend/. NEVER reference DATABASE_URL in frontend code.
+
+Schema changes:
+- ALTER TABLE / extra INSERTs go through execute_sql. Use readonly=false for mutations, readonly=true for exploration.
+- Keep backend/lib/schema.ts in sync with the live database.
 
 User-facing language:
 - Call this "your database" / "wemob db" / "veritabanın". NEVER say Neon,

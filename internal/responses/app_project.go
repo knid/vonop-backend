@@ -15,15 +15,19 @@ type CommitHistoryEntry struct {
 }
 
 type AppProjectResponse struct {
-	ID            uuid.UUID      `json:"id"`
-	Name          string         `json:"name"`
-	Slug          string         `json:"slug"`
-	Prompt        string         `json:"prompt"`
-	ProjectType   string         `json:"project_type"`
-	Theme         map[string]any `json:"theme"`
-	Settings      map[string]any `json:"settings"`
-	Status        string         `json:"status"`
-	ScreenshotURL string         `json:"screenshot_url,omitempty"`
+	ID              uuid.UUID      `json:"id"`
+	Name            string         `json:"name"`
+	Slug            string         `json:"slug"`
+	Prompt          string         `json:"prompt"`
+	ProjectType     string         `json:"project_type"`
+	FrontendRuntime string         `json:"frontend_runtime"`
+	FrontendHosting string         `json:"frontend_hosting"`
+	BackendEnabled  bool           `json:"backend_enabled"`
+	BackendRuntime  string         `json:"backend_runtime"`
+	Theme           map[string]any `json:"theme"`
+	Settings        map[string]any `json:"settings"`
+	Status          string         `json:"status"`
+	ScreenshotURL   string         `json:"screenshot_url,omitempty"`
 	// WebPreviewURL is set for mobile_app_native projects only — it's the
 	// canonical URL of the Expo Web build served by the per-project Fly app
 	// at /_web/. The studio's MobilePreview pane sources its iframe from
@@ -77,17 +81,17 @@ type AppConversationResponse struct {
 }
 
 type AppConversationMessageResp struct {
-	ID                 string                    `json:"id,omitempty"`
-	Role               string                    `json:"role"`
-	Content            string                    `json:"content"`
-	Timestamp          int64                     `json:"timestamp"`
-	FileOperations     []AppChatFileOpResp       `json:"file_operations,omitempty"`
-	ImageURLs          []string                  `json:"image_urls,omitempty"`
-	SnapshotID         string                    `json:"snapshot_id,omitempty"`
-	Suggestions        []string                  `json:"suggestions,omitempty"`
-	ThinkingText       string                    `json:"thinking_text,omitempty"`
-	ThinkingDurationMs int                       `json:"thinking_duration_ms,omitempty"`
-	ToolCalls          []AppChatToolCallResp     `json:"tool_calls,omitempty"`
+	ID                 string                `json:"id,omitempty"`
+	Role               string                `json:"role"`
+	Content            string                `json:"content"`
+	Timestamp          int64                 `json:"timestamp"`
+	FileOperations     []AppChatFileOpResp   `json:"file_operations,omitempty"`
+	ImageURLs          []string              `json:"image_urls,omitempty"`
+	SnapshotID         string                `json:"snapshot_id,omitempty"`
+	Suggestions        []string              `json:"suggestions,omitempty"`
+	ThinkingText       string                `json:"thinking_text,omitempty"`
+	ThinkingDurationMs int                   `json:"thinking_duration_ms,omitempty"`
+	ToolCalls          []AppChatToolCallResp `json:"tool_calls,omitempty"`
 }
 
 type AppChatToolCallResp struct {
@@ -132,14 +136,14 @@ type MissingEnvVarResponse struct {
 }
 
 type AppInitResponse struct {
-	Project        AppProjectDetailResponse  `json:"project"`
-	Conversation   *AppConversationResponse  `json:"conversation"`
-	Domains        []AppDomainResponse       `json:"domains"`
-	EnvVars        []EnvVarResponse          `json:"env_vars"`
-	MissingEnvVars []MissingEnvVarResponse   `json:"missing_env_vars"`
-	Integrations   []AppIntegrationResp      `json:"integrations"`
-	Deployment     *AppDeploymentResponse    `json:"deployment"`
-	SandboxID      string                    `json:"sandbox_id"`
+	Project        AppProjectDetailResponse `json:"project"`
+	Conversation   *AppConversationResponse `json:"conversation"`
+	Domains        []AppDomainResponse      `json:"domains"`
+	EnvVars        []EnvVarResponse         `json:"env_vars"`
+	MissingEnvVars []MissingEnvVarResponse  `json:"missing_env_vars"`
+	Integrations   []AppIntegrationResp     `json:"integrations"`
+	Deployment     *AppDeploymentResponse   `json:"deployment"`
+	SandboxID      string                   `json:"sandbox_id"`
 }
 
 type IntegrationProviderInfo struct {

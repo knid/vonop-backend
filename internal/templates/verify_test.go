@@ -39,8 +39,29 @@ func TestGetTemplateSmoke(t *testing.T) {
 	}
 }
 
+func TestGetViteTemplateSmoke(t *testing.T) {
+	checks := []struct {
+		path     string
+		contains string
+	}{
+		{"package.json", `"vite"`},
+		{"vite.config.ts", "defineConfig"},
+		{"src/lib/api.ts", "apiFetch"},
+		{"src/App.tsx", "Vite frontend"},
+		{".gitignore", "node_modules"},
+	}
+	for _, c := range checks {
+		content := GetViteTemplate(c.path)
+		if content == "" {
+			t.Errorf("GetViteTemplate(%q) returned empty", c.path)
+		} else if !strings.Contains(content, c.contains) {
+			t.Errorf("GetViteTemplate(%q) missing %q", c.path, c.contains)
+		}
+	}
+}
+
 func TestIsTemplateFile(t *testing.T) {
-	yes := []string{"package.json", "components/ecommerce/product-card.tsx", "lib/utils.ts", "components/ui/section.tsx"}
+	yes := []string{"package.json", "components/ecommerce/product-card.tsx", "lib/utils.ts", "components/ui/section.tsx", "frontend/src/lib/api.ts"}
 	for _, p := range yes {
 		if !IsTemplateFile(p) {
 			t.Errorf("IsTemplateFile(%q) should be true", p)

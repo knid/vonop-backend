@@ -164,17 +164,22 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 
 	var parts []string
 	isEcommerce := project.ProjectType == "ecommerce"
+	if project.UsesSplitWebRuntime() {
+		parts = append(parts, SplitWebAddendum)
+	}
 	if isEcommerce {
 		parts = append(parts, EcommerceAddendum)
 	}
 	if projectHasAuth(project) {
 		parts = append(parts, AuthAddendum)
 	}
-	if !isEcommerce && projectHasDatabase(project) {
+	if project.UsesSplitWebRuntime() && projectHasDatabase(project) {
+		parts = append(parts, DatabaseAddendumSplitWeb)
+	} else if !isEcommerce && projectHasDatabase(project) {
 		parts = append(parts, DatabaseAddendum)
 	}
 	if projectHasAI(project) {
-		parts = append(parts, buildAIAddendum(deps))
+		parts = append(parts, buildAIAddendum(deps, project))
 	}
 	if len(parts) == 0 {
 		return ""

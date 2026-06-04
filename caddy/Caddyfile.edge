@@ -16,12 +16,14 @@
 
     @host header_regexp host Host ^(?P<slug>[^.]+)\.wemob\.app$
     handle @host {
-        reverse_proxy https://wemob-{re.host.slug}.fly.dev {
-            header_up Host wemob-{re.host.slug}.fly.dev
-            header_up X-Forwarded-Host {host}
+        rewrite * /internal/edge/proxy?host={host}
+        reverse_proxy https://api.wemob.io {
+            header_up Host api.wemob.io
+            header_up X-Original-URI {http.request.orig_uri}
+            header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
             transport http {
                 tls
-                tls_server_name wemob-{re.host.slug}.fly.dev
+                tls_server_name api.wemob.io
             }
         }
     }
@@ -33,17 +35,14 @@
         on_demand
     }
 
-    reverse_proxy {
-        dynamic http {
-            url https://api.wemob.io/internal/edge/upstream?host={http.request.host}
-            header X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
-            cache_duration 5m
-        }
-
-        header_up Host {upstream_hostport}
+    rewrite * /internal/edge/proxy?host={host}
+    reverse_proxy https://api.wemob.io {
+        header_up Host api.wemob.io
+        header_up X-Original-URI {http.request.orig_uri}
+        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
         transport http {
             tls
-            tls_server_name {upstream_hostport}
+            tls_server_name api.wemob.io
         }
     }
 }

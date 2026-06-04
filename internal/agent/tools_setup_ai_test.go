@@ -138,6 +138,42 @@ func TestSetupAIGatewayTool_WebProjectKeepsRootPaths(t *testing.T) {
 	}
 }
 
+func TestSetupAIGatewayTool_SplitWebWritesBackendPaths(t *testing.T) {
+	rc, called := newSetupAITestContext(t, models.ProjectTypeApp)
+	rc.Project.FrontendRuntime = models.FrontendRuntimeViteReact
+	rc.Project.FrontendHosting = models.FrontendHostingS3CDN
+	rc.FileMap.Set("frontend/package.json", `{"name":"frontend","dependencies":{}}`)
+
+	tool := SetupAIGatewayTool{Deps: rc.Deps}
+	out, isErr, err := tool.Execute(context.Background(), rc, json.RawMessage(`{"purpose":"chatbot"}`))
+	if err != nil {
+		t.Fatalf("Execute returned infra error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("Execute returned tool error: %s", out)
+	}
+
+	if _, ok := rc.FileMap.Get("backend/lib/wemob-ai.ts"); !ok {
+		t.Error("expected backend/lib/wemob-ai.ts for split web")
+	}
+	if _, ok := rc.FileMap.Get("lib/wemob-ai.ts"); ok {
+		t.Error("split web must NOT write root lib/wemob-ai.ts")
+	}
+	if _, ok := rc.FileMap.Get("package.json"); ok {
+		t.Error("split web must NOT create root package.json")
+	}
+	pkg, ok := rc.FileMap.Get("backend/package.json")
+	if !ok || !strings.Contains(pkg, `"openai"`) {
+		t.Fatalf("expected backend/package.json with openai dep, got: %s", pkg)
+	}
+	if !strings.Contains(out, "frontend/") || !strings.Contains(out, "backend/app/api") {
+		t.Errorf("split web result should describe frontend→backend pattern, got first 500 chars: %s", out[:min(500, len(out))])
+	}
+	if !*called {
+		t.Error("EnableAI callback was not invoked")
+	}
+}
+
 func min(a, b int) int {
 	if a < b {
 		return a

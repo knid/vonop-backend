@@ -30,7 +30,21 @@ Dashboard-first app shell with role-specific work zones.
 
 ## Components
 Use Wemob UI primitives for buttons, cards, forms, empty states, and metrics.
-`
+	`
+
+func legacyWebProject() *models.AppProject {
+	return &models.AppProject{
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeNextJSLegacy,
+	}
+}
+
+func splitWebProject() *models.AppProject {
+	return &models.AppProject{
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeViteReact,
+	}
+}
 
 func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T) {
 	files := NewSafeFileMap(map[string]string{
@@ -39,7 +53,7 @@ func TestValidateGeneratedAppRejectsMarketingBrochureForSaaSRequest(t *testing.T
 		"DESIGN.md":      testDesignBrief,
 	})
 
-	err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp)
+	err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, legacyWebProject())
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -66,7 +80,7 @@ func TestValidateGeneratedAppAllowsOperationalSaaSShape(t *testing.T) {
 		"DESIGN.md": testDesignBrief,
 	})
 
-	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, models.ProjectTypeApp); err != nil {
+	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, legacyWebProject()); err != nil {
 		t.Fatalf("expected validation success, got: %v", err)
 	}
 }
@@ -77,7 +91,7 @@ func TestValidateGeneratedAppRejectsMissingDesignBrief(t *testing.T) {
 		"app/page.tsx":   "export default function Page(){ return <main>Product surface</main> }",
 	})
 
-	err := validateGeneratedApp(files, NewBuildState("build a web app", true), "build a web app", true, models.ProjectTypeApp)
+	err := validateGeneratedApp(files, NewBuildState("build a web app", true), "build a web app", true, legacyWebProject())
 	if err == nil {
 		t.Fatal("expected design brief validation error")
 	}
@@ -94,7 +108,7 @@ func TestValidateGeneratedAppAllowsMobileNativeShape(t *testing.T) {
 		"mobile/app/(auth)/sign-in.tsx": "export default function SignIn() { return null }",
 	})
 
-	if err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, models.ProjectTypeMobileAppNative); err != nil {
+	if err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, &models.AppProject{ProjectType: models.ProjectTypeMobileAppNative}); err != nil {
 		t.Fatalf("expected mobile validation success, got: %v", err)
 	}
 }
@@ -105,7 +119,7 @@ func TestValidateGeneratedAppRejectsMobileNativeMissingHome(t *testing.T) {
 		"mobile/app/_layout.tsx": "export default function Layout() { return null }",
 	})
 
-	err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, models.ProjectTypeMobileAppNative)
+	err := validateGeneratedApp(files, NewBuildState("mobile app", true), "mobile app", true, &models.AppProject{ProjectType: models.ProjectTypeMobileAppNative})
 	if err == nil {
 		t.Fatal("expected mobile validation error")
 	}
@@ -119,11 +133,45 @@ func TestValidateGeneratedAppRejectsImagePlaceholders(t *testing.T) {
 		"app/page.tsx": "const hero = '__IMG_HERO__'",
 	})
 
-	err := validateGeneratedApp(files, nil, "change image", false, models.ProjectTypeApp)
+	err := validateGeneratedApp(files, nil, "change image", false, legacyWebProject())
 	if err == nil {
 		t.Fatal("expected placeholder validation error")
 	}
 	if !strings.Contains(err.Error(), "app/page.tsx") {
 		t.Fatalf("expected path in error, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppAllowsSplitWebShape(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"frontend/package.json": `{"scripts":{"build":"vite build"}}`,
+		"frontend/src/App.tsx": `export default function App(){
+			return <main>
+				<section>Admin fleet dashboard for yacht owners</section>
+				<section>Captain assigned yacht interface and role access</section>
+				<form><input /><textarea /><button>Submit weekly entry</button></form>
+				<section>Log history with past chronological entries</section>
+				<section>Smart alert threshold battery service warning</section>
+			</main>
+		}`,
+		"DESIGN.md": testDesignBrief,
+	})
+
+	if err := validateGeneratedApp(files, NewBuildState(yachtSaaSPrompt, true), yachtSaaSPrompt, true, splitWebProject()); err != nil {
+		t.Fatalf("expected split web validation success, got: %v", err)
+	}
+}
+
+func TestValidateGeneratedAppRejectsSplitWebMissingFrontend(t *testing.T) {
+	files := NewSafeFileMap(map[string]string{
+		"DESIGN.md": testDesignBrief,
+	})
+
+	err := validateGeneratedApp(files, NewBuildState("build app", true), "build app", true, splitWebProject())
+	if err == nil {
+		t.Fatal("expected split web validation error")
+	}
+	if !strings.Contains(err.Error(), "frontend/package.json") {
+		t.Fatalf("expected missing frontend/package.json, got: %v", err)
 	}
 }

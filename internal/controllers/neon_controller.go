@@ -543,6 +543,10 @@ func (c *Controller) provisionDatabaseForAgent(ctx context.Context, project *mod
 		project.Settings = make(map[string]any)
 	}
 	project.Settings["has_database"] = true
+	if project.UsesSplitWebRuntime() || project.ProjectType == models.ProjectTypeMobileAppNative || project.FrontendRuntime == models.FrontendRuntimeNone {
+		project.BackendEnabled = true
+		project.BackendRuntime = models.BackendRuntimeNextJSAPI
+	}
 
 	if _, err := c.DB.UpdateAppProject(project); err != nil {
 		return fmt.Errorf("persist wemob db on project: %w", err)

@@ -294,6 +294,9 @@ func resolveRequiredSkillsFromCatalog(catalog SkillCatalog, profile *AgentProfil
 
 	selected := map[string]SkillFile{}
 	add := func(skill SkillFile) {
+		if project.UsesSplitWebRuntime() && skill.ID == "nextjs-app-router" {
+			return
+		}
 		if !skillCompatible(skill, profile, projectType) {
 			return
 		}

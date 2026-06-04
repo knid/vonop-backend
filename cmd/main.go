@@ -170,6 +170,29 @@ func createSchema(db *bun.DB) error {
 		`ALTER TABLE app_conversations ADD COLUMN IF NOT EXISTS summary text DEFAULT ''`,
 		// Data models for per-app Neon database provisioning
 		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS data_models jsonb DEFAULT '[]'`,
+		// Split web architecture capabilities. Existing rows default to the
+		// legacy root Next.js/Fly path; project creation explicitly sets Vite/S3
+		// for new non-ecommerce web apps.
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS frontend_runtime text NOT NULL DEFAULT 'nextjs_legacy'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS frontend_hosting text NOT NULL DEFAULT 'fly'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS backend_enabled boolean NOT NULL DEFAULT false`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS backend_runtime text NOT NULL DEFAULT 'none'`,
+		`UPDATE app_projects
+		 SET frontend_runtime = 'expo_native',
+		     frontend_hosting = 'codemagic'
+		 WHERE project_type = 'mobile_app_native'
+		   AND frontend_runtime = 'nextjs_legacy'
+		   AND frontend_hosting = 'fly'`,
+		`UPDATE app_projects
+		 SET frontend_runtime = 'nextjs_legacy',
+		     frontend_hosting = 'fly'
+		 WHERE project_type = 'ecommerce'
+		   AND (frontend_runtime = '' OR frontend_hosting = '')`,
+		`UPDATE app_projects
+		 SET backend_enabled = true,
+		     backend_runtime = 'nextjs_api'
+		 WHERE frontend_runtime = 'none'
+		   AND backend_enabled = false`,
 		// Partial streaming state (thinking text, chat text, tool calls, conversation buffer)
 		// for refresh recovery of in-flight generation jobs.
 		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS stream_state jsonb DEFAULT '{}'::jsonb`,
@@ -2407,6 +2430,7 @@ func main() {
 		r.Get("/internal/edge/cert-allowed", httpViews.HandleEdgeCertAllowed)
 		r.Route("/internal/edge", func(r chi.Router) {
 			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.HandleFunc("/proxy", httpViews.HandleEdgeProxy)
 			r.Get("/upstream", httpViews.HandleEdgeUpstream)
 		})
 

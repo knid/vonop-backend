@@ -88,16 +88,20 @@ func (v *HttpViews) CopyTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	utils.JSONResponse(w, responses.AppProjectResponse{
-		ID:          project.ID,
-		Name:        project.Name,
-		Slug:        project.Slug,
-		Prompt:      project.Prompt,
-		ProjectType: project.ProjectType,
-		Theme:       theme,
-		Settings:    project.Settings,
-		Status:      project.Status,
-		CreatedAt:   project.CreatedAt,
-		UpdatedAt:   project.UpdatedAt,
+		ID:              project.ID,
+		Name:            project.Name,
+		Slug:            project.Slug,
+		Prompt:          project.Prompt,
+		ProjectType:     project.ProjectType,
+		FrontendRuntime: project.FrontendRuntime,
+		FrontendHosting: project.FrontendHosting,
+		BackendEnabled:  project.BackendEnabled,
+		BackendRuntime:  project.BackendRuntime,
+		Theme:           theme,
+		Settings:        project.Settings,
+		Status:          project.Status,
+		CreatedAt:       project.CreatedAt,
+		UpdatedAt:       project.UpdatedAt,
 	}, http.StatusCreated)
 }
 
