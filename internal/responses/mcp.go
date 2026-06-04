@@ -7,14 +7,22 @@ import (
 )
 
 type MCPTemplateResponse struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	Description       string   `json:"description"`
-	Category          string   `json:"category"`
-	AuthType          string   `json:"auth_type"`
-	ServerURL         string   `json:"server_url,omitempty"`
-	RequiresServerURL bool     `json:"requires_server_url"`
-	Scopes            []string `json:"scopes,omitempty"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Description            string   `json:"description"`
+	Category               string   `json:"category"`
+	AuthType               string   `json:"auth_type"`
+	AuthTypes              []string `json:"auth_types,omitempty"`
+	ServerURL              string   `json:"server_url,omitempty"`
+	RequiresServerURL      bool     `json:"requires_server_url"`
+	Scopes                 []string `json:"scopes,omitempty"`
+	DocsURL                string   `json:"docs_url,omitempty"`
+	Icon                   string   `json:"icon,omitempty"`
+	Recommended            bool     `json:"recommended"`
+	SupportsOAuthDiscovery bool     `json:"supports_oauth_discovery"`
+	DefaultPolicy          string   `json:"default_policy,omitempty"`
+	APIKeyHeaderName       string   `json:"api_key_header_name,omitempty"`
+	APIKeyHeaderPrefix     string   `json:"api_key_header_prefix,omitempty"`
 }
 
 type MCPConnectionResponse struct {

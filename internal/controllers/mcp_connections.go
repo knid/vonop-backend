@@ -24,34 +24,262 @@ import (
 )
 
 type mcpTemplate struct {
-	ID                string
-	Name              string
-	Description       string
-	Category          string
-	AuthType          string
-	ServerURL         string
-	RequiresServerURL bool
-	Scopes            []string
+	ID                     string
+	Name                   string
+	Description            string
+	Category               string
+	AuthType               string
+	AuthTypes              []string
+	ServerURL              string
+	RequiresServerURL      bool
+	Scopes                 []string
+	DocsURL                string
+	Icon                   string
+	Recommended            bool
+	SupportsOAuthDiscovery bool
+	DefaultPolicy          string
+	APIKeyHeaderName       string
+	APIKeyHeaderPrefix     string
 }
 
 var mcpTemplates = []mcpTemplate{
 	{
-		ID:                "email_remote_oauth",
-		Name:              "Email MCP",
-		Description:       "Remote MCP server for project email workflows.",
-		Category:          "communication",
-		AuthType:          models.MCPAuthTypeOAuth,
-		RequiresServerURL: true,
-		Scopes:            []string{"email.read", "email.send"},
+		ID:                     "posthog",
+		Name:                   "PostHog",
+		Description:            "Product analytics, feature flags, recordings, errors, SQL, and LLM traces.",
+		Category:               "analytics",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.posthog.com/mcp",
+		DocsURL:                "https://posthog.com/docs/model-context-protocol",
+		Icon:                   "chart-no-axes-combined",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
 	},
 	{
-		ID:                "calendar_remote_oauth",
-		Name:              "Calendar MCP",
-		Description:       "Remote MCP server for scheduling and calendar workflows.",
-		Category:          "productivity",
-		AuthType:          models.MCPAuthTypeOAuth,
-		RequiresServerURL: true,
-		Scopes:            []string{"calendar.read", "calendar.write"},
+		ID:                     "betterstack",
+		Name:                   "Better Stack",
+		Description:            "Logs, uptime monitors, incidents, status pages, and observability workflows.",
+		Category:               "devops",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.betterstack.com",
+		DocsURL:                "https://betterstack.com/docs/getting-started/integrations/mcp/",
+		Icon:                   "activity",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "sentry",
+		Name:                   "Sentry",
+		Description:            "Issues, stack traces, releases, performance traces, and debugging context.",
+		Category:               "devops",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.sentry.dev/mcp",
+		DocsURL:                "https://github.com/getsentry/sentry-mcp",
+		Icon:                   "bug",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "linear",
+		Name:                   "Linear",
+		Description:            "Issues, projects, cycles, team planning, and product-management workflows.",
+		Category:               "project",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.linear.app/mcp",
+		DocsURL:                "https://linear.app/docs/mcp",
+		Icon:                   "list-checks",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "notion",
+		Name:                   "Notion",
+		Description:            "Pages, databases, docs, briefs, content plans, and team knowledge.",
+		Category:               "project",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.notion.com/mcp",
+		DocsURL:                "https://developers.notion.com/docs/get-started-with-mcp",
+		Icon:                   "notebook-tabs",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "github",
+		Name:                   "GitHub",
+		Description:            "Repositories, pull requests, issues, commits, and development workflows.",
+		Category:               "development",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://api.githubcopilot.com/mcp/",
+		DocsURL:                "https://github.com/github/github-mcp-server",
+		Icon:                   "github",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "vercel",
+		Name:                   "Vercel",
+		Description:            "Projects, deployments, logs, domains, and production app operations.",
+		Category:               "development",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.vercel.com",
+		DocsURL:                "https://vercel.com/docs/agent-resources/vercel-mcp",
+		Icon:                   "triangle",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "figma",
+		Name:                   "Figma",
+		Description:            "Design files, components, frames, design context, and UI implementation support.",
+		Category:               "design",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.figma.com/mcp",
+		DocsURL:                "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/",
+		Icon:                   "figma",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "neon",
+		Name:                   "Neon",
+		Description:            "Postgres projects, branches, databases, schema, and query workflows.",
+		Category:               "data",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.neon.tech/mcp",
+		DocsURL:                "https://neon.com/docs/ai/neon-mcp-server",
+		Icon:                   "database",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "supabase",
+		Name:                   "Supabase",
+		Description:            "Projects, Postgres, logs, edge functions, migrations, and database operations.",
+		Category:               "data",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.supabase.com/mcp",
+		DocsURL:                "https://supabase.com/docs/guides/ai-tools/mcp",
+		Icon:                   "database-zap",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "stripe",
+		Name:                   "Stripe",
+		Description:            "Payments, subscriptions, customers, invoices, and billing operations.",
+		Category:               "payments",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.stripe.com",
+		DocsURL:                "https://docs.stripe.com/mcp",
+		Icon:                   "credit-card",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "cloudflare",
+		Name:                   "Cloudflare",
+		Description:            "Workers, DNS, R2, Durable Objects, Pages, logs, and edge operations.",
+		Category:               "devops",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.cloudflare.com/mcp",
+		DocsURL:                "https://github.com/cloudflare/mcp",
+		Icon:                   "cloud",
+		Recommended:            true,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "atlassian",
+		Name:                   "Atlassian",
+		Description:            "Jira and Confluence issues, docs, project planning, and knowledge workflows.",
+		Category:               "project",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth, models.MCPAuthTypeAPIKey},
+		ServerURL:              "https://mcp.atlassian.com/v1/mcp/authv2",
+		DocsURL:                "https://support.atlassian.com/atlassian-rovo-mcp-server/docs/getting-started-with-the-atlassian-remote-mcp-server/",
+		Icon:                   "layers",
+		Recommended:            false,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+		APIKeyHeaderName:       "Authorization",
+		APIKeyHeaderPrefix:     "Bearer",
+	},
+	{
+		ID:                     "slack",
+		Name:                   "Slack",
+		Description:            "Channels, messages, threads, search, and team communication workflows.",
+		Category:               "communication",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		ServerURL:              "https://mcp.slack.com/mcp",
+		DocsURL:                "https://docs.slack.dev/ai/slack-mcp-server/",
+		Icon:                   "message-square",
+		Recommended:            false,
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "email_remote_oauth",
+		Name:                   "Email MCP",
+		Description:            "Remote MCP server for project email workflows.",
+		Category:               "communication",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		RequiresServerURL:      true,
+		Scopes:                 []string{"email.read", "email.send"},
+		Icon:                   "mail",
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
+	},
+	{
+		ID:                     "calendar_remote_oauth",
+		Name:                   "Calendar MCP",
+		Description:            "Remote MCP server for scheduling and calendar workflows.",
+		Category:               "productivity",
+		AuthType:               models.MCPAuthTypeOAuth,
+		AuthTypes:              []string{models.MCPAuthTypeOAuth},
+		RequiresServerURL:      true,
+		Scopes:                 []string{"calendar.read", "calendar.write"},
+		Icon:                   "calendar-days",
+		SupportsOAuthDiscovery: true,
+		DefaultPolicy:          models.MCPGrantPolicyAsk,
 	},
 }
 
@@ -59,14 +287,22 @@ func (c *Controller) ListMCPTemplates() []responses.MCPTemplateResponse {
 	resp := make([]responses.MCPTemplateResponse, 0, len(mcpTemplates))
 	for _, t := range mcpTemplates {
 		resp = append(resp, responses.MCPTemplateResponse{
-			ID:                t.ID,
-			Name:              t.Name,
-			Description:       t.Description,
-			Category:          t.Category,
-			AuthType:          t.AuthType,
-			ServerURL:         t.ServerURL,
-			RequiresServerURL: t.RequiresServerURL,
-			Scopes:            append([]string(nil), t.Scopes...),
+			ID:                     t.ID,
+			Name:                   t.Name,
+			Description:            t.Description,
+			Category:               t.Category,
+			AuthType:               t.AuthType,
+			AuthTypes:              append([]string(nil), t.AuthTypes...),
+			ServerURL:              t.ServerURL,
+			RequiresServerURL:      t.RequiresServerURL,
+			Scopes:                 append([]string(nil), t.Scopes...),
+			DocsURL:                t.DocsURL,
+			Icon:                   t.Icon,
+			Recommended:            t.Recommended,
+			SupportsOAuthDiscovery: t.SupportsOAuthDiscovery,
+			DefaultPolicy:          t.DefaultPolicy,
+			APIKeyHeaderName:       t.APIKeyHeaderName,
+			APIKeyHeaderPrefix:     t.APIKeyHeaderPrefix,
 		})
 	}
 	return resp
@@ -146,7 +382,7 @@ func (c *Controller) CreateMCPConnection(project *models.AppProject, req request
 	return c.DB.CreateMCPConnection(connection)
 }
 
-func (c *Controller) StartMCPOAuth(project *models.AppProject, req requests.StartMCPOAuthRequest) (*responses.MCPOAuthStartResponse, error) {
+func (c *Controller) StartMCPOAuth(ctx context.Context, project *models.AppProject, req requests.StartMCPOAuthRequest) (*responses.MCPOAuthStartResponse, error) {
 	returnURL, err := c.sanitizeMCPReturnURL(req.RedirectURL)
 	if err != nil {
 		return nil, err
@@ -173,7 +409,7 @@ func (c *Controller) StartMCPOAuth(project *models.AppProject, req requests.Star
 		return nil, fmt.Errorf("connection does not use oauth")
 	}
 
-	cfg, err := c.oauthConfigForConnection(connection)
+	cfg, err := c.prepareMCPOAuthConfig(ctx, connection)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +433,7 @@ func (c *Controller) StartMCPOAuth(project *models.AppProject, req requests.Star
 		state,
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
+		oauth2.SetAuthURLParam("resource", mcpOAuthResourceForConnection(connection)),
 	)
 	resp := c.mcpConnectionResponse(*connection, nil)
 	return &responses.MCPOAuthStartResponse{Connection: resp, AuthURL: authURL}, nil
@@ -219,7 +456,12 @@ func (c *Controller) CompleteMCPOAuthCallback(ctx context.Context, state, code s
 	if err != nil {
 		return "", err
 	}
-	token, err := cfg.Exchange(mcpOAuthHTTPContext(ctx), code, oauth2.SetAuthURLParam("code_verifier", verifier))
+	token, err := cfg.Exchange(
+		mcpOAuthHTTPContext(ctx),
+		code,
+		oauth2.SetAuthURLParam("code_verifier", verifier),
+		oauth2.SetAuthURLParam("resource", mcpOAuthResourceForConnection(connection)),
+	)
 	if err != nil {
 		connection.Status = models.MCPConnectionStatusError
 		connection.LastError = "oauth token exchange failed"
@@ -227,11 +469,19 @@ func (c *Controller) CompleteMCPOAuthCallback(ctx context.Context, state, code s
 		return "", err
 	}
 
-	creds := map[string]any{
-		"access_token":  token.AccessToken,
-		"token_type":    token.TokenType,
-		"refresh_token": token.RefreshToken,
-		"expiry":        token.Expiry.Unix(),
+	creds, err := c.decryptMCPCredentials(connection)
+	if err != nil {
+		return "", err
+	}
+	creds["access_token"] = token.AccessToken
+	if token.TokenType != "" {
+		creds["token_type"] = token.TokenType
+	}
+	if token.RefreshToken != "" {
+		creds["refresh_token"] = token.RefreshToken
+	}
+	if !token.Expiry.IsZero() {
+		creds["expiry"] = token.Expiry.Unix()
 	}
 	enc, err := c.encryptMCPCredentials(creds)
 	if err != nil {
@@ -733,22 +983,24 @@ func (c *Controller) oauthTokenForConnection(ctx context.Context, connection *mo
 	if err != nil {
 		return accessToken, nil
 	}
-	tok := &oauth2.Token{
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		Expiry:       time.Unix(expiryUnix, 0),
-	}
-	fresh, err := cfg.TokenSource(mcpOAuthHTTPContext(ctx), tok).Token()
+	fresh, err := refreshMCPOAuthToken(mcpOAuthHTTPContext(ctx), cfg, refreshToken, mcpOAuthResourceForConnection(connection))
 	if err != nil {
 		return accessToken, nil
 	}
-	updated := map[string]any{
-		"access_token":  fresh.AccessToken,
-		"token_type":    fresh.TokenType,
-		"refresh_token": fresh.RefreshToken,
-		"expiry":        fresh.Expiry.Unix(),
+	if fresh.AccessToken == "" {
+		return accessToken, nil
 	}
-	enc, err := c.encryptMCPCredentials(updated)
+	creds["access_token"] = fresh.AccessToken
+	if fresh.TokenType != "" {
+		creds["token_type"] = fresh.TokenType
+	}
+	if fresh.RefreshToken != "" {
+		creds["refresh_token"] = fresh.RefreshToken
+	}
+	if !fresh.Expiry.IsZero() {
+		creds["expiry"] = fresh.Expiry.Unix()
+	}
+	enc, err := c.encryptMCPCredentials(creds)
 	if err == nil {
 		connection.CredentialData = enc
 		_, _ = c.DB.UpdateMCPConnection(connection)
@@ -790,6 +1042,22 @@ func (c *Controller) oauthConfigForConnection(connection *models.MCPConnection) 
 		RedirectURL: c.mcpOAuthRedirectURL(),
 		Scopes:      scopes,
 	}, nil
+}
+
+func mcpOAuthResourceForConnection(connection *models.MCPConnection) string {
+	if connection == nil {
+		return ""
+	}
+	if connection.Config != nil {
+		if resource, _ := connection.Config["oauth_resource"].(string); strings.TrimSpace(resource) != "" {
+			return strings.TrimSpace(resource)
+		}
+	}
+	resource, err := mcpCanonicalResourceURI(connection.ServerURL)
+	if err != nil {
+		return connection.ServerURL
+	}
+	return resource
 }
 
 func (c *Controller) mcpOAuthRedirectURL() string {
