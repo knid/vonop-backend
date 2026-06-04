@@ -104,6 +104,10 @@ func (v *HttpViews) HandleEdgeProxy(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, "bad_request", http.StatusBadRequest, nil)
 		return
 	}
+	if !isAllowedEdgeProxyHost(host) {
+		utils.JSONErrorCode(w, "not_found", http.StatusNotFound, nil)
+		return
+	}
 	originalURI := r.Header.Get("X-Original-URI")
 	if originalURI == "" {
 		originalURI = "/"
@@ -146,6 +150,23 @@ func (v *HttpViews) HandleEdgeProxy(w http.ResponseWriter, r *http.Request) {
 		flyAppName = "wemob-" + project.Slug
 	}
 	proxyToFly(w, r, flyAppName, parsedURI, host)
+}
+
+func isAllowedEdgeProxyHost(host string) bool {
+	if strings.HasSuffix(host, ".wemob.app") {
+		slug := strings.TrimSuffix(host, ".wemob.app")
+		return slug != "" &&
+			slug != "api" &&
+			slug != "www" &&
+			!strings.Contains(slug, ".")
+	}
+	return host != "" &&
+		host != "wemob.app" &&
+		host != "wemob.io" &&
+		!strings.HasSuffix(host, ".wemob.io") &&
+		!strings.HasSuffix(host, ".preview.wemob.app") &&
+		!strings.HasSuffix(host, ".e2b.app") &&
+		!strings.HasSuffix(host, ".fly.dev")
 }
 
 func normalizeEdgeHost(host string) string {

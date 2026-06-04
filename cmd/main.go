@@ -2429,9 +2429,11 @@ func main() {
 		// public access is acceptable here.
 		r.Get("/internal/edge/cert-allowed", httpViews.HandleEdgeCertAllowed)
 		r.Route("/internal/edge", func(r chi.Router) {
-			r.Use(appMiddleware.InternalOnly(edgeToken))
 			r.HandleFunc("/proxy", httpViews.HandleEdgeProxy)
-			r.Get("/upstream", httpViews.HandleEdgeUpstream)
+			r.Group(func(r chi.Router) {
+				r.Use(appMiddleware.InternalOnly(edgeToken))
+				r.Get("/upstream", httpViews.HandleEdgeUpstream)
+			})
 		})
 
 		r.Route("/internal/health", func(r chi.Router) {
