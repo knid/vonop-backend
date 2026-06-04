@@ -39,3 +39,29 @@ func TestStaticCDNBaseURL(t *testing.T) {
 		t.Fatalf("staticCDNBaseURL() = %q", got)
 	}
 }
+
+func TestIsAllowedEdgeProxyHost(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"graphic-designer-portfolio-9gqlg.wemob.app", true},
+		{"customer.example.com", true},
+		{"api.wemob.io", false},
+		{"api.wemob.app", false},
+		{"www.wemob.app", false},
+		{"wemob.app", false},
+		{"3000-sandbox.preview.wemob.app", false},
+		{"3000-sandbox.e2b.app", false},
+		{"wemob-app.fly.dev", false},
+		{"", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			if got := isAllowedEdgeProxyHost(tc.host); got != tc.want {
+				t.Fatalf("isAllowedEdgeProxyHost(%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+}
