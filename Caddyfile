@@ -15,7 +15,7 @@
     # On-demand TLS for custom user domains (file-imported below). Caddy
     # asks the api backend before issuing each Let's Encrypt cert.
     on_demand_tls {
-        ask https://api.wemob.io/internal/edge/cert-allowed
+        ask http://api:8001/internal/edge/cert-allowed
     }
 }
 
@@ -126,25 +126,18 @@ mcp.wemob.io {
     }
 }
 
-# Wemob user apps deployed on Fly Machines.
-# {slug}.wemob.app → wemob-{slug}.fly.dev via Fly's published A records.
+# Wemob user apps. The backend edge handler serves split-web static assets
+# from S3/CDN and proxies legacy/API traffic to Fly as needed.
 *.wemob.app {
     tls {
         dns cloudflare {env.CF_API_TOKEN}
     }
 
-    reverse_proxy {
-        # versions ipv4: see preview block above.
-        dynamic a {
-            name wemob-{http.request.host.labels.2}.fly.dev
-            port 443
-            versions ipv4
-        }
-        transport http {
-            tls
-            tls_server_name wemob-{http.request.host.labels.2}.fly.dev
-        }
-        header_up Host wemob-{http.request.host.labels.2}.fly.dev
+    rewrite * /internal/edge/proxy?host={host}
+    reverse_proxy api:8001 {
+        header_up Host api.wemob.io
+        header_up X-Original-URI {http.request.orig_uri}
+        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
     }
 
     log {
@@ -153,6 +146,23 @@ mcp.wemob.io {
     }
 }
 
-# Custom domains: each verified domain is a separate file written by the api
-# backend. Caddy reloads when /load is hit by the backend after a write.
-import /etc/caddy/custom-domains/*.caddy
+# Verified custom domains use the same backend edge handler. On-demand TLS asks
+# the API before issuing a certificate, so unverified domains are rejected
+# before this catch-all route serves traffic.
+:443 {
+    tls {
+        on_demand
+    }
+
+    rewrite * /internal/edge/proxy?host={host}
+    reverse_proxy api:8001 {
+        header_up Host api.wemob.io
+        header_up X-Original-URI {http.request.orig_uri}
+        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+    }
+
+    log {
+        output file /var/log/caddy/custom_domain_access.log
+        format console
+    }
+}
