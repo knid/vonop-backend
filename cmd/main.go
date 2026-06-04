@@ -71,6 +71,11 @@ func createSchema(db *bun.DB) error {
 		(*models.AppProject)(nil),
 		(*models.AppDeployment)(nil),
 		(*models.AppIntegration)(nil),
+		(*models.MCPConnection)(nil),
+		(*models.MCPConnectionTool)(nil),
+		(*models.AgentMCPGrant)(nil),
+		(*models.MCPToolApproval)(nil),
+		(*models.AgentMCPToolCall)(nil),
 		(*models.AppConversation)(nil),
 		// Agent rewrite: chat messages + agent run tracking
 		(*models.AppChatMessage)(nil),
@@ -860,6 +865,24 @@ END $$`,
 	for _, stmt := range shipMarkersMigrations {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Warn("ship markers migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// MCP project connections landed after the main canary had already passed
+	// on production DBs. Keep these uniqueness guarantees outside
+	// alterStatements so upserts work on already-migrated schemas.
+	mcpSchemaMigrations := []string{
+		`ALTER TABLE IF EXISTS mcp_connections DROP CONSTRAINT IF EXISTS mcp_connections_project_slug`,
+		`DROP INDEX IF EXISTS mcp_connections_project_slug`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS mcp_connections_project_slug ON mcp_connections (app_project_id, slug) WHERE deleted_at IS NULL`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS mcp_connection_tools_connection_name ON mcp_connection_tools (connection_id, name)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS agent_mcp_grants_project_agent_connection ON agent_mcp_grants (app_project_id, agent_id, mcp_connection_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_mcp_tool_approvals_job ON mcp_tool_approvals (generation_job_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_mcp_tool_calls_job ON agent_mcp_tool_calls (generation_job_id, created_at DESC)`,
+	}
+	for _, stmt := range mcpSchemaMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("mcp schema migration skipped", "statement", stmt, "error", err)
 		}
 	}
 
@@ -1920,6 +1943,9 @@ func main() {
 			})
 
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
+			r.Get("/mcp/templates", httpViews.GetMCPTemplates)
+			r.Get("/mcp/oauth/callback", httpViews.CompleteMCPOAuthCallback)
+			r.Get("/orgs/{orgId}/agents/mcp-grants", httpViews.GetOrgAgentMCPGrants)
 
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
@@ -1973,6 +1999,7 @@ func main() {
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
+				r.Post("/jobs/{jobId}/approvals/{approvalId}", httpViews.SubmitMCPToolApproval)
 
 				r.Get("/", httpViews.GetApps)
 				r.Post("/", httpViews.CreateApp)
@@ -2010,6 +2037,19 @@ func main() {
 							r.Put("/", httpViews.UpdateAppIntegration)
 							r.Delete("/", httpViews.DisconnectAppIntegration)
 						})
+					})
+
+					// Project-scoped MCP connections and per-agent grants
+					r.Route("/mcp", func(r chi.Router) {
+						r.Get("/connections", httpViews.GetAppMCPConnections)
+						r.Post("/connections", httpViews.CreateAppMCPConnection)
+						r.Post("/connections/oauth/start", httpViews.StartAppMCPOAuth)
+						r.Route("/connections/{connectionId}", func(r chi.Router) {
+							r.Post("/discover", httpViews.DiscoverAppMCPConnection)
+							r.Delete("/", httpViews.DeleteAppMCPConnection)
+						})
+						r.Get("/grants", httpViews.GetAppMCPGrants)
+						r.Put("/grants/{agentId}/{connectionId}", httpViews.PutAppMCPGrant)
 					})
 
 					// Custom environment variables

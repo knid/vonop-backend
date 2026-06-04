@@ -131,6 +131,7 @@ func buildWebBuilderRegistry(project *models.AppProject, deps *RunDependencies, 
 	if project != nil && project.ProjectType == "ecommerce" {
 		r.Register(SetupStoreTool{Deps: deps})
 	}
+	registerMCPTools(r, project, deps)
 	return r
 }
 
@@ -151,6 +152,7 @@ func buildMobileBuilderRegistry(project *models.AppProject, deps *RunDependencie
 		r.Register(&ReadDeployLogsTool{Deps: deps})
 		r.Register(&TriggerWebDeployTool{Deps: deps})
 	}
+	registerMCPTools(r, project, deps)
 	return r
 }
 
@@ -190,6 +192,33 @@ func registerDataAndAITools(r *Registry, deps *RunDependencies) {
 	// AI gateway setup is registered unconditionally so the model can opt into
 	// AI on demand. The addendum only injects after setup has persisted.
 	r.Register(SetupAIGatewayTool{Deps: deps})
+}
+
+func registerMCPTools(r *Registry, project *models.AppProject, deps *RunDependencies) {
+	if r == nil || project == nil || deps == nil || deps.ListMCPTools == nil {
+		return
+	}
+	agentID := defaultAgentIDForProject(project)
+	if agentID == "" {
+		return
+	}
+	tools, err := deps.ListMCPTools(project.ID.String(), agentID)
+	if err != nil {
+		return
+	}
+	for _, tool := range tools {
+		if tool.PrefixedName == "" || tool.ToolName == "" || tool.ConnectionID == "" {
+			continue
+		}
+		r.Register(MCPToolExecutor{Tool: tool})
+	}
+}
+
+func defaultAgentIDForProject(project *models.AppProject) string {
+	if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
+		return "mobile-builder"
+	}
+	return "web-builder"
 }
 
 // projectHasDatabase returns true if the project has a connected database

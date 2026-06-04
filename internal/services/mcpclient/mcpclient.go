@@ -15,17 +15,26 @@ import (
 
 // ServerConfig describes a single MCP server to connect to.
 type ServerConfig struct {
-	Name           string            `json:"name"`
-	URL            string            `json:"url"`
-	Headers        map[string]string `json:"headers"`
-	Enabled        bool              `json:"enabled"`
-	TimeoutSeconds int               `json:"timeout_seconds"`
-	ToolPrefix     string            `json:"tool_prefix"`
+	Name            string            `json:"name"`
+	URL             string            `json:"url"`
+	Headers         map[string]string `json:"headers"`
+	Enabled         bool              `json:"enabled"`
+	TimeoutSeconds  int               `json:"timeout_seconds"`
+	ToolPrefix      string            `json:"tool_prefix"`
+	RestrictNetwork bool              `json:"restrict_network"`
 }
 
 // Config is the top-level configuration parsed from the MCP_SERVERS_CONFIG secret.
 type Config struct {
 	Servers []ServerConfig `json:"servers"`
+}
+
+type DiscoveredTool struct {
+	Name        string         `json:"name"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
+	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
 type serverConnection struct {
@@ -45,6 +54,97 @@ type Service struct {
 	tools       []toolEntry
 }
 
+func DiscoverTools(ctx context.Context, sc ServerConfig) ([]DiscoveredTool, error) {
+	session, err := connectSession(ctx, sc)
+	if err != nil {
+		return nil, err
+	}
+	defer session.Close()
+
+	var result []DiscoveredTool
+	for tool, err := range session.Tools(ctx, nil) {
+		if err != nil {
+			return result, err
+		}
+		inputSchema := make(map[string]any)
+		if tool.InputSchema != nil {
+			if data, err := json.Marshal(tool.InputSchema); err == nil {
+				_ = json.Unmarshal(data, &inputSchema)
+			}
+		}
+		annotations := make(map[string]any)
+		if tool.Annotations != nil {
+			if data, err := json.Marshal(tool.Annotations); err == nil {
+				_ = json.Unmarshal(data, &annotations)
+			}
+		}
+		result = append(result, DiscoveredTool{
+			Name:        tool.Name,
+			Title:       tool.Title,
+			Description: tool.Description,
+			InputSchema: inputSchema,
+			Annotations: annotations,
+		})
+	}
+	return result, nil
+}
+
+func CallTool(ctx context.Context, sc ServerConfig, toolName string, argumentsJSON string) (string, error) {
+	var args map[string]any
+	if argumentsJSON != "" {
+		if err := json.Unmarshal([]byte(argumentsJSON), &args); err != nil {
+			return fmt.Sprintf("Failed to parse arguments for %s: %v", toolName, err), err
+		}
+	}
+
+	session, err := connectSession(ctx, sc)
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      toolName,
+		Arguments: args,
+	})
+	if err != nil {
+		return fmt.Sprintf("Tool %s is currently unavailable: %v", toolName, err), err
+	}
+
+	return stringifyToolResult(toolName, result), nil
+}
+
+func connectSession(ctx context.Context, sc ServerConfig) (*mcp.ClientSession, error) {
+	timeout := time.Duration(sc.TimeoutSeconds) * time.Second
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	connCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	transport := &mcp.StreamableClientTransport{Endpoint: sc.URL}
+	if sc.RestrictNetwork {
+		transport.HTTPClient = NewSafeHTTPClient(sc.Headers, timeout)
+	} else if len(sc.Headers) > 0 {
+		transport.HTTPClient = &http.Client{
+			Transport: &headerTransport{
+				base:    http.DefaultTransport,
+				headers: sc.Headers,
+			},
+		}
+	}
+
+	client := mcp.NewClient(&mcp.Implementation{
+		Name:    "wemob-backend",
+		Version: "1.0.0",
+	}, nil)
+	session, err := client.Connect(connCtx, transport, nil)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
 // NewService parses configJSON, connects to each enabled server, discovers tools,
 // and returns a ready-to-use Service. Failed servers are logged and skipped.
 func NewService(ctx context.Context, configJSON string) (*Service, error) {
@@ -62,34 +162,7 @@ func NewService(ctx context.Context, configJSON string) (*Service, error) {
 			continue
 		}
 
-		timeout := time.Duration(sc.TimeoutSeconds) * time.Second
-		if timeout == 0 {
-			timeout = 30 * time.Second
-		}
-
-		connCtx, cancel := context.WithTimeout(ctx, timeout)
-
-		transport := &mcp.StreamableClientTransport{
-			Endpoint: sc.URL,
-		}
-
-		// Add custom headers via HTTP client if configured
-		if len(sc.Headers) > 0 {
-			transport.HTTPClient = &http.Client{
-				Transport: &headerTransport{
-					base:    http.DefaultTransport,
-					headers: sc.Headers,
-				},
-			}
-		}
-
-		client := mcp.NewClient(&mcp.Implementation{
-			Name:    "wemob-backend",
-			Version: "1.0.0",
-		}, nil)
-		session, err := client.Connect(connCtx, transport, nil)
-		cancel()
-
+		session, err := connectSession(ctx, sc)
 		if err != nil {
 			msg := fmt.Sprintf("failed to connect to MCP server %q: %v", sc.Name, err)
 			slog.Warn(msg)
@@ -235,29 +308,29 @@ func (s *Service) callTool(prefixedName string, argumentsJSON string) (string, e
 		return fmt.Sprintf("Tool %s is currently unavailable: %v", prefixedName, err), nil
 	}
 
-	if result.IsError {
-		var errTexts []string
-		for _, c := range result.Content {
-			if tc, ok := c.(*mcp.TextContent); ok {
-				errTexts = append(errTexts, tc.Text)
-			}
-		}
-		if len(errTexts) > 0 {
-			return fmt.Sprintf("Tool %s returned an error: %s", prefixedName, strings.Join(errTexts, "\n")), nil
-		}
-		return fmt.Sprintf("Tool %s returned an error", prefixedName), nil
-	}
+	return stringifyToolResult(prefixedName, result), nil
+}
 
+func stringifyToolResult(toolName string, result *mcp.CallToolResult) string {
+	if result == nil {
+		return "Tool returned no result"
+	}
 	var texts []string
 	for _, c := range result.Content {
 		if tc, ok := c.(*mcp.TextContent); ok {
 			texts = append(texts, tc.Text)
 		}
 	}
-	if len(texts) == 0 {
-		return "Tool returned no text content", nil
+	if result.IsError {
+		if len(texts) > 0 {
+			return fmt.Sprintf("Tool %s returned an error: %s", toolName, strings.Join(texts, "\n"))
+		}
+		return fmt.Sprintf("Tool %s returned an error", toolName)
 	}
-	return strings.Join(texts, "\n"), nil
+	if len(texts) == 0 {
+		return "Tool returned no text content"
+	}
+	return strings.Join(texts, "\n")
 }
 
 // headerTransport wraps an http.RoundTripper to inject custom headers.

@@ -77,6 +77,26 @@ type ToolCallResultEvent struct {
 	IsError    bool      `json:"is_error"`
 }
 
+type ToolApprovalRequiredEvent struct {
+	RunID        uuid.UUID       `json:"run_id"`
+	ApprovalID   string          `json:"approval_id"`
+	ToolCallID   string          `json:"tool_call_id,omitempty"`
+	ToolName     string          `json:"tool_name"`
+	ConnectionID string          `json:"connection_id"`
+	RiskLevel    string          `json:"risk_level"`
+	InputPreview json.RawMessage `json:"input_preview,omitempty"`
+	ExpiresAt    int64           `json:"expires_at"`
+}
+
+type ToolApprovalResolvedEvent struct {
+	RunID        uuid.UUID `json:"run_id"`
+	ApprovalID   string    `json:"approval_id"`
+	ToolName     string    `json:"tool_name"`
+	ConnectionID string    `json:"connection_id"`
+	Status       string    `json:"status"`
+	Approved     bool      `json:"approved"`
+}
+
 type SkillLoadedEvent struct {
 	RunID    uuid.UUID `json:"run_id"`
 	SkillID  string    `json:"skill_id"`
@@ -165,20 +185,22 @@ type DoneEvent struct {
 
 // Event type constants — single source of truth for event names.
 const (
-	EventRunStart       = "run_start"
-	EventTurnStart      = "turn_start"
-	EventNarration      = "narration"
-	EventToolCallStart  = "tool_call_start"
-	EventToolCallResult = "tool_call_result"
-	EventSkillLoaded    = "skill_loaded"
-	EventFileWritten    = "file_written"
-	EventFileDeleted    = "file_deleted"
-	EventTurnEnd        = "turn_end"
-	EventCreditsUpdate  = "credits_update"
-	EventTodoSnapshot   = "todo_snapshot"
-	EventCheckpoint     = "checkpoint"
-	EventError          = "error"
-	EventDone           = "done"
+	EventRunStart             = "run_start"
+	EventTurnStart            = "turn_start"
+	EventNarration            = "narration"
+	EventToolCallStart        = "tool_call_start"
+	EventToolCallResult       = "tool_call_result"
+	EventToolApprovalRequired = "tool_approval_required"
+	EventToolApprovalResolved = "tool_approval_resolved"
+	EventSkillLoaded          = "skill_loaded"
+	EventFileWritten          = "file_written"
+	EventFileDeleted          = "file_deleted"
+	EventTurnEnd              = "turn_end"
+	EventCreditsUpdate        = "credits_update"
+	EventTodoSnapshot         = "todo_snapshot"
+	EventCheckpoint           = "checkpoint"
+	EventError                = "error"
+	EventDone                 = "done"
 )
 
 // The SSE-backed emitter lives in internal/views/agent_bridge.go as
