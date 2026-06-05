@@ -12,6 +12,47 @@ type SSEEvent struct {
 	Data  any    `json:"data"`
 }
 
+const EventUIMessagePart = "ui_message_part"
+
+// UIMessagePartEvent is an additive, normalized stream contract for chat UIs.
+// Legacy agent events still stream unchanged; clients that render AI SDK /
+// AI Elements-style messages can consume this event instead of rebuilding
+// custom timeline cards from Wemob-specific event vocabulary.
+type UIMessagePartEvent struct {
+	RunID       string        `json:"run_id,omitempty"`
+	SourceEvent string        `json:"source_event,omitempty"`
+	Part        UIMessagePart `json:"part"`
+}
+
+// UIMessagePart intentionally mirrors the useful subset of AI SDK UI message
+// parts without importing frontend packages into the backend. Tool states use
+// the AI Elements vocabulary: input-available, output-available, output-error,
+// approval-requested, and approval-responded.
+type UIMessagePart struct {
+	Type string `json:"type"`
+
+	// type=text-delta
+	Text string `json:"text,omitempty"`
+
+	// type=tool
+	ToolCallID string `json:"tool_call_id,omitempty"`
+	ToolName   string `json:"tool_name,omitempty"`
+	State      string `json:"state,omitempty"`
+	Input      any    `json:"input,omitempty"`
+	Output     any    `json:"output,omitempty"`
+	ErrorText  string `json:"error_text,omitempty"`
+	DurationMs int    `json:"duration_ms,omitempty"`
+	RiskLevel  string `json:"risk_level,omitempty"`
+
+	// type=tool-approval
+	ApprovalID   string `json:"approval_id,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"`
+	Approved     *bool  `json:"approved,omitempty"`
+
+	// type=plan
+	Todos any `json:"todos,omitempty"`
+}
+
 type GenerationErrorEvent struct {
 	Error string `json:"error"`
 	Phase string `json:"phase"`
@@ -57,11 +98,11 @@ type ToolCallEvent struct {
 // a string result from its executor; the frontend uses `tool` to pick a
 // renderer and falls back to a monospace preview if no match exists.
 type ToolResultEvent struct {
-	Tool     string `json:"tool"`
-	Status   string `json:"status"`             // "ok" or "error"
-	Preview  string `json:"preview,omitempty"`  // Truncated human-readable result (≤ 600 chars)
-	Summary  string `json:"summary,omitempty"`  // One-line TL;DR suitable for a collapsed card
-	IsError  bool   `json:"is_error,omitempty"` // Legacy convenience flag — duplicates Status == "error"
+	Tool    string `json:"tool"`
+	Status  string `json:"status"`             // "ok" or "error"
+	Preview string `json:"preview,omitempty"`  // Truncated human-readable result (≤ 600 chars)
+	Summary string `json:"summary,omitempty"`  // One-line TL;DR suitable for a collapsed card
+	IsError bool   `json:"is_error,omitempty"` // Legacy convenience flag — duplicates Status == "error"
 }
 
 // CreditsUpdateEvent is emitted periodically during a chat turn so the client
@@ -101,4 +142,3 @@ type AutoFixEvent struct {
 	FixTypes   []string `json:"fix_types"` // e.g. ["ts_to_tsx", "use_client", "import_mismatch"]
 	Paths      []string `json:"paths"`     // paths of fixed files
 }
-
