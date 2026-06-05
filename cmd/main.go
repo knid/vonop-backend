@@ -1966,9 +1966,6 @@ func main() {
 			})
 
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
-			r.Get("/mcp/templates", httpViews.GetMCPTemplates)
-			r.Get("/mcp/oauth/callback", httpViews.CompleteMCPOAuthCallback)
-			r.Get("/orgs/{orgId}/agents/mcp-grants", httpViews.GetOrgAgentMCPGrants)
 
 			r.Route("/mobile/{projectId}", func(r chi.Router) {
 				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
@@ -2009,6 +2006,13 @@ func main() {
 				r.Get("/", httpViews.ListPublishedTemplates)
 				r.Get("/{slug}", httpViews.GetPublishedTemplate)
 			})
+
+			// Project MCP catalog and OAuth callback. The handlers perform
+			// their own auth checks where needed; the callback is public
+			// because the OAuth state/code are the authenticators.
+			r.Get("/mcp/templates", httpViews.GetMCPTemplates)
+			r.Get("/mcp/oauth/callback", httpViews.CompleteMCPOAuthCallback)
+			r.Get("/orgs/{orgId}/agents/mcp-grants", httpViews.GetOrgAgentMCPGrants)
 
 			// Template copy (requires auth + subscription)
 			r.With(appMiddleware.RequireAuth(controller), appMiddleware.RequireSubscription(controller, "active", "trial", "free")).
