@@ -173,5 +173,12 @@ jobs:
               sleep 2
             done
 
+            mcp_status="$(curl -sS -o /dev/null -w "%{http_code}" --resolve api.wemob.io:443:127.0.0.1 https://api.wemob.io/v2/mcp/templates || true)"
+            if [ "$mcp_status" != "401" ]; then
+              echo "MCP templates route smoke failed: expected 401 without auth, got $mcp_status" >&2
+              docker compose logs --tail=80 api caddy
+              exit 1
+            fi
+
             docker image prune -f --filter "until=24h"
             docker logout ghcr.io
