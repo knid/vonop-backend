@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -909,14 +910,51 @@ func (c *Controller) encryptMCPCredentials(creds map[string]any) ([]byte, error)
 }
 
 func (c *Controller) decryptMCPCredentials(connection *models.MCPConnection) (map[string]any, error) {
-	var creds map[string]any
 	if connection == nil || len(connection.CredentialData) == 0 {
 		return map[string]any{}, nil
 	}
-	if err := json.Unmarshal(connection.CredentialData, &creds); err != nil {
+	creds, err := decodeMCPCredentialData(connection.CredentialData)
+	if err != nil {
 		return nil, err
 	}
 	return utils.DecryptIntegrationMapAny(creds, c.integrationCredentialsKey()), nil
+}
+
+func decodeMCPCredentialData(raw []byte) (map[string]any, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return map[string]any{}, nil
+	}
+	var creds map[string]any
+	if err := json.Unmarshal(trimmed, &creds); err == nil {
+		if creds == nil {
+			return map[string]any{}, nil
+		}
+		return creds, nil
+	}
+
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err != nil {
+		return nil, err
+	}
+	encoded = strings.TrimSpace(encoded)
+	if encoded == "" {
+		return map[string]any{}, nil
+	}
+	candidates := [][]byte{[]byte(encoded)}
+	if decoded, err := base64.StdEncoding.DecodeString(encoded); err == nil {
+		candidates = append(candidates, decoded)
+	}
+	for _, candidate := range candidates {
+		var nested map[string]any
+		if err := json.Unmarshal(bytes.TrimSpace(candidate), &nested); err == nil {
+			if nested == nil {
+				return map[string]any{}, nil
+			}
+			return nested, nil
+		}
+	}
+	return nil, fmt.Errorf("credential_data must be a JSON object")
 }
 
 func (c *Controller) mcpHeadersForConnection(ctx context.Context, connection *models.MCPConnection) (map[string]string, error) {
