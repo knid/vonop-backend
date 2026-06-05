@@ -33,23 +33,23 @@ const (
 )
 
 type MCPConnection struct {
-	ID                     uuid.UUID      `bun:",pk,type:uuid,default:uuid_generate_v4()"`
-	AppProjectID           uuid.UUID      `bun:",notnull,type:uuid,unique:mcp_connections_project_slug"`
-	AppProject             *AppProject    `bun:"rel:belongs-to,join:app_project_id=id"`
-	Name                   string         `bun:",notnull"`
-	Slug                   string         `bun:",notnull,unique:mcp_connections_project_slug"`
-	TemplateID             string         `bun:",notnull,default:''"`
-	AuthType               string         `bun:",notnull,default:'api_key'"`
-	ServerURL              string         `bun:",notnull"`
-	Status                 string         `bun:",notnull,default:'pending_auth'"`
-	Config                 map[string]any `bun:",type:jsonb,default:'{}'"`
-	CredentialData         []byte         `bun:"credential_data,type:jsonb,default:'{}'"`
-	CredentialsEncryptedV1 bool           `bun:",notnull,default:false"`
-	LastDiscoveredAt       time.Time      `bun:",nullzero"`
-	LastError              string         `bun:",notnull,default:''"`
-	CreatedAt              time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt              time.Time      `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt              time.Time      `bun:",soft_delete,nullzero"`
+	ID                     uuid.UUID       `bun:",pk,type:uuid,default:uuid_generate_v4()"`
+	AppProjectID           uuid.UUID       `bun:",notnull,type:uuid,unique:mcp_connections_project_slug"`
+	AppProject             *AppProject     `bun:"rel:belongs-to,join:app_project_id=id"`
+	Name                   string          `bun:",notnull"`
+	Slug                   string          `bun:",notnull,unique:mcp_connections_project_slug"`
+	TemplateID             string          `bun:",notnull,default:''"`
+	AuthType               string          `bun:",notnull,default:'api_key'"`
+	ServerURL              string          `bun:",notnull"`
+	Status                 string          `bun:",notnull,default:'pending_auth'"`
+	Config                 map[string]any  `bun:",type:jsonb,default:'{}'"`
+	CredentialData         json.RawMessage `bun:"credential_data,type:jsonb,default:'{}'"`
+	CredentialsEncryptedV1 bool            `bun:",notnull,default:false"`
+	LastDiscoveredAt       time.Time       `bun:",nullzero"`
+	LastError              string          `bun:",notnull,default:''"`
+	CreatedAt              time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp"`
+	UpdatedAt              time.Time       `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt              time.Time       `bun:",soft_delete,nullzero"`
 }
 
 type MCPConnectionTool struct {

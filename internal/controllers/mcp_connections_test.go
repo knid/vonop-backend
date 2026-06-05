@@ -1,6 +1,8 @@
 package controllers
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/knid/wemob/internal/agent"
@@ -91,6 +93,25 @@ func TestParseWWWAuthenticateResourceMetadata(t *testing.T) {
 	want := "https://mcp.example.com/.well-known/oauth-protected-resource/mcp"
 	if got != want {
 		t.Fatalf("resource_metadata = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeMCPCredentialDataAcceptsStoredJSONShapes(t *testing.T) {
+	rawObject := []byte(`{"client_secret":"enc:v1:secret","expiry":123}`)
+	quotedObject, _ := json.Marshal(string(rawObject))
+	base64Object, _ := json.Marshal(base64.StdEncoding.EncodeToString(rawObject))
+
+	for _, raw := range [][]byte{rawObject, quotedObject, base64Object} {
+		got, err := decodeMCPCredentialData(raw)
+		if err != nil {
+			t.Fatalf("decodeMCPCredentialData(%s): %v", raw, err)
+		}
+		if got["client_secret"] != "enc:v1:secret" {
+			t.Fatalf("client_secret = %v", got["client_secret"])
+		}
+		if got["expiry"] != float64(123) {
+			t.Fatalf("expiry = %v", got["expiry"])
+		}
 	}
 }
 
