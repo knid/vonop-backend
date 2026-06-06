@@ -20,3 +20,17 @@ func TestBuildRegistryFor_ExposesWriteFilesButNotWriteFile(t *testing.T) {
 		t.Fatal("expected write_files to be exposed")
 	}
 }
+
+func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
+	registry := BuildRegistryFor(&models.AppProject{ProjectType: models.ProjectTypeApp}, &RunDependencies{}, "")
+
+	names := map[string]bool{}
+	for _, name := range registry.Names() {
+		names[name] = true
+	}
+	for _, name := range sandboxToolNames() {
+		if !names[name] {
+			t.Fatalf("expected %s to be exposed", name)
+		}
+	}
+}

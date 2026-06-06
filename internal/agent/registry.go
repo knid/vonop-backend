@@ -121,6 +121,7 @@ func BuildRegistryFor(project *models.AppProject, deps *RunDependencies, model s
 func buildWebBuilderRegistry(project *models.AppProject, deps *RunDependencies, model string) *Registry {
 	r := NewRegistry()
 	registerBaseBuilderTools(r, deps)
+	registerSandboxTools(r, deps)
 	registerServerTools(r, deps, model)
 	registerDataAndAITools(r, deps)
 
@@ -138,6 +139,7 @@ func buildWebBuilderRegistry(project *models.AppProject, deps *RunDependencies, 
 func buildMobileBuilderRegistry(project *models.AppProject, deps *RunDependencies, model string) *Registry {
 	r := NewRegistry()
 	registerBaseBuilderTools(r, deps)
+	registerSandboxTools(r, deps)
 	registerServerTools(r, deps, model)
 	registerDataAndAITools(r, deps)
 
