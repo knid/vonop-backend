@@ -364,7 +364,8 @@ type TokenEntry struct {
 	ToolCalls          []ToolCall // optional: tool calls emitted by the LLM in this round
 	SpanName           string     // LLM function name (e.g. "get_json", "stream_text") for PostHog $ai_span_name
 	RecordedAt         time.Time  // wall-clock time when this entry was recorded
-	CostUSD            float64    // estimated cost in USD (computed from model pricing)
+	CostUSD            float64    // upstream or estimated cost in USD
+	CostSource         string     // "upstream" when usage.cost was provided, otherwise "catalog_estimate"
 }
 
 // modelCosts maps normalized model names to per-million-token pricing {input, output}.
@@ -472,11 +473,11 @@ func estimateCostUSD(model string, inputTokens, outputTokens, cacheCreation, cac
 // catalog-based estimate. Without this fallback, every PostHog $ai_generation
 // for a non-Claude model (modelCosts only carries Claude SKUs) reported
 // $ai_total_cost_usd = 0 even though OpenRouter knew the real number.
-func resolveCostUSD(model string, usage UsageInfo) float64 {
+func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 	if usage.Cost > 0 {
-		return usage.Cost
+		return usage.Cost, "upstream"
 	}
-	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens)
+	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens), "catalog_estimate"
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
@@ -588,6 +589,7 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 	if len(spanName) > 0 {
 		name = spanName[0]
 	}
+	cost, costSource := resolveCostUSD(model, usage)
 	t.entries = append(t.entries, TokenEntry{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -600,7 +602,8 @@ func (t *TokenTracker) Record(model string, usage UsageInfo, latencyMs int64, is
 		IsStreaming:              isStreaming,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
-		CostUSD:                  resolveCostUSD(model, usage),
+		CostUSD:                  cost,
+		CostSource:               costSource,
 	})
 }
 
@@ -628,6 +631,7 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 			copy(msgs[i].Images, m.Images)
 		}
 	}
+	cost, costSource := resolveCostUSD(model, usage)
 	t.entries = append(t.entries, TokenEntry{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -642,7 +646,8 @@ func (t *TokenTracker) RecordWithContent(model string, usage UsageInfo, latencyM
 		OutputText:               outputText,
 		SpanName:                 name,
 		RecordedAt:               time.Now(),
-		CostUSD:                  resolveCostUSD(model, usage),
+		CostUSD:                  cost,
+		CostSource:               costSource,
 	})
 }
 

@@ -1216,8 +1216,8 @@ func textToOutputChoices(text string) []map[string]interface{} {
 	}
 }
 
-// toolCallsToPostHog converts the backend ToolCall slice into the shape
-// PostHog expects for the $ai_tools_called property on $ai_generation events.
+// toolCallsToPostHog converts the backend ToolCall slice into the shape used by
+// $ai_tools on $ai_generation events.
 func toolCallsToPostHog(toolCalls []utils.ToolCall) []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(toolCalls))
 	for _, tc := range toolCalls {
@@ -1234,6 +1234,42 @@ func toolCallsToPostHog(toolCalls []utils.ToolCall) []map[string]interface{} {
 		result = append(result, item)
 	}
 	return result
+}
+
+func toolCallNames(toolCalls []utils.ToolCall) []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(toolCalls))
+	for _, tc := range toolCalls {
+		name := ""
+		if tc.Function != nil {
+			name = strings.TrimSpace(tc.Function.Name)
+		}
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
+}
+
+func postHogCostSplit(entry utils.TokenEntry) (inputCost, outputCost float64, source string) {
+	estimatedInput, estimatedOutput := utils.EstimateInputOutputCostUSD(
+		entry.Model, entry.PromptTokens, entry.CompletionTokens,
+		entry.CacheCreationInputTokens, entry.CacheReadInputTokens,
+	)
+	estimatedTotal := estimatedInput + estimatedOutput
+	if entry.CostUSD <= 0 {
+		return estimatedInput, estimatedOutput, "catalog_estimate"
+	}
+	if entry.CostSource == "upstream" {
+		if estimatedTotal <= 0 {
+			return 0, 0, "upstream_total_only"
+		}
+		scale := entry.CostUSD / estimatedTotal
+		return estimatedInput * scale, estimatedOutput * scale, "allocated_from_upstream_total"
+	}
+	return estimatedInput, estimatedOutput, "catalog_estimate"
 }
 
 // RecordTokenUsage persists LLM token usage to the DB and sends PostHog
@@ -1364,19 +1400,18 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if entry.CostUSD > 0 {
 				props.Set("$ai_total_cost_usd", entry.CostUSD)
 			}
-			// Always compute the catalog-based input/output split so PostHog's
-			// built-in cost panels work for every model in modelCosts. Returns
-			// (0, 0) for unknown models — emit only the non-zero leg so we don't
-			// distort dashboards by claiming we know a cost we don't.
-			inputCost, outputCost := utils.EstimateInputOutputCostUSD(
-				entryModel, entry.PromptTokens, entry.CompletionTokens,
-				entry.CacheCreationInputTokens, entry.CacheReadInputTokens,
-			)
+			inputCost, outputCost, costSplitSource := postHogCostSplit(entry)
 			if inputCost > 0 {
-				props.Set("$ai_input_cost", inputCost)
+				props.Set("$ai_input_cost_usd", inputCost)
 			}
 			if outputCost > 0 {
-				props.Set("$ai_output_cost", outputCost)
+				props.Set("$ai_output_cost_usd", outputCost)
+			}
+			if costSplitSource != "" {
+				props.Set("$ai_cost_split_source", costSplitSource)
+			}
+			if entry.CostSource != "" {
+				props.Set("$ai_cost_total_source", entry.CostSource)
 			}
 			if entry.InputMessages != nil {
 				props.Set("$ai_input", messagesToPostHogInput(entry.InputMessages))
@@ -1391,7 +1426,11 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 				props.Set("$ai_output", outputPreview)
 			}
 			if len(entry.ToolCalls) > 0 {
-				props.Set("$ai_tools_called", toolCallsToPostHog(entry.ToolCalls))
+				props.Set("$ai_tools", toolCallsToPostHog(entry.ToolCalls))
+				if names := toolCallNames(entry.ToolCalls); len(names) > 0 {
+					props.Set("tools", names)
+					props.Set("tool_count", len(names))
+				}
 			}
 			if len(requiredSkillIDs) > 0 {
 				props.Set("agent_required_skills", requiredSkillIDs)
@@ -1412,10 +1451,13 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 
 		// Compute wall-clock latency and total cost across all LLM calls for the trace event.
 		var totalComputeMs int64
-		var totalCost float64
+		var totalCost, totalInputCost, totalOutputCost float64
 		for _, e := range tracker.Entries() {
 			totalComputeMs += e.LatencyMs
 			totalCost += e.CostUSD
+			inputCost, outputCost, _ := postHogCostSplit(e)
+			totalInputCost += inputCost
+			totalOutputCost += outputCost
 		}
 		// Use wall-clock elapsed time for $ai_latency (accurate when LLM calls run in parallel).
 		// Keep sum-of-calls as $ai_compute_time for cost analysis.
@@ -1446,6 +1488,12 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 		}
 		if totalCost > 0 {
 			traceProps.Set("$ai_total_cost_usd", totalCost)
+		}
+		if totalInputCost > 0 {
+			traceProps.Set("$ai_input_cost_usd", totalInputCost)
+		}
+		if totalOutputCost > 0 {
+			traceProps.Set("$ai_output_cost_usd", totalOutputCost)
 		}
 		if user.Email != "" {
 			traceProps.Set("$email", user.Email)
