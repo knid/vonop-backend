@@ -10,6 +10,7 @@ import (
 	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
@@ -115,6 +116,12 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		TriggerWebDeploy: func(ctx context.Context, project *models.AppProject, user *models.User) (string, error) {
 			return c.triggerWebDeployForAgent(ctx, project, user)
 		},
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req agent.SandboxControlRequest) (map[string]any, error) {
+			return c.sandboxControlForAgent(ctx, project, user, req)
+		},
+		SetPreviewURL: func(ctx context.Context, project *models.AppProject, url, label, kind string) error {
+			return c.setPreviewURLForAgent(ctx, project, url, label, kind)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},
@@ -127,6 +134,64 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		WaitForMCPApproval:    c.WaitForMCPApproval,
 		ExecuteMCPTool:        c.ExecuteMCPTool,
 	}
+}
+
+func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models.AppProject, user *models.User, req agent.SandboxControlRequest) (map[string]any, error) {
+	if project == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user is required")
+	}
+	if c.E2BService == nil {
+		return nil, fmt.Errorf("E2B service is not configured")
+	}
+	out, err := c.E2BService.AgentControl(ctx, e2bService.AgentControlRequest{
+		AppID:     project.ID.String(),
+		SandboxID: project.SandboxID,
+		Action:    req.Action,
+		Command:   req.Command,
+		Cwd:       req.Cwd,
+		Path:      req.Path,
+		Content:   req.Content,
+		Target:    req.Target,
+		URL:       req.URL,
+		Label:     req.Label,
+		Kind:      req.Kind,
+		Route:     req.Route,
+		TimeoutMs: req.TimeoutMs,
+	})
+	if err != nil {
+		return out, err
+	}
+	if sid, _ := out["sandbox_id"].(string); sid != "" && sid != project.SandboxID {
+		if updateErr := c.DB.UpdateAppProjectSandboxID(project.ID.String(), sid); updateErr != nil {
+			slog.Warn("agent_deps: failed to persist sandbox id from agent control", "project_id", project.ID, "sandbox_id", sid, "error", updateErr)
+		} else {
+			project.SandboxID = sid
+		}
+	}
+	return out, nil
+}
+
+func (c *Controller) setPreviewURLForAgent(ctx context.Context, project *models.AppProject, url, label, kind string) error {
+	_ = ctx
+	if project == nil {
+		return fmt.Errorf("project is required")
+	}
+	target := map[string]any{
+		"url":        url,
+		"label":      label,
+		"kind":       kind,
+		"updated_by": "agent",
+		"updated_at": time.Now().UTC().Format(time.RFC3339),
+	}
+	if project.Settings == nil {
+		project.Settings = make(map[string]any)
+	}
+	project.Settings["preview_target"] = target
+	err := c.DB.UpdateAppProjectPreviewTarget(project.ID.String(), target)
+	return err
 }
 
 // ResolveOrgForProjectID returns the OrganizationID owning the given project.

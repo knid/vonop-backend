@@ -2425,6 +2425,8 @@ func main() {
 			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
 
+		r.Post("/internal/e2b/agent/authorize", httpViews.AuthorizeE2BAgentSandbox)
+
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
 		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot
 		// send custom headers — InternalOnly would always 401 it. The endpoint

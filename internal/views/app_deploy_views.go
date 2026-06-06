@@ -783,6 +783,42 @@ func (v *HttpViews) GetAppSandboxStatus(w http.ResponseWriter, r *http.Request) 
 	}, http.StatusOK)
 }
 
+// POST /internal/e2b/agent/authorize
+func (v *HttpViews) AuthorizeE2BAgentSandbox(w http.ResponseWriter, r *http.Request) {
+	if v.Controller.E2BService == nil || v.Controller.E2BService.AgentToken == "" ||
+		r.Header.Get("X-Wemob-Agent-Token") != v.Controller.E2BService.AgentToken {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	var body struct {
+		AppID     string `json:"appId"`
+		SandboxID string `json:"sandboxId"`
+	}
+	if err := utils.ParseJSONBody(r, &body); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	if body.AppID == "" || body.SandboxID == "" {
+		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, nil)
+		return
+	}
+	project, err := v.Controller.DB.GetAppProjectByID(body.AppID)
+	if err != nil || project == nil || project.SandboxID != body.SandboxID {
+		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+		return
+	}
+	allowExec, _ := project.Settings["agent_allow_sandbox_exec"].(bool)
+	utils.JSONResponse(w, map[string]any{
+		"authorized":         true,
+		"sandbox_id":         project.SandboxID,
+		"project_type":       project.ProjectType,
+		"frontend_runtime":   project.FrontendRuntime,
+		"backend_enabled":    project.BackendEnabled,
+		"backend_runtime":    project.BackendRuntime,
+		"allow_sandbox_exec": allowExec,
+	}, http.StatusOK)
+}
+
 // POST /v2/apps/{appId}/deploy/validate
 func (v *HttpViews) ValidateAppFiles(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)

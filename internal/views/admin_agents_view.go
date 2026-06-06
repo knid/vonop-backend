@@ -160,6 +160,16 @@ func adminAgentToolRisks() []adminAgentToolRiskResponse {
 		"configure_mobile_bridge",
 		"trigger_build_after_fix",
 		"trigger_web_deploy",
+		"sandbox_status",
+		"sandbox_exec",
+		"sandbox_read_file",
+		"sandbox_write_file",
+		"sandbox_list_files",
+		"sandbox_read_logs",
+		"sandbox_serve_artifact",
+		"preview_set_url",
+		"preview_open_route",
+		"preview_open_artifact",
 	}
 	out := make([]adminAgentToolRiskResponse, len(names))
 	for i, name := range names {

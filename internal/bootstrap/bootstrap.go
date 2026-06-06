@@ -21,10 +21,11 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services"
-	"github.com/knid/wemob/internal/services/events"
+	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/knid/wemob/internal/services/codemagic"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
+	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/giteabackup"
@@ -36,7 +37,6 @@ import (
 	"github.com/knid/wemob/internal/services/revenuecat"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
-	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 	"github.com/redis/go-redis/v9"
@@ -231,6 +231,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	e2b := e2bService.NewService(
 		sm.GetSecret("DASHBOARD_URL"),
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
+		sm.GetSecret("E2B_AGENT_CONTROL_TOKEN"),
 	)
 
 	flyService := fly.NewService(

@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -108,6 +109,21 @@ func (db *Database) UpdateAppProjectSandboxID(projectID string, sandboxID string
 	return err
 }
 
+func (db *Database) UpdateAppProjectPreviewTarget(projectID string, target map[string]any) error {
+	raw, err := json.Marshal(target)
+	if err != nil {
+		return err
+	}
+	_, err = db.DB.NewUpdate().Model((*models.AppProject)(nil)).
+		Set(`settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{preview_target}', ?::jsonb, true)`, string(raw)).
+		Where("id = ?", projectID).
+		Exec(context.Background())
+	if err == nil {
+		db.InvalidateProjectCache(projectID)
+	}
+	return err
+}
+
 // SetAppProjectV1ProjectID persists the legacy v1 Project ID into
 // app_projects.settings via jsonb_set so the dashboard's Native Builds tab
 // can resolve this mobile app to its Codemagic build pipeline entry.
@@ -164,9 +180,10 @@ func (db *Database) CountAppProjectsByUserID(userID string) (int, error) {
 
 // CountAppProjectsByUserIDAndType counts total app projects for a user.
 // projectType filter values:
-//   "mobile"           — counts mobile_app_native rows (use for quota gates)
-//   "mobile_app_native" — synonym for "mobile"
-//   ""                 — counts non-mobile (web/ecommerce)
+//
+//	"mobile"           — counts mobile_app_native rows (use for quota gates)
+//	"mobile_app_native" — synonym for "mobile"
+//	""                 — counts non-mobile (web/ecommerce)
 func (db *Database) CountAppProjectsByUserIDAndType(userID string, projectType string) (int, error) {
 	q := db.DB.NewSelect().Model((*models.AppProject)(nil)).
 		Where("user_id = ?", userID).
@@ -246,4 +263,3 @@ func (db *Database) AssignAppProjectOrg(projectID string, orgID uuid.UUID) error
 		Exec(context.Background())
 	return err
 }
-
