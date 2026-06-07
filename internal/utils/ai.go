@@ -37,6 +37,14 @@ const maxBase64ImageBytes = 8 * 1024 * 1024 // 8 MiB raw (base64 will be ~33% la
 // error to decide whether recovery (e.g. continuation) is needed.
 var ErrResponseTruncated = errors.New("LLM response truncated (output token limit reached)")
 
+type ToolRoundsExceededError struct {
+	MaxRounds int
+}
+
+func (e *ToolRoundsExceededError) Error() string {
+	return fmt.Sprintf("tool calling exceeded maximum rounds (%d)", e.MaxRounds)
+}
+
 // normalizeToolCacheKey produces a canonical cache key for tool dedup.
 // It normalizes JSON arguments so semantically identical calls (different key order) match.
 func normalizeToolCacheKey(name, args string) string {
@@ -2259,5 +2267,5 @@ func StreamWithTools(
 		return fullText.String(), nil
 	}
 
-	return "", fmt.Errorf("tool calling exceeded maximum rounds (%d)", maxRounds)
+	return "", &ToolRoundsExceededError{MaxRounds: maxRounds}
 }

@@ -77,6 +77,18 @@ type ToolCallResultEvent struct {
 	IsError    bool      `json:"is_error"`
 }
 
+type ToolProgressEvent struct {
+	RunID      uuid.UUID `json:"run_id"`
+	ToolName   string    `json:"tool_name"`
+	BatchID    string    `json:"batch_id,omitempty"`
+	BatchIndex int       `json:"batch_index,omitempty"`
+	BatchTotal int       `json:"batch_total,omitempty"`
+	Path       string    `json:"path,omitempty"`
+	Operation  string    `json:"operation,omitempty"`
+	Bytes      int       `json:"bytes,omitempty"`
+	Message    string    `json:"message,omitempty"`
+}
+
 type ToolApprovalRequiredEvent struct {
 	RunID        uuid.UUID       `json:"run_id"`
 	ApprovalID   string          `json:"approval_id"`
@@ -190,6 +202,7 @@ const (
 	EventNarration            = "narration"
 	EventToolCallStart        = "tool_call_start"
 	EventToolCallResult       = "tool_call_result"
+	EventToolProgress         = "tool_progress"
 	EventToolApprovalRequired = "tool_approval_required"
 	EventToolApprovalResolved = "tool_approval_resolved"
 	EventSkillLoaded          = "skill_loaded"

@@ -43,8 +43,11 @@ file paths or component names. Keep narration short and act with tools.
 
 ## Tool Protocol
 Work by calling tools. Read before editing. Use grep first to locate relevant
-symbols, then read_files in batches. Put all code in write/edit tools, never in
-narration. Use update_todos only for genuinely multi-step work.
+symbols, then read_files in batches. Read all known relevant files in one
+read_files call, and batch known edits with multi_edit, patch_files, or
+write_files instead of spending one round per file or per small edit. Put all
+code in write/edit tools, never in narration. Use update_todos only for
+genuinely multi-step work.
 
 Do not mutate locked/template-managed files unless the active skill or tool
 result explicitly permits it. Do not touch lockfiles.

@@ -434,6 +434,19 @@ func commitFileWrite(rc *RunContext, plan fileWritePlan) string {
 	if rc.BuildState != nil {
 		rc.BuildState.RecordFileWrite(plan.Path, plan.Operation)
 	}
+	if plan.BatchTotal > 1 {
+		rc.Emitter.Emit(EventToolProgress, ToolProgressEvent{
+			RunID:      rc.RunID,
+			ToolName:   "write_files",
+			BatchID:    plan.BatchID,
+			BatchIndex: plan.BatchIndex,
+			BatchTotal: plan.BatchTotal,
+			Path:       plan.Path,
+			Operation:  plan.Operation,
+			Bytes:      len(plan.Content),
+			Message:    fmt.Sprintf("%s %s (%d/%d)", plan.Operation, plan.Path, plan.BatchIndex, plan.BatchTotal),
+		})
+	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:      rc.RunID,
 		Path:       plan.Path,

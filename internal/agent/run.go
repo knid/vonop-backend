@@ -321,7 +321,10 @@ func Run(
 	compactIntervalTokens := 150_000
 	trimToolResultChars := 4_000
 	trimToolArgChars := 1_200
-	keepRecentToolRounds := 5
+	keepRecentToolRounds := 2
+	if project.Status == "draft" {
+		keepRecentToolRounds = 5
+	}
 	if deps.RemoteConfig != nil {
 		compactAfterTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactAfterTokens, remoteconfig.Global)
 		compactIntervalTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactIntervalTokens, remoteconfig.Global)
@@ -331,8 +334,14 @@ func Run(
 		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global); rcTrim > 0 {
 			trimToolArgChars = rcTrim
 		}
-		if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
-			keepRecentToolRounds = rcKeep
+		if project.Status == "draft" {
+			if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
+				keepRecentToolRounds = rcKeep
+			}
+		} else {
+			if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
+				keepRecentToolRounds = rcKeep
+			}
 		}
 	}
 	if compactIntervalTokens <= 0 {
@@ -654,6 +663,13 @@ func Run(
 		if errors.Is(llmErr, utils.ErrResponseTruncated) {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeTruncated, "model response exceeded token budget", llmErr,
+				tracker, runStart,
+				fileMap, message)
+		}
+		var toolRoundsErr *utils.ToolRoundsExceededError
+		if errors.As(llmErr, &toolRoundsErr) {
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+				CodeToolRoundsExceeded, "tool round limit reached — reply \"continue\" to keep going from saved progress", llmErr,
 				tracker, runStart,
 				fileMap, message)
 		}
@@ -1582,7 +1598,7 @@ func sanitizeFileMapForBuild(fileMap *SafeFileMap) {
 // mapCodeToStatus maps agent error codes to AppAgentRun status strings.
 func mapCodeToStatus(code ErrorCode) string {
 	switch code {
-	case CodeBudgetExceeded, CodeTruncated:
+	case CodeBudgetExceeded, CodeTruncated, CodeToolRoundsExceeded:
 		// Truncation is a model-side budget hit — same bucket as wallclock
 		// for UI purposes ("your request was too big, try a smaller one").
 		return models.AgentRunStatusBudgetExceeded
@@ -1619,6 +1635,8 @@ func classifyErrorKind(code ErrorCode, wrapped error) string {
 		return "provider_error"
 	case CodeBudgetExceeded:
 		return "budget_exceeded"
+	case CodeToolRoundsExceeded:
+		return "tool_rounds_exceeded"
 	case CodeCanceled:
 		if wrapped != nil && errors.Is(wrapped, context.Canceled) {
 			return "context_canceled"
@@ -1645,6 +1663,8 @@ func humanizeErrorKind(kind string) string {
 		return "run timed out"
 	case "context_canceled":
 		return "run was canceled"
+	case "tool_rounds_exceeded":
+		return "tool round limit reached; reply continue to keep going"
 	case "internal":
 		return "internal error"
 	default:

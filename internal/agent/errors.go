@@ -25,12 +25,13 @@ const (
 	// detection threshold. Treated like truncation from the user's
 	// perspective (runaway generation) but emitted separately so ops can
 	// tell a natural overflow from a stuck model.
-	CodeRepetitionLoop   ErrorCode = "REPETITION_LOOP"
-	CodeToolFailed       ErrorCode = "TOOL_FAILED"
-	CodeValidationFailed ErrorCode = "VALIDATION_FAILED"
-	CodeGitError         ErrorCode = "GIT_ERROR"
-	CodeRunInProgress    ErrorCode = "RUN_IN_PROGRESS"
-	CodeInternal         ErrorCode = "INTERNAL"
+	CodeRepetitionLoop     ErrorCode = "REPETITION_LOOP"
+	CodeToolRoundsExceeded ErrorCode = "TOOL_ROUNDS_EXCEEDED"
+	CodeToolFailed         ErrorCode = "TOOL_FAILED"
+	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
+	CodeGitError           ErrorCode = "GIT_ERROR"
+	CodeRunInProgress      ErrorCode = "RUN_IN_PROGRESS"
+	CodeInternal           ErrorCode = "INTERNAL"
 )
 
 // Error is a typed agent error that carries a phase label and an error code.
