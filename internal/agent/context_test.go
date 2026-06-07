@@ -40,6 +40,28 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemMessages_IncludesProjectTypeBoundary(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, true)
+	joined := concatMessages(msgs)
+
+	if !strings.Contains(joined, "Project Type Boundary") {
+		t.Error("expected project type boundary in system messages")
+	}
+	if !strings.Contains(joined, `project_type="app"`) {
+		t.Error("expected current project_type in boundary")
+	}
+	if !strings.Contains(joined, "they need an ecommerce project") {
+		t.Error("expected ecommerce mismatch warning guidance")
+	}
+	if !strings.Contains(joined, "they need a\n  mobile_app_native project") {
+		t.Error("expected mobile mismatch warning guidance")
+	}
+}
+
 func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeMobileAppNative,
