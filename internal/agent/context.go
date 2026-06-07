@@ -26,6 +26,28 @@ Before calling tools, batch independent work into the fewest calls possible:
 
 Do not narrate your plan at length — act with tools immediately.`
 
+const projectTypeBoundary = `## Project Type Boundary
+This project was created with project_type=%q (%s).
+
+If the user's request clearly asks for a different project type, do not build a
+workaround in this project. Warn the user briefly that this project is %s and
+that they should create a new %s project instead, then stop without writing
+files or calling tools.
+
+Treat these as mismatches:
+- project_type=app, but the user asks for an online store, product catalog,
+  cart, checkout, orders, inventory, shipping, or selling products/services:
+  they need an ecommerce project.
+- project_type=app or ecommerce, but the user asks for a native iOS/Android,
+  React Native, Expo, App Store, Play Store, push-notification, biometric,
+  deep-link, offline-native, or in-app-purchase app: they need a
+  mobile_app_native project.
+- project_type=mobile_app_native, but the user asks for a web-only marketing
+  site, web dashboard, portfolio, or ecommerce storefront without native
+  mobile requirements: they need an app or ecommerce project.
+
+If the request fits this project type, continue normally.`
+
 // mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
 // without a real *database.Database. *database.Database satisfies this interface.
 type mobileConfigGetter interface {
@@ -63,9 +85,13 @@ func BuildSystemMessagesForProfile(profile *AgentProfile, project *models.AppPro
 	base := profile.BasePrompt
 	modeAddendum := profile.ModePrompt(isFirstGen)
 	addendum := buildAddendum(project, deps)
+	boundary := buildProjectTypeBoundary(project)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
 	msgs = append(msgs, utils.Message{Role: "system", Content: modeAddendum})
+	if boundary != "" {
+		msgs = append(msgs, utils.Message{Role: "system", Content: boundary})
+	}
 	if addendum != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: addendum})
 	}
@@ -74,6 +100,26 @@ func BuildSystemMessagesForProfile(profile *AgentProfile, project *models.AppPro
 	}
 	msgs = append(msgs, utils.Message{Role: "system", Content: planningDiscipline})
 	return msgs
+}
+
+func buildProjectTypeBoundary(project *models.AppProject) string {
+	if project == nil {
+		return ""
+	}
+	projectType := project.ProjectType
+	if projectType == "" {
+		projectType = models.ProjectTypeApp
+	}
+	switch projectType {
+	case models.ProjectTypeApp:
+		return fmt.Sprintf(projectTypeBoundary, projectType, "web app", "a web app", "ecommerce or mobile_app_native")
+	case models.ProjectTypeEcommerce:
+		return fmt.Sprintf(projectTypeBoundary, projectType, "ecommerce web store", "an ecommerce app", "app or mobile_app_native")
+	case models.ProjectTypeMobileAppNative:
+		return fmt.Sprintf(projectTypeBoundary, projectType, "native mobile app", "a native mobile app", "app or ecommerce")
+	default:
+		return fmt.Sprintf(projectTypeBoundary, projectType, "unknown app type", "this app type", "supported")
+	}
 }
 
 // BuildFileTreeUserPrefix returns the file-tree context block that should be

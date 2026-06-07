@@ -64,21 +64,12 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		return nil, err
 	}
 
-	// Determine project type first so we can enforce the right limit. Only
-	// auto-classify when the client didn't pick one — an explicit "app"
-	// (web) selection from the home composer must be honored, otherwise the
-	// LLM classifier can flip prompts that "sound mobile" (camera, scanning,
-	// etc.) into mobile_app_native and bounce Starter users with a misleading
-	// "not available in your plan" 403.
+	// Determine project type first so we can enforce the right limit. Empty
+	// means the default web-app type; we no longer auto-classify creation
+	// prompts because an explicit or default UI selection should be stable.
 	projectType := req.ProjectType
 	if projectType == "" {
-		classified := c.classifyProjectType(ctx, req.Prompt, user)
-		if classified != "" {
-			projectType = classified
-		}
-	}
-	if projectType == "" {
-		projectType = "app"
+		projectType = models.ProjectTypeApp
 	}
 	frontendRuntime, frontendHosting, backendEnabled, backendRuntime := defaultProjectCapabilities(projectType)
 	if override := strings.TrimSpace(req.FrontendRuntime); override != "" &&
@@ -208,9 +199,9 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	}
 
 	// mobile_app_native projects get an eager MobileAppConfig row + a
-	// canonical mobile/ + backend/ skeleton in the project repo so the
-	// agent has somewhere to write from turn 1 and read_mobile_config
-	// returns sensible defaults instead of "missing config".
+	// canonical mobile/ skeleton in the project repo so the agent has
+	// somewhere to write from turn 1 and read_mobile_config returns sensible
+	// defaults instead of "missing config". backend/ stays opt-in.
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
 		// Pre-populate every field with the same defaults the DB column
 		// DEFAULT clauses use. Bun's INSERT emits explicit values for all
