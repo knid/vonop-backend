@@ -523,6 +523,23 @@ func Run(
 		emitter.Emit(EventNarration, NarrationEvent{RunID: runID, Turn: turn, Delta: chunk})
 	}
 
+	reasoningSink := func(chunk string) {
+		if chunk == "" {
+			return
+		}
+		partsMu.Lock()
+		defer partsMu.Unlock()
+		if n := len(parts); n > 0 && parts[n-1].Type == "reasoning" {
+			parts[n-1].Text += chunk
+		} else {
+			parts = append(parts, models.ChatMessagePart{
+				Type: "reasoning",
+				Text: chunk,
+			})
+		}
+		emitter.Emit(EventReasoning, ReasoningEvent{RunID: runID, Turn: turn, Delta: chunk})
+	}
+
 	toolSchemas := registryToUtilsTools(registry)
 
 	toolRoundCount := 0
@@ -537,7 +554,7 @@ func Run(
 		executor,
 		nil, // deprecated onToolCall; start events emitted from executor for correlatable IDs
 		narrationSink,
-		nil, // onReasoning
+		reasoningSink,
 		utils.ToolCallConfig{
 			MaxRounds: maxTurns,
 			// Sonnet 4.6's non-extended output cap. Running at the provider
@@ -941,27 +958,37 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 			}
 
 			var pendingText string
+			var pendingReasoning string
 			var pendingToolCalls []utils.ToolCall
 			var pendingToolResults []utils.Message
 
 			flush := func() {
-				if pendingText == "" && len(pendingToolCalls) == 0 {
+				if pendingText == "" && pendingReasoning == "" && len(pendingToolCalls) == 0 {
 					return
 				}
 				out = append(out, utils.Message{
-					Role:      "assistant",
-					Content:   pendingText,
-					ToolCalls: pendingToolCalls,
+					Role:             "assistant",
+					Content:          pendingText,
+					ReasoningContent: pendingReasoning,
+					ToolCalls:        pendingToolCalls,
 				})
 				out = append(out, pendingToolResults...)
 				pendingText = ""
+				pendingReasoning = ""
 				pendingToolCalls = nil
 				pendingToolResults = nil
 			}
 
 			for _, p := range parts {
-				if p.Type == "text" {
-					flush()
+				if p.Type == "reasoning" {
+					if len(pendingToolCalls) > 0 {
+						flush()
+					}
+					pendingReasoning += p.Text
+				} else if p.Type == "text" {
+					if pendingText != "" || len(pendingToolCalls) > 0 {
+						flush()
+					}
 					pendingText = p.Text
 				} else if p.Type == "tool_call" {
 					pendingToolCalls = append(pendingToolCalls, utils.ToolCall{

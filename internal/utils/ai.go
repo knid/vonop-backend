@@ -1977,7 +1977,7 @@ func StreamWithTools(
 				Content:   fullText.String(),
 				ToolCalls: toolCalls,
 			}
-			if provider.UsesThinkingFormat() && fullReasoning.Len() > 0 {
+			if fullReasoning.Len() > 0 {
 				assistantMsg.ReasoningContent = fullReasoning.String()
 			}
 			currentMessages = append(currentMessages, assistantMsg)

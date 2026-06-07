@@ -74,15 +74,25 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 			}
 		}
 
-	case "chat_thinking":
+	case "chat_thinking", agent.EventReasoning:
 		if d, ok := event.Data.(responses.ChatThinkingEvent); ok && d.Chunk != "" {
 			b.thinkingText += d.Chunk
+			b.dirty = true
+			return true
+		}
+		if d, ok := event.Data.(agent.ReasoningEvent); ok && d.Delta != "" {
+			b.thinkingText += d.Delta
 			b.dirty = true
 			return true
 		}
 		if m, ok := event.Data.(map[string]any); ok {
 			if chunk, _ := m["chunk"].(string); chunk != "" {
 				b.thinkingText += chunk
+				b.dirty = true
+				return true
+			}
+			if delta, _ := m["delta"].(string); delta != "" {
+				b.thinkingText += delta
 				b.dirty = true
 				return true
 			}

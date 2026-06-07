@@ -47,6 +47,41 @@ func TestAgentSSEAdapterEmitsLegacyAndUIMessagePart(t *testing.T) {
 	}
 }
 
+func TestAgentSSEAdapterNormalizesReasoning(t *testing.T) {
+	runID := uuid.New()
+	ch := make(chan responses.SSEEvent, 4)
+	adapter := newAgentSSEAdapter(ch, runID.String())
+
+	ok := adapter.Emit(agent.EventReasoning, agent.ReasoningEvent{
+		RunID: runID,
+		Turn:  1,
+		Delta: "thinking",
+	})
+	if !ok {
+		t.Fatal("Emit returned false")
+	}
+
+	legacy := <-ch
+	if legacy.Event != agent.EventReasoning {
+		t.Fatalf("legacy event = %q, want %q", legacy.Event, agent.EventReasoning)
+	}
+
+	normalized := <-ch
+	if normalized.Event != responses.EventUIMessagePart {
+		t.Fatalf("normalized event = %q, want %q", normalized.Event, responses.EventUIMessagePart)
+	}
+	payload, ok := normalized.Data.(responses.UIMessagePartEvent)
+	if !ok {
+		t.Fatalf("normalized data type = %T, want UIMessagePartEvent", normalized.Data)
+	}
+	if payload.SourceEvent != agent.EventReasoning {
+		t.Fatalf("source_event = %q, want %q", payload.SourceEvent, agent.EventReasoning)
+	}
+	if payload.Part.Type != "reasoning-delta" || payload.Part.Text != "thinking" {
+		t.Fatalf("part = %#v, want reasoning-delta thinking", payload.Part)
+	}
+}
+
 func TestAgentSSEAdapterNormalizesToolLifecycle(t *testing.T) {
 	runID := uuid.New()
 	ch := make(chan responses.SSEEvent, 8)

@@ -62,6 +62,30 @@ func TestConvertHistory_AssistantTextOnly(t *testing.T) {
 	assert.Empty(t, out[0].ToolCalls)
 }
 
+func TestPartsToContentIgnoresReasoning(t *testing.T) {
+	got := partsToContent([]models.ChatMessagePart{
+		{Type: "reasoning", Text: "hidden"},
+		{Type: "text", Text: "visible"},
+		{Type: "reasoning", Text: "also hidden"},
+	})
+	assert.Equal(t, "visible", got)
+}
+
+func TestConvertHistory_AssistantReasoningAndText(t *testing.T) {
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "reasoning", Text: "hidden"},
+		{Type: "text", Text: "visible"},
+	})
+	history := []models.AppChatMessage{
+		{Role: "assistant", Content: "visible", Parts: parts},
+	}
+	out := convertHistory(history)
+	require.Len(t, out, 1)
+	assert.Equal(t, "assistant", out[0].Role)
+	assert.Equal(t, "visible", out[0].Content)
+	assert.Equal(t, "hidden", out[0].ReasoningContent)
+}
+
 func TestConvertHistory_AssistantSingleToolRound(t *testing.T) {
 	parts, _ := json.Marshal([]models.ChatMessagePart{
 		{Type: "text", Text: "Let me read."},

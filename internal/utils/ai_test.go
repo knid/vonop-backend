@@ -68,6 +68,20 @@ func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	}
 }
 
+func TestStreamDeltaGetReasoningPrefersReasoningContent(t *testing.T) {
+	d := StreamDelta{Reasoning: "openrouter", ReasoningContent: "moonshot"}
+	if got := d.GetReasoning(); got != "moonshot" {
+		t.Fatalf("GetReasoning() = %q, want moonshot", got)
+	}
+}
+
+func TestStreamDeltaGetReasoningFallsBackToReasoning(t *testing.T) {
+	d := StreamDelta{Reasoning: "openrouter"}
+	if got := d.GetReasoning(); got != "openrouter" {
+		t.Fatalf("GetReasoning() = %q, want openrouter", got)
+	}
+}
+
 func TestTrimToolRoundsOlderThanTrimsAllToolCallsInOldRound(t *testing.T) {
 	messages := []Message{
 		{

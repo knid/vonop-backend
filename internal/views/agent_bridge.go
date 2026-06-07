@@ -82,6 +82,15 @@ func normalizeAgentEventForUIMessage(eventType string, data any) (responses.SSEE
 
 func agentEventToUIMessagePart(eventType string, data any) (responses.UIMessagePart, string, bool) {
 	switch eventType {
+	case agent.EventReasoning:
+		ev, ok := data.(agent.ReasoningEvent)
+		if !ok || ev.Delta == "" {
+			return responses.UIMessagePart{}, "", false
+		}
+		return responses.UIMessagePart{
+			Type: "reasoning-delta",
+			Text: ev.Delta,
+		}, ev.RunID.String(), true
 	case agent.EventNarration:
 		ev, ok := data.(agent.NarrationEvent)
 		if !ok || ev.Delta == "" {
