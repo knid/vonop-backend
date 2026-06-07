@@ -53,6 +53,12 @@ type NarrationEvent struct {
 	Delta string    `json:"delta"`
 }
 
+type ReasoningEvent struct {
+	RunID uuid.UUID `json:"run_id"`
+	Turn  int       `json:"turn"`
+	Delta string    `json:"delta"`
+}
+
 type ToolCallStartEvent struct {
 	RunID        uuid.UUID       `json:"run_id"`
 	Turn         int             `json:"turn"`
@@ -187,6 +193,7 @@ type DoneEvent struct {
 const (
 	EventRunStart             = "run_start"
 	EventTurnStart            = "turn_start"
+	EventReasoning            = "reasoning"
 	EventNarration            = "narration"
 	EventToolCallStart        = "tool_call_start"
 	EventToolCallResult       = "tool_call_result"

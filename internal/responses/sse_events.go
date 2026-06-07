@@ -31,7 +31,7 @@ type UIMessagePartEvent struct {
 type UIMessagePart struct {
 	Type string `json:"type"`
 
-	// type=text-delta
+	// type=reasoning-delta or type=text-delta
 	Text string `json:"text,omitempty"`
 
 	// type=tool

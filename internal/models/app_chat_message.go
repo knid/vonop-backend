@@ -23,7 +23,7 @@ type AppChatMessage struct {
 	RunID        *uuid.UUID      `bun:",type:uuid,nullzero" json:"run_id"`
 	Role         string          `bun:",notnull" json:"role"`
 	Content      string          `bun:",type:text,notnull,default:''" json:"content"`
-	Images       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"images"`       // [{url, alt?}]
+	Images       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"images"` // [{url, alt?}]
 	// Attachments is the canonical record of what the user attached to a turn.
 	// Denormalized snapshot of AppAsset metadata so historical user bubbles
 	// render correctly even after the underlying asset is deleted. The live
@@ -31,26 +31,28 @@ type AppChatMessage struct {
 	//
 	// Replaces Images for new writes. Images is kept for read-back compat with
 	// rows persisted before this column existed.
-	Attachments  json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"attachments"` // []ChatMessageAttachment
-	ToolCalls    json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"tool_calls"` // []ChatMessageToolCall — derived from Parts, kept for legacy readers
-	Parts        json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"parts"`      // []ChatMessagePart — chronological ordered record (canonical)
+	Attachments json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"attachments"` // []ChatMessageAttachment
+	ToolCalls   json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"tool_calls"`  // []ChatMessageToolCall — derived from Parts, kept for legacy readers
+	Parts       json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"parts"`       // []ChatMessagePart — chronological ordered record (canonical)
 	// ErrorKind classifies a failed assistant turn so the frontend can render
 	// the same rich error card from history that it shows live. Empty on
 	// successful turns; one of "credit_out" | "timeout" | "provider_error" |
 	// "rate_limit" | "context_canceled" | "internal" | "unknown" otherwise.
-	ErrorKind    string          `bun:"error_kind,nullzero" json:"error_kind,omitempty"`
-	CreatedAt    time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+	ErrorKind string    `bun:"error_kind,nullzero" json:"error_kind,omitempty"`
+	CreatedAt time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 }
 
 // ChatMessagePart is one chronological block inside an assistant turn.
-// Text parts carry narration the model wrote; tool_call parts carry a
-// snapshot of one tool invocation (name, input, result). The dashboard
-// renders parts top-to-bottom — text → MarkdownText, tool_call → tool /
-// file card — so the on-screen order matches what the model actually did.
+// Text parts carry user-visible narration the model wrote; reasoning parts
+// carry provider thinking that must render separately from the assistant
+// answer; tool_call parts carry a snapshot of one tool invocation (name,
+// input, result). The dashboard renders parts top-to-bottom — reasoning →
+// thinking block, text → MarkdownText, tool_call → tool / file card — so the
+// on-screen order matches what the model actually did.
 type ChatMessagePart struct {
-	Type string `json:"type"` // "text" | "tool_call"
+	Type string `json:"type"` // "reasoning" | "text" | "tool_call"
 
-	// type=text
+	// type=reasoning or type=text
 	Text string `json:"text,omitempty"`
 
 	// type=tool_call
