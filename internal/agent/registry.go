@@ -132,6 +132,9 @@ func buildWebBuilderRegistry(project *models.AppProject, deps *RunDependencies, 
 	if project != nil && project.ProjectType == "ecommerce" {
 		r.Register(SetupStoreTool{Deps: deps})
 	}
+	if project != nil && project.ProjectType == models.ProjectTypeApp && project.FrontendRuntime == models.FrontendRuntimeNone {
+		r.Register(EnableFrontendTool{Deps: deps})
+	}
 	registerMCPTools(r, project, deps)
 	return r
 }

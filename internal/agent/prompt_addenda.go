@@ -27,6 +27,32 @@ This project uses the split web architecture.
 - Backend route handlers may import backend/lib/db.ts or backend/lib/wemob-ai.ts after the matching setup tool creates them.
 - The frontend talks to backend routes through /api/*; it never imports backend files.`
 
+const BackendOnlyAddendum = `# BACKEND/API-ONLY ADDENDUM
+This project starts without a frontend. Build only the backend API unless the
+user explicitly asks to add a web frontend.
+
+## Source tree
+- backend/ is the application root. Write Next.js API route handlers under
+  backend/app/api/**/route.ts and server utilities under backend/lib/**.
+- Do not write frontend/, root app/**, root package.json, or other root Next.js
+  files while frontend_runtime is "none".
+- DESIGN.md is project metadata and is the only root-level file you may create
+  or update.
+
+## Backend scope
+- It is valid for the first generation to be a scaffold with backend/package.json
+  and setup files only.
+- Add routes, database, auth, AI, webhooks, uploads, cron-style endpoints, and
+  integrations only when the user prompt calls for them.
+- Keep secrets and provider SDKs server-side. Never expose DATABASE_URL,
+  WEMOB_AI_KEY, auth secrets, or webhook signing secrets to client code.
+
+## Adding a frontend later
+- If the user asks for a web UI, first call enable_frontend. That changes the
+  project to Vite React hosting, scaffolds frontend/, and unlocks frontend writes.
+- After enable_frontend, build browser UI under frontend/ and call the existing
+  backend through relative /api/* URLs. Never import backend files from frontend/.`
+
 // EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
 // Ecommerce projects bypass DatabaseAddendum — this addendum is the single
 // source of truth for their data-layer story.

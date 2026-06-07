@@ -34,3 +34,18 @@ func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildRegistryFor_BackendOnlyExposesEnableFrontend(t *testing.T) {
+	registry := BuildRegistryFor(&models.AppProject{
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeNone,
+	}, &RunDependencies{}, "")
+
+	names := map[string]bool{}
+	for _, name := range registry.Names() {
+		names[name] = true
+	}
+	if !names["enable_frontend"] {
+		t.Fatal("expected backend-only app projects to expose enable_frontend")
+	}
+}
