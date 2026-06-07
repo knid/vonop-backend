@@ -57,6 +57,30 @@ func TestDefaultProjectCapabilities(t *testing.T) {
 	}
 }
 
+func TestFrontendRuntimeOverrideBackendOnlyAllowedWithoutEnv(t *testing.T) {
+	t.Setenv("WEMOB_ALLOW_FRONTEND_RUNTIME_OVERRIDE", "")
+
+	if !allowFrontendRuntimeOverride(models.ProjectTypeApp, models.FrontendRuntimeNone) {
+		t.Fatal("expected frontend_runtime=none to be allowed for app projects without override env")
+	}
+	if allowFrontendRuntimeOverride(models.ProjectTypeApp, models.FrontendRuntimeViteReact) {
+		t.Fatal("expected vite_react override to stay env-gated")
+	}
+	if allowFrontendRuntimeOverride(models.ProjectTypeEcommerce, models.FrontendRuntimeNone) {
+		t.Fatal("expected frontend_runtime=none to be rejected for ecommerce")
+	}
+}
+
+func TestFrontendCapabilitiesForRuntimeNone(t *testing.T) {
+	frontendRuntime, frontendHosting := frontendCapabilitiesForRuntime(models.FrontendRuntimeNone)
+	if frontendRuntime != models.FrontendRuntimeNone {
+		t.Fatalf("frontendRuntime = %q, want %q", frontendRuntime, models.FrontendRuntimeNone)
+	}
+	if frontendHosting != models.FrontendHostingNone {
+		t.Fatalf("frontendHosting = %q, want %q", frontendHosting, models.FrontendHostingNone)
+	}
+}
+
 type fakeTemplateRepo struct {
 	files map[string]bool
 }

@@ -210,7 +210,10 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 
 	var parts []string
 	isEcommerce := project.ProjectType == "ecommerce"
-	if project.UsesSplitWebRuntime() {
+	isBackendOnly := project.FrontendRuntime == models.FrontendRuntimeNone
+	if isBackendOnly {
+		parts = append(parts, BackendOnlyAddendum)
+	} else if project.UsesSplitWebRuntime() {
 		parts = append(parts, SplitWebAddendum)
 	}
 	if isEcommerce {
@@ -219,7 +222,7 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	if projectHasAuth(project) {
 		parts = append(parts, AuthAddendum)
 	}
-	if project.UsesSplitWebRuntime() && projectHasDatabase(project) {
+	if (project.UsesSplitWebRuntime() || isBackendOnly) && projectHasDatabase(project) {
 		parts = append(parts, DatabaseAddendumSplitWeb)
 	} else if !isEcommerce && projectHasDatabase(project) {
 		parts = append(parts, DatabaseAddendum)

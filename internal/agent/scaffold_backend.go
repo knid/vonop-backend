@@ -22,8 +22,8 @@ import "github.com/knid/wemob/internal/templates"
 //
 // Dockerfile is intentionally NOT written here — the deploy worker
 // auto-writes a default standalone Next.js Dockerfile if missing (P1.1.D).
-func scaffoldMinimalBackend(rc *RunContext) {
-	files := map[string]string{
+func minimalBackendFiles() map[string]string {
+	return map[string]string{
 		"backend/package.json": `{
   "name": "backend",
   "version": "0.0.0",
@@ -77,6 +77,10 @@ export default nextConfig;
 `,
 		"backend/middleware.ts": templates.GetTemplate("middleware.ts"),
 	}
+}
+
+func scaffoldMinimalBackend(rc *RunContext) {
+	files := minimalBackendFiles()
 	for path, content := range files {
 		if content == "" {
 			continue

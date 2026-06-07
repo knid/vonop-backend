@@ -16,6 +16,19 @@ func InjectTemplates(repo *gitrepo.Repo, project *models.AppProject) (int, error
 	lang := constants.DetectLanguage(project.Prompt)
 	written := 0
 
+	if project.FrontendRuntime == models.FrontendRuntimeNone {
+		for path, content := range minimalBackendFiles() {
+			if content == "" {
+				continue
+			}
+			if err := repo.WriteFile(path, []byte(content)); err != nil {
+				return written, fmt.Errorf("write %s: %w", path, err)
+			}
+			written++
+		}
+		return written, nil
+	}
+
 	if project.UsesSplitWebRuntime() {
 		for _, p := range templates.ViteFilePaths {
 			content := templates.GetViteTemplate(p)

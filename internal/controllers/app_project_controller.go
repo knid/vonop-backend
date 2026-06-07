@@ -73,8 +73,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	}
 	frontendRuntime, frontendHosting, backendEnabled, backendRuntime := defaultProjectCapabilities(projectType)
 	if override := strings.TrimSpace(req.FrontendRuntime); override != "" &&
-		projectType == models.ProjectTypeApp &&
-		os.Getenv("WEMOB_ALLOW_FRONTEND_RUNTIME_OVERRIDE") == "1" {
+		allowFrontendRuntimeOverride(projectType, override) {
 		frontendRuntime, frontendHosting = frontendCapabilitiesForRuntime(override)
 		if frontendRuntime == models.FrontendRuntimeNone {
 			backendEnabled = true
@@ -306,6 +305,16 @@ func frontendCapabilitiesForRuntime(runtime string) (frontendRuntime, frontendHo
 	default:
 		return models.FrontendRuntimeViteReact, models.FrontendHostingS3CDN
 	}
+}
+
+func allowFrontendRuntimeOverride(projectType, runtime string) bool {
+	if projectType != models.ProjectTypeApp {
+		return false
+	}
+	if runtime == models.FrontendRuntimeNone {
+		return true
+	}
+	return os.Getenv("WEMOB_ALLOW_FRONTEND_RUNTIME_OVERRIDE") == "1"
 }
 
 func (c *Controller) GetAppProjectsByUserFiltered(user *models.User, types []string) ([]models.AppProject, error) {

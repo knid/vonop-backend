@@ -40,6 +40,30 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemMessages_BackendOnlyIncludesBackendOnlyAddendum(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeNone,
+		Settings:        map[string]any{"has_database": true},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, false)
+	joined := concatMessages(msgs)
+
+	for _, want := range []string{
+		"BACKEND/API-ONLY ADDENDUM",
+		"Build only the backend API",
+		"enable_frontend",
+		"DATABASE ADDENDUM (split web + backend)",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected backend-only system messages to contain %q", want)
+		}
+	}
+	if strings.Contains(joined, "frontend/ is a Vite + React static frontend") {
+		t.Fatal("backend-only prompt must not include split web frontend instructions")
+	}
+}
+
 func TestBuildSystemMessages_IncludesProjectTypeBoundary(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeApp,
