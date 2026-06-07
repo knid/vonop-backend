@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +36,18 @@ func TestFailureDisplayMessageIncludesWrappedDetail(t *testing.T) {
 	got := failureDisplayMessage("LLM call failed", assert.AnError)
 	assert.Contains(t, got, "LLM call failed")
 	assert.Contains(t, got, assert.AnError.Error())
+}
+
+func TestToolRoundLimitClassificationTellsUserToContinue(t *testing.T) {
+	err := &utils.ToolRoundsExceededError{MaxRounds: 30}
+	got := failureDisplayMessage("tool round limit reached — reply \"continue\" to keep going from saved progress", err)
+
+	assert.Contains(t, got, "tool round limit reached")
+	assert.Contains(t, got, "continue")
+	assert.Contains(t, got, "30")
+	assert.Equal(t, models.AgentRunStatusBudgetExceeded, mapCodeToStatus(CodeToolRoundsExceeded))
+	assert.Equal(t, "tool_rounds_exceeded", classifyErrorKind(CodeToolRoundsExceeded, err))
+	assert.Contains(t, humanizeErrorKind("tool_rounds_exceeded"), "continue")
 }
 
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {

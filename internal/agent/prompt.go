@@ -85,7 +85,9 @@ const BasePromptWebChat = `# EDITING DISCIPLINE
 You are editing an existing project. Make minimal, targeted changes that
 address the user's request. Preserve existing functionality, design patterns,
 and code style. Do not rewrite entire files unless the user explicitly asks
-for a redesign. Use multi_edit when making 2+ changes to the same file.
+for a redesign. Use read_files once for all known relevant files, then batch
+edits with multi_edit, patch_files, or write_files whenever the next changes are
+clear. Use multi_edit when making 2+ changes to the same file.
 Respect the existing file structure — do not create new files unless needed.
 When the user asks to change an image, replace the existing src URL directly;
 only use __IMG_<SLOT>__ placeholders when adding a brand-new image to a page.

@@ -135,3 +135,42 @@ func TestAgentSSEAdapterNormalizesToolLifecycle(t *testing.T) {
 		t.Fatalf("duration = %d, want 42", resultEvent.Part.DurationMs)
 	}
 }
+
+func TestAgentSSEAdapterNormalizesToolProgress(t *testing.T) {
+	runID := uuid.New()
+	ch := make(chan responses.SSEEvent, 4)
+	adapter := newAgentSSEAdapter(ch, runID.String())
+
+	if !adapter.Emit(agent.EventToolProgress, agent.ToolProgressEvent{
+		RunID:      runID,
+		ToolName:   "write_files",
+		BatchID:    "batch-1",
+		BatchIndex: 2,
+		BatchTotal: 4,
+		Path:       "app/page.tsx",
+		Operation:  "create",
+		Bytes:      128,
+		Message:    "create app/page.tsx (2/4)",
+	}) {
+		t.Fatal("progress Emit returned false")
+	}
+
+	legacy := <-ch
+	if legacy.Event != agent.EventToolProgress {
+		t.Fatalf("legacy event = %q, want %q", legacy.Event, agent.EventToolProgress)
+	}
+	progressEvent := (<-ch).Data.(responses.UIMessagePartEvent)
+	if progressEvent.SourceEvent != agent.EventToolProgress {
+		t.Fatalf("source event = %q", progressEvent.SourceEvent)
+	}
+	if progressEvent.Part.Type != "tool" || progressEvent.Part.ToolName != "write_files" || progressEvent.Part.State != "output-streaming" {
+		t.Fatalf("progress part = %#v", progressEvent.Part)
+	}
+	output, ok := progressEvent.Part.Output.(map[string]any)
+	if !ok {
+		t.Fatalf("progress output type = %T", progressEvent.Part.Output)
+	}
+	if output["path"] != "app/page.tsx" || output["batch_index"] != 2 || output["batch_total"] != 4 {
+		t.Fatalf("progress output = %#v", output)
+	}
+}

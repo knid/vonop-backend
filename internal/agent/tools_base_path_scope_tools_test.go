@@ -184,16 +184,28 @@ func TestWriteFilesTool_EmitsBatchMetadata(t *testing.T) {
 	if isError {
 		t.Fatalf("expected write_files success, got: %s", out)
 	}
-	if len(emitter.events) != 2 {
-		t.Fatalf("expected 2 file_written events, got %d", len(emitter.events))
+	if len(emitter.events) != 4 {
+		t.Fatalf("expected 2 tool_progress and 2 file_written events, got %d", len(emitter.events))
 	}
-	first := emitter.events[0].Data.(FileWrittenEvent)
-	second := emitter.events[1].Data.(FileWrittenEvent)
+	if emitter.events[0].Type != EventToolProgress || emitter.events[1].Type != EventFileWritten ||
+		emitter.events[2].Type != EventToolProgress || emitter.events[3].Type != EventFileWritten {
+		t.Fatalf("unexpected event order: %#v", emitter.events)
+	}
+	firstProgress := emitter.events[0].Data.(ToolProgressEvent)
+	secondProgress := emitter.events[2].Data.(ToolProgressEvent)
+	first := emitter.events[1].Data.(FileWrittenEvent)
+	second := emitter.events[3].Data.(FileWrittenEvent)
 	if first.BatchID == "" || first.BatchID != second.BatchID {
 		t.Fatalf("expected shared batch id, got %q and %q", first.BatchID, second.BatchID)
 	}
 	if first.BatchIndex != 1 || second.BatchIndex != 2 || first.BatchTotal != 2 || second.BatchTotal != 2 {
 		t.Fatalf("unexpected batch indexes: %+v %+v", first, second)
+	}
+	if firstProgress.BatchID != first.BatchID || secondProgress.BatchID != first.BatchID {
+		t.Fatalf("expected progress events to share batch id %q, got %q and %q", first.BatchID, firstProgress.BatchID, secondProgress.BatchID)
+	}
+	if firstProgress.BatchIndex != 1 || secondProgress.BatchIndex != 2 || firstProgress.ToolName != "write_files" {
+		t.Fatalf("unexpected progress metadata: %+v %+v", firstProgress, secondProgress)
 	}
 }
 

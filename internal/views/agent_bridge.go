@@ -134,6 +134,25 @@ func agentEventToUIMessagePart(eventType string, data any) (responses.UIMessageP
 			DurationMs: ev.DurationMs,
 			RiskLevel:  ev.RiskLevel,
 		}, ev.RunID.String(), true
+	case agent.EventToolProgress:
+		ev, ok := data.(agent.ToolProgressEvent)
+		if !ok {
+			return responses.UIMessagePart{}, "", false
+		}
+		return responses.UIMessagePart{
+			Type:     "tool",
+			ToolName: ev.ToolName,
+			State:    "output-streaming",
+			Output: map[string]any{
+				"batch_id":    ev.BatchID,
+				"batch_index": ev.BatchIndex,
+				"batch_total": ev.BatchTotal,
+				"path":        ev.Path,
+				"operation":   ev.Operation,
+				"bytes":       ev.Bytes,
+				"message":     ev.Message,
+			},
+		}, ev.RunID.String(), true
 	case agent.EventToolApprovalRequired:
 		ev, ok := data.(agent.ToolApprovalRequiredEvent)
 		if !ok {
