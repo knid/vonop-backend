@@ -79,11 +79,36 @@ function normalizeEmail(raw: string): string {
   return `${baseLocal}@${domain}`;
 }
 
+function resolvePaymentProviders(raw: unknown): string[] {
+  const paymentConfig = (raw ?? {}) as Record<string, unknown>;
+  const providers: string[] = [];
+  for (const [provider, providerCfg] of Object.entries(paymentConfig)) {
+    if (providerCfg && typeof providerCfg === "object") {
+      const enabled = (providerCfg as Record<string, unknown>).enabled;
+      if (enabled === true) {
+        providers.push(provider);
+        continue;
+      }
+      if (!("enabled" in (providerCfg as Record<string, unknown>))) {
+        providers.push(provider);
+      }
+    }
+  }
+  return providers;
+}
+
+function resolveSiteUrlFromRequest(req: NextRequest): string {
+  const fromEnv = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "");
+  if (fromEnv) return fromEnv;
+  return req.nextUrl.origin.replace(/\/+$/, "");
+}
+
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as CheckoutBody;
   if (!body.provider || !body.email || !body.shippingAddress) {
     return NextResponse.json({ error: "missing_fields" }, { status: 400 });
   }
+  const requestedProvider = body.provider.toLowerCase();
 
   // Match the normalization used in /api/reviews so the verified-purchase
   // check finds orders for a customer who paid as `Buyer+tag@gmail.com` and
@@ -153,6 +178,13 @@ export async function POST(req: NextRequest) {
 
   const [cfg] = await db.select().from(schema.config).limit(1);
   if (!cfg) return NextResponse.json({ error: "no_config" }, { status: 500 });
+  const paymentProviders = resolvePaymentProviders(cfg.paymentConfig);
+  if (!paymentProviders.includes(requestedProvider)) {
+    return NextResponse.json(
+      { error: "unsupported_payment_provider" },
+      { status: 400 },
+    );
+  }
 
   const [cart] = await db
     .select()
@@ -300,7 +332,7 @@ export async function POST(req: NextRequest) {
         currency: cfg.currency,
         status: "pending",
         paymentStatus: "pending",
-        paymentProvider: body.provider,
+        paymentProvider: requestedProvider,
         discountId: cart.discountId,
         // cartId: applyPaymentOutcome drops the cart on pending→paid.
         // viewToken: gates /checkout/success + /checkout/cancel against IDOR.
@@ -341,10 +373,14 @@ export async function POST(req: NextRequest) {
 
   // --- Payment session --------------------------------------------------
   const clientIp = resolveClientIp(req);
+  const siteUrl = resolveSiteUrlFromRequest(req);
   let result;
   try {
-    const adapter = getAdapter(body.provider);
-    result = await adapter.createSession(order, cfg, { clientIp });
+    const adapter = getAdapter(requestedProvider);
+    result = await adapter.createSession(order, cfg, {
+      clientIp,
+      siteUrl,
+    });
   } catch (err) {
     // Adapter failed — cancel the order and put inventory back so the
     // customer can retry without leaking stock.

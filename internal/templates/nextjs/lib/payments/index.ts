@@ -30,6 +30,7 @@ export type WebhookEvent = {
 // is on metadata) stay out of the schema.
 export type CheckoutContext = {
   clientIp: string; // best-effort from x-forwarded-for; "" if unresolved
+  siteUrl?: string; // checkout return URL base (fallbacks to NEXT_PUBLIC_SITE_URL)
 };
 
 export type PaymentAdapter = {

@@ -21,6 +21,15 @@ function getClient(): Stripe {
   return new Stripe(sk, { apiVersion: "2024-12-18.acacia", timeout: 15000 });
 }
 
+function resolveSiteUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
+  if (!trimmed) return "";
+  const noSlash = trimmed.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(noSlash)) return noSlash;
+  // In case NEXT_PUBLIC_SITE_URL is set to bare host:port.
+  return `https://${noSlash}`;
+}
+
 // Build Stripe line_items from order_items, showing each product at its
 // real unit_amount and quantity. Any delta between subtotal and totalCents
 // (tax + shipping - discount) is added as a single positive or negative
@@ -109,7 +118,7 @@ function buildLineItems(
 export async function createSession(
   order: Order,
   config: Config,
-  _ctx: CheckoutContext,
+  ctx: CheckoutContext,
 ): Promise<CheckoutResult> {
   const totalCents = Number(order.totalCents);
   if (totalCents <= 0) {
@@ -123,7 +132,10 @@ export async function createSession(
   }
 
   const stripe = getClient();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const siteUrl = resolveSiteUrl(ctx.siteUrl);
+  if (!siteUrl) {
+    throw new Error("Payment callback URL base not configured");
+  }
 
   const items = await db
     .select({
