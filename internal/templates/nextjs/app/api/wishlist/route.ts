@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { randomUUID } from "crypto";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
@@ -9,7 +9,38 @@ const CART_SESSION_COOKIE = "wemob_cart_session";
 // 30 days — shared lifetime with the cart session cookie set by
 // /api/cart so a returning visitor sees both cart and wishlist intact.
 const CART_SESSION_MAX_AGE = 60 * 60 * 24 * 30;
-const IS_PROD = process.env.NODE_ENV === "production";
+
+function isLocalHostHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.startsWith("localhost:") ||
+    host.startsWith("127.0.0.1:") ||
+    host.startsWith("[::1]") ||
+    host === "::1"
+  );
+}
+
+function isSecureCookie(): boolean {
+  const requestHeaders = headers();
+  const xProto = requestHeaders.get("x-forwarded-proto")?.toLowerCase();
+  if (xProto) {
+    const proto = xProto.split(",")[0]?.trim();
+    if (proto === "https" || proto === "http") return proto === "https";
+  }
+
+  const origin = requestHeaders.get("origin")?.toLowerCase();
+  if (origin) {
+    return origin.startsWith("https://");
+  }
+
+  const host = requestHeaders.get("host") ?? "";
+  if (isLocalHostHost(host)) {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
+}
 
 // Read-or-mint the session id. Setting the cookie is deferred to the
 // response via stampSession() below — relying on cookies().set() inside a
@@ -25,7 +56,7 @@ function stampSession(response: NextResponse, sid: string): void {
   response.cookies.set(CART_SESSION_COOKIE, sid, {
     httpOnly: true,
     sameSite: "lax",
-    secure: IS_PROD,
+    secure: isSecureCookie(),
     path: "/",
     maxAge: CART_SESSION_MAX_AGE,
   });
