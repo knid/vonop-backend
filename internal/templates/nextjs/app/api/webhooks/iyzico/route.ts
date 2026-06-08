@@ -39,7 +39,8 @@ export async function POST(req: NextRequest) {
   // The viewToken scopes the success/cancel page against IDOR (see
   // /api/checkout). We look it up from the order we just touched — the
   // customer's browser doesn't carry it across the iyzico round-trip.
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const siteUrl =
+    (process.env.NEXT_PUBLIC_SITE_URL ?? req.nextUrl.origin).replace(/\/+$/, "");
   let tokenParam = "";
   if (event.orderId) {
     const [row] = await db

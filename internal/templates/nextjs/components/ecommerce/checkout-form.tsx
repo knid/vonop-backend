@@ -46,8 +46,11 @@ export function CheckoutForm() {
   const showPhoneField = isTurkishStore;
 
   React.useEffect(() => {
-    if (providers.length === 1) setSelectedProvider(providers[0]);
-  }, [providers.length]);
+    if (!providers.length) return;
+    setSelectedProvider((prev) =>
+      prev && providers.includes(prev) ? prev : providers[0],
+    );
+  }, [providers]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -72,7 +75,7 @@ export function CheckoutForm() {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          provider: selectedProvider || "cod",
+          provider: selectedProvider,
           email: form.email,
           name: form.name,
           phone: form.phone || undefined,
@@ -257,9 +260,9 @@ export function CheckoutForm() {
           <div className="rounded-xl bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>
         )}
 
-        <button
+          <button
           type="submit"
-          disabled={isSubmitting || (!selectedProvider && providers.length > 0)}
+          disabled={isSubmitting || !selectedProvider}
           className="flex w-full items-center justify-center gap-2 rounded-full bg-foreground px-6 py-3.5 text-sm font-semibold tracking-wide text-background transition-opacity hover:opacity-90 disabled:opacity-50"
         >
           {isSubmitting && <Loader2 className="h-4 w-4 animate-spin" />}

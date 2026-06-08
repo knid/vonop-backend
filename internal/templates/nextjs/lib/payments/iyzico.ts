@@ -72,6 +72,15 @@ async function getClient(): Promise<IyzipayClient> {
   return new Iyzipay({ apiKey, secretKey, uri });
 }
 
+function resolveSiteUrl(raw: string | undefined): string {
+  const trimmed = (raw ?? process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
+  if (!trimmed) return "";
+  const noSlash = trimmed.replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(noSlash)) return noSlash;
+  // In case NEXT_PUBLIC_SITE_URL is set to bare host:port.
+  return `https://${noSlash}`;
+}
+
 function promisify<T>(fn: (cb: IyzipayCallback<T>) => void): Promise<T> {
   return new Promise<T>((resolve, reject) =>
     fn((err, res) => (err ? reject(err) : resolve(res))),
@@ -116,7 +125,10 @@ export async function createSession(
   ctx: CheckoutContext,
 ): Promise<CheckoutResult> {
   const iyzipay = await getClient();
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+  const siteUrl = resolveSiteUrl(ctx.siteUrl);
+  if (!siteUrl) {
+    throw new Error("Payment callback URL base not configured");
+  }
 
   const nameParts = (order.customerName ?? "").trim().split(/\s+/);
   const firstName = nameParts[0] || "Customer";
