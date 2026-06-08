@@ -1,16 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { randomUUID } from "crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { db, schema } from "@/lib/db";
 import { getCart as getCartServer } from "@/lib/wemob-store-server";
 
 const CART_SESSION_COOKIE = "wemob_cart_session";
-// NODE_ENV is the only reliable signal here: templates ship to production
-// stores behind HTTPS (Caddy / Vercel) where `secure` must be set so the
-// cookie can't leak over plaintext or downgrade. In dev we run on http://
-// localhost and need the flag off.
-const IS_PROD = process.env.NODE_ENV === "production";
+
+function isLocalHostHost(host: string): boolean {
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.startsWith("localhost:") ||
+    host.startsWith("127.0.0.1:") ||
+    host.startsWith("[::1]") ||
+    host === "::1"
+  );
+}
+
+function isSecureCookie(): boolean {
+  const requestHeaders = headers();
+  const xProto = requestHeaders.get("x-forwarded-proto")?.toLowerCase();
+  if (xProto) {
+    const proto = xProto.split(",")[0]?.trim();
+    if (proto === "https" || proto === "http") return proto === "https";
+  }
+
+  const origin = requestHeaders.get("origin")?.toLowerCase();
+  if (origin) {
+    return origin.startsWith("https://");
+  }
+
+  const host = requestHeaders.get("host") ?? "";
+  if (isLocalHostHost(host)) {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
+}
 
 async function ensureCart(sessionId: string) {
   let [cart] = await db
@@ -47,7 +74,7 @@ function stampSession(response: NextResponse, sid: string): void {
   response.cookies.set(CART_SESSION_COOKIE, sid, {
     httpOnly: true,
     sameSite: "lax",
-    secure: IS_PROD,
+    secure: isSecureCookie(),
     path: "/",
     maxAge: CART_SESSION_MAX_AGE,
   });
