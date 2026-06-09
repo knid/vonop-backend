@@ -30,6 +30,12 @@ _setup_test_env()
 def _init_repo_for_test(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.check_call(["git", "init", "-q"], cwd=str(path))
+    subprocess.check_call(
+        ["git", "config", "user.email", "dev@wemob.io"], cwd=str(path)
+    )
+    subprocess.check_call(
+        ["git", "config", "user.name", "wemob-test"], cwd=str(path)
+    )
     (path / ".gitkeep").write_text("", encoding="utf-8")
     subprocess.check_call(["git", "add", ".gitkeep"], cwd=str(path))
     subprocess.check_call(["git", "commit", "-m", "init"], cwd=str(path))
