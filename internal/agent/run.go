@@ -391,20 +391,22 @@ func runNative(
 
 	// --- Step 10: emit run_start ---
 	emitter.Emit(EventRunStart, RunStartEvent{
-		RunID:           runID,
-		PreCommit:       preCommit,
-		Model:           model,
-		Provider:        provider.Name,
-		MaxTurns:        maxTurns,
-		Tools:           registry.Names(),
-		AgentID:         profile.ID,
-		AgentName:       profile.Name,
-		Skills:          skillIDs(activeSkills),
-		RequiredSkills:  contextPacket.SkillIDs,
+		RunID:          runID,
+		PreCommit:      preCommit,
+		Model:          model,
+		Provider:       provider.Name,
+		MaxTurns:       maxTurns,
+		Tools:          registry.Names(),
+		AgentID:        profile.ID,
+		AgentName:      profile.Name,
+		Skills:         skillIDs(activeSkills),
+		RequiredSkills: contextPacket.SkillIDs,
 		SuggestedSkills: contextPacket.SuggestedSkillIDs,
 		AvailableSkills: contextPacket.ManifestSkillIDs,
-		LoadedSkills:    nil,
-		Handoffs:        append([]string(nil), profile.HandoffTargets...),
+		LoadedSkills:   nil,
+		Handoffs:       append([]string(nil), profile.HandoffTargets...),
+		RuntimeKind:    string(RuntimeNativeGo),
+		SubagentNames:  append([]string(nil), profile.HandoffTargets...),
 	})
 	emitTodoSnapshot(rc)
 

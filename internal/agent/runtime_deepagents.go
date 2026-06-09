@@ -84,6 +84,24 @@ type deepAgentsEventDataDone struct {
 	StopReason string `json:"stop_reason"`
 }
 
+// deepAgentsEventDataLLMUsage mirrors the payload emitted by the Python
+// LangChain callback handler. Field names match the Python side verbatim
+// so the JSON unmarshal is a 1:1 mapping. See utils.PythonUsageEntry for
+// the canonical Go struct that lives in the TokenTracker.
+type deepAgentsEventDataLLMUsage struct {
+	SpanID           string  `json:"span_id"`
+	Provider         string  `json:"provider"`
+	Model            string  `json:"model"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CacheReadTokens  int     `json:"cache_read_tokens"`
+	CacheWriteTokens int     `json:"cache_write_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+	LatencyMs        int     `json:"latency_ms"`
+	Subagent         string  `json:"subagent"`
+	RuntimeKind      string  `json:"runtime_kind"`
+}
+
 func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter EventEmitter) (*RuntimeResult, error) {
 	if r == nil {
 		return nil, New(CodeInternal, "setup", "runtime is not initialized", nil)
@@ -278,6 +296,8 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		AvailableSkills: []string{},
 		LoadedSkills:    []string{},
 		Handoffs:        []string{},
+		RuntimeKind:     string(RuntimeDeepAgents),
+		SubagentNames:   deepagentsSubagentNames,
 	})
 	baseFileMap := fileMap
 	var poller *WorkspaceDiffPoller
@@ -498,6 +518,32 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 				Message:    payload.Message,
 			})
 			return nil
+
+		case "llm_usage":
+			// PR 9: forward per-model-call usage from the Python LangChain
+			// callback into the same TokenTracker the native runtime uses.
+			// finaliseSuccess / finaliseFailureV2 then bill from the unified
+			// set of entries — no native-vs-deepagents split in PostHog or
+			// in the LLMTokenUsage row.
+			var payload deepAgentsEventDataLLMUsage
+			_ = json.Unmarshal(evt.Data, &payload)
+			if tracker == nil {
+				return nil
+			}
+			tracker.RecordFromPythonUsage(utils.PythonUsageEntry{
+				SpanID:           payload.SpanID,
+				Provider:         payload.Provider,
+				Model:            payload.Model,
+				PromptTokens:     payload.PromptTokens,
+				CompletionTokens: payload.CompletionTokens,
+				CacheReadTokens:  payload.CacheReadTokens,
+				CacheWriteTokens: payload.CacheWriteTokens,
+				CostUSD:          payload.CostUSD,
+				LatencyMs:        payload.LatencyMs,
+				Subagent:         payload.Subagent,
+				RuntimeKind:      payload.RuntimeKind,
+			})
+			return nil
 		}
 
 		return nil
@@ -695,4 +741,15 @@ func buildDeepAgentsToolSpecs(reg *Registry) []deepagents.ToolSpec {
 		})
 	}
 	return out
+}
+
+// deepagentsSubagentNames mirrors the static subagent set the Python
+// runtime instantiates. Kept in sync with build_subagents() in
+// deepagents-runtime/app/runtime.py. The list is small and stable; when
+// the plan evolves, this is the single place to update.
+var deepagentsSubagentNames = []string{
+	"design_direction_agent",
+	"frontend_builder_agent",
+	"data_backend_agent",
+	"qa_debug_agent",
 }

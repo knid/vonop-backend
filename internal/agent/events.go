@@ -40,6 +40,20 @@ type RunStartEvent struct {
 	AvailableSkills []string  `json:"available_skills,omitempty"`
 	LoadedSkills    []string  `json:"loaded_skills,omitempty"`
 	Handoffs        []string  `json:"handoffs,omitempty"`
+	// RuntimeKind identifies which agent runtime produced this run.
+	// "native_go" for the in-process Go loop, "deepagents" for the
+	// Python runtime. Populated by the runtime so dashboards can split
+	// cost + latency by engine. PR 13 sets this from the deploy config
+	// when AppAgentRun.runtime_kind lands.
+	RuntimeKind string `json:"runtime_kind,omitempty"`
+	// RuntimeVersion is the build/version of the runtime implementation.
+	// For "native_go" the controller's binary SHA; for "deepagents" the
+	// service image tag. Empty until PR 13 wires the migration.
+	RuntimeVersion string `json:"runtime_version,omitempty"`
+	// SubagentNames is the list of static subagents the runtime will
+	// dispatch to. Mirrors the Python `_system_prompt` "handoffs" block
+	// and lets the dashboard render the subagent picker.
+	SubagentNames []string `json:"subagent_names,omitempty"`
 }
 
 type TurnStartEvent struct {

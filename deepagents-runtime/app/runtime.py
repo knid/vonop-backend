@@ -559,6 +559,23 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     # installed.
     from deepagents import DeepAgents
 
+    # PR 9: wire the LLM-usage callback. The closure emits one NDJSON
+    # llm_usage event per model call; the Go runtime consumes it and
+    # appends to the run's TokenTracker so final billing stays unified
+    # with the native Go runtime.
+    from .usage import (
+        WemobUsageCallback,
+        langsmith_callbacks,
+        langsmith_metadata,
+        make_event_emitter,
+    )
+
+    usage_emit = make_event_emitter(request, subagent="")
+    usage_callback = WemobUsageCallback(emit=usage_emit)
+    callbacks: list[Any] = [usage_callback]
+    if langsmith_callbacks(request):
+        callbacks.extend(langsmith_callbacks(request))
+
     agent_kwargs = {
         "model": model,
         "system_prompt": prompt,
@@ -567,6 +584,7 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
         "context": context,
         "thread_id": request.run_id,
         "subagents": subagents,
+        "callbacks": callbacks,
     }
     try:
         agent = DeepAgents(**agent_kwargs)
@@ -578,6 +596,17 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
             setattr(agent, "thread_id", request.run_id)
         if hasattr(agent, "tools"):
             setattr(agent, "tools", wemob_tools)
+        if hasattr(agent, "callbacks"):
+            setattr(agent, "callbacks", callbacks)
+
+    # Drop the run's recorder on the way out so subsequent runs start clean.
+    from .usage import drop_recorder
+
+    def _cleanup() -> None:
+        try:
+            drop_recorder(request.run_id)
+        except Exception:
+            pass
 
     event_stream = None
     for method_name in ("stream", "run", "astream", "stream_run", "run_stream"):

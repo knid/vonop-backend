@@ -18,6 +18,13 @@ class Settings:
     GO_TOOL_BASE_URL = os.getenv("GO_TOOL_BASE_URL", "").strip()
     GO_TOOL_TIMEOUT_S = float(os.getenv("GO_TOOL_TIMEOUT_S", "60") or 60)
 
+    # PR 9: LangSmith tracing. When LANGSMITH_TRACING=true and the
+    # `langsmith` package is installed, the runtime attaches a LangChain
+    # tracer so model calls land in the configured LangSmith project.
+    LANGSMITH_TRACING = (os.getenv("LANGSMITH_TRACING", "false").lower() in {"1", "true", "yes"})
+    LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "wemob-deepagents-prod")
+    LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "").strip()
+
 
 def require_internal_token() -> str:
     token = Settings.INTERNAL_TOKEN.strip()
