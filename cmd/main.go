@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
 	"github.com/knid/wemob/internal/bootstrap"
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
@@ -1394,6 +1395,8 @@ func isSensitiveLogPath(path string) bool {
 
 func main() {
 	controller, _ := bootstrap.BootstrapController()
+
+	agent.ValidateRuntimeStartup()
 
 	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
 	// Failure-soft — log+continue so a missing IAM permission doesn't block startup.

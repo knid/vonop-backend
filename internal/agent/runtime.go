@@ -3,12 +3,13 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/knid/wemob/internal/services/gitrepo"
-	"github.com/knid/wemob/internal/services/deepagents"
+	"log/slog"
 	"os"
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/deepagents"
+	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -144,4 +145,22 @@ func NewDeepAgentsRuntime() (AgentRuntime, error) {
 // NewNativeGoRuntime returns the in-process legacy runtime implementation.
 func NewNativeGoRuntime() AgentRuntime {
 	return NativeGoRuntime{}
+}
+
+func ValidateRuntimeStartup() {
+	kind := ResolveAgentRuntimeKind()
+	if kind != RuntimeDeepAgents {
+		return
+	}
+	url := strings.TrimSpace(os.Getenv("DEEPAGENTS_RUNTIME_URL"))
+	token := strings.TrimSpace(os.Getenv("DEEPAGENTS_INTERNAL_TOKEN"))
+	if url == "" {
+		slog.Error("AGENT_RUNTIME=deepagents but DEEPAGENTS_RUNTIME_URL is not set")
+		os.Exit(1)
+	}
+	if token == "" {
+		slog.Error("AGENT_RUNTIME=deepagents but DEEPAGENTS_INTERNAL_TOKEN is not set")
+		os.Exit(1)
+	}
+	slog.Info("agent runtime configured", "kind", string(kind), "url", url)
 }

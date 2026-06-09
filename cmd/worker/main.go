@@ -11,6 +11,7 @@ import (
 
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/bootstrap"
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/tasks"
 )
@@ -23,6 +24,8 @@ func main() {
 	}
 
 	controller, redisOpts := bootstrap.BootstrapController()
+
+	agent.ValidateRuntimeStartup()
 
 	// Concurrency caps total in-flight tasks across queues. 4 leaves
 	// headroom for parallel web/cron tasks (which are IO-bound). The

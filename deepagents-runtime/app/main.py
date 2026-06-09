@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from time import time
 from typing import AsyncGenerator
@@ -76,9 +77,36 @@ async def healthz() -> dict[str, str]:
 
 
 @app.get("/readyz")
-async def readyz() -> dict[str, str]:
+async def readyz() -> dict[str, str | list[str]]:
+    reasons: list[str] = []
+
     if not Settings.REPO_BASE:
-        return JSONResponse(status_code=500, content={"status": "error", "reason": "missing config"})
+        reasons.append("WEMOB_REPOS_BASE is not configured")
+    else:
+        from pathlib import Path
+        base = Path(Settings.REPO_BASE)
+        if not base.exists():
+            reasons.append(f"WEMOB_REPOS_BASE does not exist: {Settings.REPO_BASE}")
+        elif not base.is_dir():
+            reasons.append(f"WEMOB_REPOS_BASE is not a directory: {Settings.REPO_BASE}")
+        elif not os.access(str(base), os.W_OK):
+            reasons.append(f"WEMOB_REPOS_BASE is not writable: {Settings.REPO_BASE}")
+
+    if not Settings.INTERNAL_TOKEN:
+        reasons.append("DEEPAGENTS_INTERNAL_TOKEN is not configured")
+
+    if not Settings.GO_TOOL_BASE_URL:
+        reasons.append("GO_TOOL_BASE_URL is not configured")
+
+    model_providers = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("MOONSHOT_API_KEY")
+    if not model_providers:
+        reasons.append("no model provider API key configured (ANTHROPIC_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, or MOONSHOT_API_KEY)")
+
+    if Settings.LANGSMITH_TRACING and not Settings.LANGSMITH_API_KEY:
+        reasons.append("LANGSMITH_TRACING is enabled but LANGSMITH_API_KEY is not configured")
+
+    if reasons:
+        return JSONResponse(status_code=503, content={"status": "not_ready", "reasons": reasons})
     return {"status": "ready"}
 
 
