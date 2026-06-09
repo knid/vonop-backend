@@ -226,6 +226,70 @@ func defaultAgentIDForProject(project *models.AppProject) string {
 	return "web-builder"
 }
 
+// deepAgentsExcludedTools is the set of ToolExecutor names that MUST NOT be
+// exposed to the Python DeepAgents runtime. The plan keeps file editing under
+// DeepAgents' native /workspace filesystem tools and prevents two parallel
+// file-source semantics from confusing the model. Skill loading and TODO
+// management are also handled natively in Python; the legacy Go wrappers are
+// filtered out so the LLM doesn't see duplicates.
+var deepAgentsExcludedTools = map[string]struct{}{
+	// Native DeepAgents /workspace filesystem tools own file editing.
+	"read_files":  {},
+	"list_files":  {},
+	"grep":        {},
+	"write_file":  {},
+	"write_files": {},
+	"edit_file":   {},
+	"multi_edit":  {},
+	"patch_files": {},
+	"delete_file": {},
+	// DeepAgents skills replace custom load_skill-style helpers.
+	"list_skills": {},
+	"search_skills": {},
+	"load_skill":  {},
+	// DeepAgents native write_todos replaces the Go helper.
+	"update_todos": {},
+	// DESIGN.md is a Wemob convention; the Python side writes it directly
+	// through /workspace using the file tools above.
+	"create_design": {},
+}
+
+// FilterRegistryForDeepAgents returns a deepAgentsExcludedTools-free copy of
+// the given registry. Server-side tools (e.g. web_search) and MCP tools are
+// kept because the Python side turns them into first-class tools too.
+//
+// The original registry is not modified — the runtime keeps the unfiltered
+// registry for any fallback path that might still need it.
+func FilterRegistryForDeepAgents(reg *Registry) *Registry {
+	if reg == nil {
+		return NewRegistry()
+	}
+	filtered := NewRegistry()
+	excluded := func(name string) bool {
+		_, ok := deepAgentsExcludedTools[name]
+		return ok
+	}
+	for _, name := range reg.order {
+		if excluded(name) {
+			continue
+		}
+		if tool, ok := reg.tools[name]; ok {
+			filtered.tools[name] = tool
+			filtered.order = append(filtered.order, name)
+			continue
+		}
+		// Preserve matching server-tool entries.
+		for _, ref := range reg.serverTools {
+			if ref.DisplayName == name {
+				filtered.serverTools = append(filtered.serverTools, ref)
+				filtered.order = append(filtered.order, name)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
 // projectHasDatabase returns true if the project has a connected database
 // (signaled by a boolean in project.Settings). The actual connection lookup
 // still runs inside the execute_sql tool at call time — this predicate is

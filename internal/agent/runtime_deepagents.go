@@ -253,9 +253,15 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
 	registry := BuildRegistryFor(req.Project, req.Deps, model)
+	filteredRegistry := FilterRegistryForDeepAgents(registry)
 	tools := []string{}
+	toolSpecs := []deepagents.ToolSpec{}
 	if registry != nil {
 		tools = registry.Names()
+	}
+	if filteredRegistry != nil {
+		toolSpecs = buildDeepAgentsToolSpecs(filteredRegistry)
+		tools = filteredRegistry.Names()
 	}
 	emitter.Emit(EventRunStart, RunStartEvent{
 		RunID:           runID,
@@ -323,7 +329,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 			MaxToolCalls:           limits.MaxToolCalls,
 			MaxOutputTokensPerCall: limits.MaxOutputTokensPerCall,
 		},
-		Tools:  nil,
+		Tools:  toolSpecs,
 		Skills: deepagents.SkillsSpec{},
 		Metadata: map[string]any{
 			"app_title":  req.Project.Name,
@@ -662,6 +668,31 @@ func toDeepAgentsHistory(in []utils.Message) []map[string]any {
 			entry["content"] = ""
 		}
 		out = append(out, entry)
+	}
+	return out
+}
+
+// buildDeepAgentsToolSpecs converts a Registry's tool executors into the
+// ToolSpec list Python consumes to construct one first-class tool per spec.
+// One Python function per spec — no generic wemob_tool wrapper.
+func buildDeepAgentsToolSpecs(reg *Registry) []deepagents.ToolSpec {
+	if reg == nil {
+		return nil
+	}
+	out := make([]deepagents.ToolSpec, 0, len(reg.order))
+	for _, name := range reg.order {
+		exec, ok := reg.tools[name]
+		if !ok {
+			// Server tools (e.g. web_search) are not exposed to DeepAgents;
+			// the native agent loop uses them via the LLM provider.
+			continue
+		}
+		out = append(out, deepagents.ToolSpec{
+			Name:        exec.Name(),
+			Description: exec.Description(),
+			Schema:      exec.Schema(),
+			RiskLevel:   ClassifyToolRisk(exec.Name()),
+		})
 	}
 	return out
 }

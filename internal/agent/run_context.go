@@ -163,6 +163,29 @@ func (rc *RunContext) ActiveSkillIDs() []string {
 	return skillIDs(append(append([]SkillFile(nil), rc.RequiredSkills...), rc.LoadedSkills...))
 }
 
+// NewRunContext constructs a minimal RunContext suitable for the
+// per-call bridge path (PR 8 DeepAgents tool executor) where the
+// agent loop is running out-of-process. The orchestrator sets
+// FileMap/Emitter/Tracker as it owns them; this constructor only
+// fills the fields the tool executors and approval flow read.
+func NewRunContext(
+	runID uuid.UUID,
+	profile *AgentProfile,
+	project *models.AppProject,
+	user *models.User,
+	deps *RunDependencies,
+) *RunContext {
+	return &RunContext{
+		RunID:         runID,
+		Profile:       profile,
+		Project:       project,
+		User:          user,
+		Deps:          deps,
+		ImageCache:    make(map[string]string),
+		ImageInflight: make(map[string]*imageInflightCall),
+	}
+}
+
 func (rc *RunContext) LoadedSkillIDs() []string {
 	if rc == nil {
 		return nil

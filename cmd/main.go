@@ -2427,6 +2427,14 @@ func main() {
 
 		r.Post("/internal/e2b/agent/authorize", httpViews.AuthorizeE2BAgentSandbox)
 
+		// PR 8: deepagents-runtime calls this for every first-class Wemob
+		// tool the model invokes. Auth is the DEEPAGENTS_INTERNAL_TOKEN
+		// bearer; no anonymous access. The endpoint is also used for MCP
+		// approval flow when an MCP tool's policy is "ask".
+		r.Route("/internal/v1/agent-runs", func(r chi.Router) {
+			r.Post("/{run_id}/tools/{tool_name}/execute", httpViews.HandleDeepAgentsToolExecute)
+		})
+
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
 		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot
 		// send custom headers — InternalOnly would always 401 it. The endpoint

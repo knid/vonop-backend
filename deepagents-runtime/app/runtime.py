@@ -516,14 +516,54 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
         "subagents": list(subagents.keys()),
     }
 
-    # Import lazily so tests can run in environments without deepagents installed.
+    # Build one Python tool per Wemob ToolSpec. The closures POST to the Go
+    # internal tool endpoint so guardrails and MCP approval flow stay on
+    # the Go side. We carry an emit hook for tool_call_start/result frames;
+    # the actual events are produced as bytes by make_wemob_tool and queued
+    # through a small async buffer so the consumer of the stream sees them
+    # in the right order.
+    from .config import Settings
+    from .tool_bridge import GoToolClient
+    from .wemob_tools import build_wemob_tools
+
+    tool_emit_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+    seq_counter = {"value": 0}
+
+    def _queued_emit(raw: bytes) -> None:
+        # Replace seq=0 with the next monotonic counter so the SSE client
+        # sees strictly increasing seq even when the tool fires multiple
+        # events between two agent-level events.
+        seq_counter["value"] += 1
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            tool_emit_queue.put_nowait(raw)
+            return
+        if payload.get("seq") == 0:
+            payload["seq"] = seq_counter["value"]
+        tool_emit_queue.put_nowait(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+
+    client = GoToolClient(
+        base_url=Settings.GO_TOOL_BASE_URL,
+        token=Settings.INTERNAL_TOKEN,
+        timeout_s=Settings.GO_TOOL_TIMEOUT_S,
+    )
+    wemob_tools = build_wemob_tools(
+        [t.model_dump() if hasattr(t, "model_dump") else dict(t) for t in request.tools],
+        run_context=request,
+        client=client,
+        emit=_queued_emit,
+    )
+
+    # Lazily imported so tests can run in environments without deepagents
+    # installed.
     from deepagents import DeepAgents
 
     agent_kwargs = {
         "model": model,
         "system_prompt": prompt,
         "backend": backend,
-        "tools": request.tools,
+        "tools": wemob_tools,
         "context": context,
         "thread_id": request.run_id,
         "subagents": subagents,
@@ -536,6 +576,8 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
             setattr(agent, "backend", backend)
         if hasattr(agent, "thread_id"):
             setattr(agent, "thread_id", request.run_id)
+        if hasattr(agent, "tools"):
+            setattr(agent, "tools", wemob_tools)
 
     event_stream = None
     for method_name in ("stream", "run", "astream", "stream_run", "run_stream"):
@@ -556,7 +598,25 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     seq = 1
     run_id = request.run_id
     if hasattr(event_stream, "__aiter__"):
-        async for raw_event in event_stream:
+        iterator = event_stream.__aiter__()
+        while True:
+            # Drain any tool events the model produced between agent events.
+            drained_any = False
+            while not tool_emit_queue.empty():
+                try:
+                    item = tool_emit_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if item is None:
+                    continue
+                yield item
+                drained_any = True
+            if drained_any:
+                continue
+            try:
+                raw_event = await asyncio.wait_for(iterator.__anext__(), timeout=0.05)
+            except (StopAsyncIteration, asyncio.TimeoutError):
+                break
             event_type = _extract_event_type(raw_event)
             payload = _extract_event_payload(raw_event)
             mapped = _map_event(event_type, payload, request, seq)
