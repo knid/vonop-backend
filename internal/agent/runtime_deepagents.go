@@ -245,6 +245,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		Provider:     providerName,
 		Todos:        []byte("[]"),
 		Memory:       []byte("{}"),
+		RuntimeKind:  string(RuntimeDeepAgents),
 	}
 	if _, err := req.Deps.DB.InsertAgentRun(run); err != nil {
 		if isUniqueViolation(err) {
@@ -326,6 +327,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		LoadedSkills:    []string{},
 		Handoffs:        []string{},
 		RuntimeKind:     string(RuntimeDeepAgents),
+		RuntimeVersion:  runtimeVersion,
 		SubagentNames:   deepagentsSubagentNames,
 	})
 	baseFileMap := fileMap
@@ -629,6 +631,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 	if doneToolCalls == 0 {
 		doneToolCalls = toolCalls
 	}
+	run.RuntimeVersion = runtimeVersion
 	if err := finaliseSuccess(ctx, req.Deps, repo, run, emitter, fileMap, parts, tracker, runStart, doneToolCalls, doneTurns, req.Message, req.User, req.Project); err != nil {
 		return nil, err
 	}

@@ -143,6 +143,7 @@ func runNative(
 		Provider:     provider.Name,
 		Todos:        todos.RawJSON(),
 		Memory:       memory.RawJSON(),
+		RuntimeKind:  string(RuntimeNativeGo),
 	}
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
 		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
@@ -214,6 +215,8 @@ func runNative(
 	profile := contextPacket.Profile
 	activeSkills := contextPacket.Skills
 	llmMessages := contextPacket.SystemMessages
+	run.RuntimeVersion = runtimeVersion
+	run.SkillIDs = mustJSON(contextPacket.SkillIDs)
 	memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
 	memory.Persist(ctx, deps.DB, runID)
 
@@ -391,22 +394,23 @@ func runNative(
 
 	// --- Step 10: emit run_start ---
 	emitter.Emit(EventRunStart, RunStartEvent{
-		RunID:          runID,
-		PreCommit:      preCommit,
-		Model:          model,
-		Provider:       provider.Name,
-		MaxTurns:       maxTurns,
-		Tools:          registry.Names(),
-		AgentID:        profile.ID,
-		AgentName:      profile.Name,
-		Skills:         skillIDs(activeSkills),
-		RequiredSkills: contextPacket.SkillIDs,
+		RunID:           runID,
+		PreCommit:       preCommit,
+		Model:           model,
+		Provider:        provider.Name,
+		MaxTurns:        maxTurns,
+		Tools:           registry.Names(),
+		AgentID:         profile.ID,
+		AgentName:       profile.Name,
+		Skills:          skillIDs(activeSkills),
+		RequiredSkills:  contextPacket.SkillIDs,
 		SuggestedSkills: contextPacket.SuggestedSkillIDs,
 		AvailableSkills: contextPacket.ManifestSkillIDs,
-		LoadedSkills:   nil,
-		Handoffs:       append([]string(nil), profile.HandoffTargets...),
-		RuntimeKind:    string(RuntimeNativeGo),
-		SubagentNames:  append([]string(nil), profile.HandoffTargets...),
+		LoadedSkills:    nil,
+		Handoffs:        append([]string(nil), profile.HandoffTargets...),
+		RuntimeKind:     string(RuntimeNativeGo),
+		RuntimeVersion:  runtimeVersion,
+		SubagentNames:   append([]string(nil), profile.HandoffTargets...),
 	})
 	emitTodoSnapshot(rc)
 

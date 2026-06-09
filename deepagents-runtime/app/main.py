@@ -40,6 +40,7 @@ async def add_request_context(request: Request, call_next):  # type: ignore[no-u
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Service"] = "deepagents-runtime"
+    response.headers["X-Service-Version"] = app.__version__
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -107,7 +108,7 @@ async def readyz() -> dict[str, str | list[str]]:
 
     if reasons:
         return JSONResponse(status_code=503, content={"status": "not_ready", "reasons": reasons})
-    return {"status": "ready"}
+    return {"status": "ready", "version": app.__version__}
 
 
 @app.post("/internal/v1/runs/stream", dependencies=[Depends(auth)], response_class=StreamingResponse)

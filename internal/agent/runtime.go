@@ -16,6 +16,17 @@ import (
 // AGENT_RUNTIME selects which execution engine powers agent runs.
 const envAgentRuntime = "AGENT_RUNTIME"
 
+// runtimeVersion is set from the RUNTIME_VERSION env var at init time.
+// CI sets this to the git SHA; on dev machines it defaults to "dev".
+var runtimeVersion string
+
+func init() {
+	runtimeVersion = strings.TrimSpace(os.Getenv("RUNTIME_VERSION"))
+	if runtimeVersion == "" {
+		runtimeVersion = "dev"
+	}
+}
+
 type RuntimeKind string
 
 // AgentRuntimeKind and runtime constants are kept for backwards

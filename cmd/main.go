@@ -472,6 +472,10 @@ func createSchema(db *bun.DB) error {
 		// Compact agent memory used to resume and condense long tool loops
 		// without mutating the user-visible chat transcript.
 		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS memory jsonb NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_kind text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_version text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS skill_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS python_service_version text NOT NULL DEFAULT ''`,
 		// Sub-credit gateway audit: stores the fractional credit cost when a
 		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
 		// rows and non-gateway transactions stay untouched.
@@ -907,6 +911,20 @@ END $$`,
 	for _, stmt := range mcpSchemaMigrations {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Warn("mcp schema migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// Runtime observability columns landed after the main canary had passed
+	// on production DBs. Run unconditionally with IF NOT EXISTS.
+	runtimeObservabilityMigrations := []string{
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_kind text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_version text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS skill_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS python_service_version text NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range runtimeObservabilityMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("runtime observability migration skipped", "statement", stmt, "error", err)
 		}
 	}
 
