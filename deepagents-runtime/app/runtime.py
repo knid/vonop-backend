@@ -740,8 +740,16 @@ async def stream_run(
         async for event in _stream_deepagents(request, resolved_repo_root):
             yield event
         return
-    except Exception:
-        pass
+    except Exception as exc:
+        # DeepAgents and its adapters are not guaranteed to be installed in
+        # every environment (CI, smoke tests). Log so we don't lose the
+        # diagnostic, then fall through to the deterministic scaffold so
+        # the stream always terminates with a `done` event.
+        import logging
+
+        logging.getLogger("deepagents.stream").warning(
+            "deepagents runtime unavailable, falling back to scaffold: %s", exc, exc_info=True
+        )
 
     async for event in _stream_fallback(request, resolved_repo_root):
         yield event

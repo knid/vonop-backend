@@ -234,7 +234,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
 		sm.GetSecret("E2B_AGENT_CONTROL_TOKEN"),
 	)
-	workspaceLock := workspacelock.New(redisClient)
 
 	flyService := fly.NewService(
 		sm.GetSecret("FLY_API_TOKEN"),
@@ -358,6 +357,10 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		TLSConfig: redisOpts.TLSConfig,
 	})
 
+	// Cross-process workspace lock for Python direct repo writes (PR 2).
+	// Refresh/release use Lua compare-and-delete; see workspacelock package.
+	workspaceLock := workspacelock.New(redisClient)
+
 	edgeIPsCSV := sm.GetSecret("EDGE_IPS")
 	var edgeIPs []string
 	if edgeIPsCSV != "" {
@@ -407,8 +410,8 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		metaCAPI,
 		remoteConfigService,
 		e2b,
-		workspaceLock,
 		edgeIPs,
+		workspaceLock,
 		caddyAdmin,
 	)
 

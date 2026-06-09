@@ -17,17 +17,11 @@ def ndjson_event(event_type: str, *, run_id: str, seq: int, data: dict[str, Any]
     return json.dumps(envelope).encode("utf-8") + b"\n"
 
 
-from .runtime import stream_run
-from .schemas import RunStreamRequest
+# Re-exported for callers that prefer the streaming module as entrypoint.
+# Avoid duplicating logic — the canonical implementation lives in runtime.py.
+from .runtime import stream_run  # noqa: E402
 
 
-async def fake_run_stream(payload: RunStreamRequest | dict[str, Any]) -> AsyncGenerator[bytes, None]:
-    """Compatibility shim retained for existing call sites."""
-    async for event in stream_run(payload):
-        yield event
-
-
-async def run_stream(payload: RunStreamRequest | dict[str, Any]) -> AsyncGenerator[bytes, None]:
-    """Alias for explicit naming in callers that prefer the production entrypoint."""
+async def run_stream(payload: Any) -> AsyncGenerator[bytes, None]:
     async for event in stream_run(payload):
         yield event
