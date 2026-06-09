@@ -16,6 +16,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/posthog/posthog-go"
 )
 
@@ -575,6 +576,20 @@ func (c *Controller) RestoreAppSnapshot(project *models.AppProject, commitHash s
 	return project, nil
 }
 
+func (c *Controller) AcquireWorkspaceLease(projectID, owner string) (*workspacelock.Lease, error) {
+	if c.WorkspaceLock == nil {
+		return nil, nil
+	}
+	if owner == "" {
+		owner = "api"
+	}
+	return c.WorkspaceLock.Acquire(context.Background(), projectID, owner)
+}
+
+func (c *Controller) acquireWorkspaceLease(projectID, owner string) (*workspacelock.Lease, error) {
+	return c.AcquireWorkspaceLease(projectID, owner)
+}
+
 // GetAppSnapshotDiff returns the diff for a specific commit (what it changed).
 func (c *Controller) GetAppSnapshotDiff(projectID, commitHash string) (string, error) {
 	repo, err := c.GitRepoService.Open(projectID)
@@ -606,6 +621,16 @@ func (c *Controller) GetAppGeneratedFiles(projectID string) (map[string]string, 
 // File CRUD
 
 func (c *Controller) CreateAppFile(project *models.AppProject, filePath string, content string, fileType string) error {
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:file:create:"+filePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	repo, err := c.GitRepoService.OpenOrInit(project.ID.String())
 	if err != nil {
 		return fmt.Errorf("failed to open repo: %w", err)
@@ -627,6 +652,16 @@ func (c *Controller) CreateAppFile(project *models.AppProject, filePath string, 
 }
 
 func (c *Controller) UpdateAppFile(project *models.AppProject, filePath string, content string) error {
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:file:update:"+filePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
 		return fmt.Errorf("failed to open repo: %w", err)
@@ -648,6 +683,16 @@ func (c *Controller) UpdateAppFile(project *models.AppProject, filePath string, 
 }
 
 func (c *Controller) DeleteAppFile(project *models.AppProject, filePath string) error {
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:file:delete:"+filePath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {
 		return fmt.Errorf("failed to open repo: %w", err)

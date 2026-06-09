@@ -153,7 +153,8 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 	emitter := newRedisEventEmitter(runCtx, c.RedisPubSub, p.JobID, onEvent)
 
 	// --- Run the agent ---
-	deps := c.AgentDeps(user, p.JobID)
+	workerID, _ := asynq.GetTaskID(ctx)
+	deps := c.AgentDeps(user, p.JobID, workerID)
 	runErr := agent.Run(runCtx, deps, project, user, p.Message, turnAttachments, emitter)
 	if runErr != nil {
 		slog.Error("agent_run: agent.Run failed", "job_id", p.JobID, "project_id", project.ID, "error", runErr)

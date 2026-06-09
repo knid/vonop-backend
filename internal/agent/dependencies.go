@@ -12,6 +12,7 @@ import (
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -229,6 +230,8 @@ type RunDependencies struct {
 	LLMProvider         *utils.LLMProvider
 	PostHog             posthog.Client
 	RemoteConfig        *remoteconfig.Service
+	WorkspaceLock       *workspacelock.WorkspaceLocker
+	WorkerID            string
 
 	// UserPlanName is the lowercased personal subscription plan
 	// (starter, hobby, pro, max). Used by creditsBilled as a fallback when

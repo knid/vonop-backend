@@ -19,7 +19,7 @@ import (
 // AgentDeps builds a per-run RunDependencies bundle for the agent package.
 // Credit lifecycle callbacks are bound to the specific user at call time.
 // This method is called once per HTTP chat/generate request from the view layer.
-func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDependencies {
+func (c *Controller) AgentDeps(user *models.User, jobID, workerID string) *agent.RunDependencies {
 	provider := c.llmProviderForUser(user)
 	_, planName, _ := c.GetUserLimitsWithPlan(user)
 
@@ -28,8 +28,10 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		GitRepo:       c.GitRepoService,
 		AssetsStorage: c.AssetsStorage,
 		SecretManager: c.SecretManager,
-		NeonService:   c.NeonService,
-		LLMProvider:   provider,
+		NeonService:    c.NeonService,
+		WorkspaceLock:  c.WorkspaceLock,
+		WorkerID:       workerID,
+		LLMProvider:    provider,
 		PostHog:       c.PostHog,
 		RemoteConfig:  c.RemoteConfig,
 		UserPlanName:  planName,

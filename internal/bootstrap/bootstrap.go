@@ -33,6 +33,7 @@ import (
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/revenuecat"
 	"github.com/knid/wemob/internal/services/secret"
@@ -233,6 +234,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
 		sm.GetSecret("E2B_AGENT_CONTROL_TOKEN"),
 	)
+	workspaceLock := workspacelock.New(redisClient)
 
 	flyService := fly.NewService(
 		sm.GetSecret("FLY_API_TOKEN"),
@@ -405,6 +407,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		metaCAPI,
 		remoteConfigService,
 		e2b,
+		workspaceLock,
 		edgeIPs,
 		caddyAdmin,
 	)

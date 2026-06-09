@@ -18,6 +18,17 @@ import (
 func (v *HttpViews) syncEnvVarsToPreview(project *models.AppProject) {
 	envVars := v.Controller.CollectAllEnvVars(project)
 
+	lease, err := v.Controller.AcquireWorkspaceLease(project.ID.String(), "manual:env-var-sync")
+	if err != nil {
+		slog.Warn("syncEnvVarsToPreview: failed to acquire workspace lock", "error", err, "project_id", project.ID)
+		return
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	repo, err := v.Controller.GitRepoService.OpenOrInit(project.ID.String())
 	if err != nil {
 		slog.Warn("syncEnvVarsToPreview: failed to open repo", "error", err, "project_id", project.ID)
@@ -125,6 +136,9 @@ func (v *HttpViews) SetAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	envVar, err := v.Controller.SetAppEnvVar(project, req)
 	if err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}
@@ -169,6 +183,9 @@ func (v *HttpViews) UpdateAppEnvVar(w http.ResponseWriter, r *http.Request) {
 
 	envVar, err := v.Controller.UpdateAppEnvVar(evID, project, req)
 	if err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}
@@ -206,6 +223,9 @@ func (v *HttpViews) DeleteAppEnvVar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteAppEnvVar(evID, project); err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

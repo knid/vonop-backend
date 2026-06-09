@@ -18,6 +18,7 @@ import (
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -39,7 +40,7 @@ const (
 	defaultMaxWallclockMs      = 45 * 60 * 1000
 )
 
-// Run is the single entry point for both initial generation and chat edit.
+// runNative is the legacy native Go implementation of the agent flow.
 //
 // When project.Status == "draft" and the repo is empty, Run injects templates.
 // Otherwise it loads the existing fileMap from the repo.
@@ -52,7 +53,7 @@ const (
 // failures do not create checkpoints. AppAgentRun is marked failed, credits for
 // tokens already consumed are billed, an error event is emitted, and a *Error
 // is returned.
-func Run(
+func runNative(
 	ctx context.Context,
 	deps *RunDependencies,
 	project *models.AppProject,
@@ -60,7 +61,7 @@ func Run(
 	message string,
 	turnAttachments TurnAttachments,
 	emitter EventEmitter,
-) (runErr error) {
+) (runResult *RuntimeResult, runErr error) {
 	runStart := time.Now()
 
 	// Wall-clock deadline: wrap ctx with a max-lifetime timer.
@@ -72,13 +73,13 @@ func Run(
 	// check is the partial unique index on app_agent_runs(app_project_id)
 	// WHERE status='running', caught below at InsertAgentRun.
 	if existing, existingErr := deps.DB.GetActiveAgentRun(project.ID); existingErr == nil && existing != nil {
-		return New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
+		return nil, New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
 	}
 
 	// --- Step 2: open git repo (creates if missing) ---
 	repo, err := deps.GitRepo.OpenOrInit(project.ID.String())
 	if err != nil {
-		return New(CodeGitError, "setup", "failed to open project repo", err)
+		return nil, New(CodeGitError, "setup", "failed to open project repo", err)
 	}
 
 	// --- Step 3: first-run template injection (draft projects only) ---
@@ -86,26 +87,47 @@ func Run(
 		existingFiles, _ := repo.ListFiles()
 		if len(existingFiles) == 0 {
 			if n, injErr := InjectTemplates(repo, project); injErr != nil {
-				return New(CodeGitError, "setup", fmt.Sprintf("template injection failed after %d files", n), injErr)
+				return nil, New(CodeGitError, "setup", fmt.Sprintf("template injection failed after %d files", n), injErr)
 			}
 		}
 	}
 
 	// --- Step 4: load fileMap from disk ---
-	rawFiles, err := repo.ReadAllFiles()
+	fileMap, err := ReloadFileMapFromRepo(repo)
 	if err != nil {
-		return New(CodeGitError, "setup", "failed to read project files", err)
+		return nil, New(CodeGitError, "setup", "failed to read project files", err)
 	}
-	fileMap := NewSafeFileMap(rawFiles)
 
 	// --- Step 5: pre-run commit baseline ---
 	runID := uuid.New()
 	preCommit, err := PreRunCommit(repo, runID.String())
 	if err != nil {
-		return New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
+		return nil, New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
 	}
 
-	// --- Step 6: insert AppAgentRun row ---
+	// --- Step 6: acquire distributed workspace lock ---
+	leaseOwner := "agent:" + runID.String()
+	if deps.WorkerID != "" {
+		leaseOwner = "worker:" + deps.WorkerID + ":" + runID.String()
+	}
+	var workspaceLease *workspacelock.Lease
+	if deps.WorkspaceLock != nil {
+		var lockErr error
+		workspaceLease, lockErr = deps.WorkspaceLock.Acquire(ctx, project.ID.String(), leaseOwner)
+		if lockErr != nil {
+			if _, busy := lockErr.(*workspacelock.LockBusyError); busy {
+				return nil, New(CodeRunInProgress, "setup", "another process is modifying this workspace", lockErr)
+			}
+			return nil, New(CodeInternal, "setup", "failed to acquire workspace lock", lockErr)
+		}
+		defer func() {
+			if err := workspaceLease.Release(); err != nil {
+				slog.Warn("agent: failed to release workspace lock", "project_id", project.ID, "error", err, "run_id", runID)
+			}
+		}()
+	}
+
+	// --- Step 7: insert AppAgentRun row ---
 	provider := deps.LLMProvider
 	model := resolveModel(deps.SecretManager, project, provider)
 	isFirstGen := project != nil && project.Status == "draft"
@@ -125,9 +147,9 @@ func Run(
 	if _, err := deps.DB.InsertAgentRun(run); err != nil {
 		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
 		if isUniqueViolation(err) {
-			return New(CodeRunInProgress, "setup", "another run is already in progress for this project", err)
+			return nil, New(CodeRunInProgress, "setup", "another run is already in progress for this project", err)
 		}
-		return New(CodeInternal, "setup", "failed to record run", err)
+		return nil, New(CodeInternal, "setup", "failed to record run", err)
 	}
 
 	// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
@@ -173,7 +195,7 @@ func Run(
 		Parts:        userParts,
 	}
 	if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
-		return New(CodeInternal, "setup", "failed to persist user message", err)
+		return nil, New(CodeInternal, "setup", "failed to persist user message", err)
 	}
 	run.UserMessageID = &userMsgRow.ID
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
@@ -414,7 +436,7 @@ func Run(
 
 	// Budget check before entering the loop.
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
 			tracker, runStart,
 			fileMap, message)
@@ -654,7 +676,7 @@ func Run(
 	if repetition.Tripped() {
 		slog.Warn("agent aborted: narration repetition loop",
 			"project_id", project.ID, "run_id", runID)
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeRepetitionLoop, "model got stuck repeating output", nil,
 			tracker, runStart,
 			fileMap, message)
@@ -668,7 +690,7 @@ func Run(
 			slog.Warn("agent LLM call aborted by context",
 				"project_id", project.ID, "ctx_err", ctxErr, "llm_err", llmErr)
 			code, msg := classifyCtxErr(ctxErr)
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+			return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				code, msg, ctxErr,
 				tracker, runStart,
 				fileMap, message)
@@ -678,19 +700,19 @@ func Run(
 		// Surface it distinctly so the UI can prompt the user to narrow
 		// the request rather than showing a generic "provider error".
 		if errors.Is(llmErr, utils.ErrResponseTruncated) {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+			return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeTruncated, "model response exceeded token budget", llmErr,
 				tracker, runStart,
 				fileMap, message)
 		}
 		var toolRoundsErr *utils.ToolRoundsExceededError
 		if errors.As(llmErr, &toolRoundsErr) {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+			return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 				CodeToolRoundsExceeded, "tool round limit reached — reply \"continue\" to keep going from saved progress", llmErr,
 				tracker, runStart,
 				fileMap, message)
 		}
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeProviderError, "LLM call failed", llmErr,
 			tracker, runStart,
 			fileMap, message)
@@ -699,19 +721,19 @@ func Run(
 	// Post-loop budget checks to classify why the loop ended.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		code, msg := classifyCtxErr(ctxErr)
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			code, msg, ctxErr,
 			tracker, runStart,
 			fileMap, message)
 	}
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
 			tracker, runStart,
 			fileMap, message)
 	}
 	if _, _, total, _ := tracker.Totals(); total > maxTokensPerRun {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+		return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
 			CodeBudgetExceeded,
 			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil,
 			tracker, runStart,
@@ -720,7 +742,7 @@ func Run(
 
 	if !contextPacket.ReadOnly {
 		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
+			return nil, finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
 				CodeValidationFailed, validationErr.Error(), validationErr,
 				tracker, runStart,
 				fileMap, message)
@@ -740,9 +762,17 @@ func Run(
 	finalParts := append([]models.ChatMessagePart(nil), parts...)
 	finalToolCalls := totalToolCalls
 	partsMu.Unlock()
-	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
+	if err := finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
 		finalParts, tracker, runStart,
-		finalToolCalls, turn, message, user, project)
+		finalToolCalls, turn, message, user, project); err != nil {
+		return nil, err
+	}
+	return &RuntimeResult{
+		Parts:      finalParts,
+		ToolCalls:  finalToolCalls,
+		Turns:      turn,
+		StopReason: "completed",
+	}, nil
 }
 
 // partsToContent flattens an ordered parts slice into the legacy plain-text
@@ -1110,7 +1140,7 @@ func finaliseSuccess(
 		deps.AutoDeployBackend != nil &&
 		finalCommit != "" &&
 		finalCommit != run.PreCommit {
-		changed, diffErr := repo.ChangedPathsSince(run.PreCommit)
+		changed, diffErr := repo.WorkingTreeChangedPaths(run.PreCommit)
 		if diffErr != nil {
 			slog.Warn("agent: auto-deploy diff failed",
 				"error", diffErr, "project_id", project.ID, "pre_commit", run.PreCommit)

@@ -174,3 +174,29 @@ func TestAgentSSEAdapterNormalizesToolProgress(t *testing.T) {
 		t.Fatalf("progress output = %#v", output)
 	}
 }
+
+func TestAgentSSEAdapterIgnoresUnknownEventForUIMessage(t *testing.T) {
+	runID := uuid.New()
+	ch := make(chan responses.SSEEvent, 2)
+	adapter := newAgentSSEAdapter(ch, runID.String())
+
+	if !adapter.Emit(agent.EventSubagentProgress, agent.SubagentProgressEvent{
+		RunID:      runID,
+		SubagentID: "sub-1",
+		Name:       "planner",
+		Message:    "working",
+	}) {
+		t.Fatal("Emit returned false")
+	}
+
+	legacy := <-ch
+	if legacy.Event != agent.EventSubagentProgress {
+		t.Fatalf("legacy event = %q, want %q", legacy.Event, agent.EventSubagentProgress)
+	}
+
+	select {
+	case <-ch:
+		t.Fatal("expected no normalized ui_message_part for unknown subagent progress event")
+	default:
+	}
+}

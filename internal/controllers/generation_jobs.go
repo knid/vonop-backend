@@ -65,6 +65,8 @@ var milestoneEvents = map[string]bool{
 	// writes. narration/tool_call_delta/keepalive stay out.
 	"run_start":              true,
 	"turn_start":             true,
+	"subagent_start":         true,
+	"subagent_end":           true,
 	"tool_call_start":        true,
 	"tool_call_result":       true,
 	"tool_approval_required": true,
