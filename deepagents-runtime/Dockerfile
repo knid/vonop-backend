@@ -8,7 +8,7 @@ RUN groupadd -r runtime && useradd -r -g runtime -d /app -s /sbin/nologin runtim
 
 WORKDIR /app
 
-COPY pyproject.toml requirements.txt ./
+COPY pyproject.toml requirements.txt README.md ./
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
