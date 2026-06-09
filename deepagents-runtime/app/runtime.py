@@ -373,6 +373,7 @@ def build_subagents(request: RunStreamRequest) -> dict[str, Any]:
         "design_direction_agent": {
             "name": "design_direction_agent",
             "description": "Plan or validate visual direction and UX goals before implementation.",
+            "system_prompt": "You plan visual direction and UX goals for Wemob apps. Focus on design-system consistency, content hierarchy, and interaction flow before any implementation work.",
             "parent": "main",
             "focus": ["design-system consistency", "content hierarchy", "interaction flow"],
             "project_type": runtime,
@@ -381,18 +382,21 @@ def build_subagents(request: RunStreamRequest) -> dict[str, Any]:
         "frontend_builder_agent": {
             "name": "frontend_builder_agent",
             "description": "Implement frontend work on Next.js and web surfaces with existing conventions.",
+            "system_prompt": "You implement frontend work on Next.js and web surfaces following Wemob conventions. Focus on pages, components, styles, and assets.",
             "parent": "main",
             "focus": ["pages", "components", "styles", "assets"],
         },
         "data_backend_agent": {
             "name": "data_backend_agent",
             "description": "Handle API shape, persistence, and backend-safe integration points.",
+            "system_prompt": "You handle API shape, persistence, and backend-safe integration points. Focus on routes, data-models, db, and validation.",
             "parent": "main",
             "focus": ["routes", "data-models", "db", "validation"],
         },
         "qa_debug_agent": {
             "name": "qa_debug_agent",
             "description": "Identify likely runtime/build/test gaps and propose concrete fixes.",
+            "system_prompt": "You identify likely runtime, build, and test gaps and propose concrete fixes. Focus on edge cases, error handling, tests, and logging.",
             "parent": "main",
             "focus": ["edge cases", "error handling", "tests", "logging"],
         },
@@ -629,7 +633,7 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
 
     # Lazily imported so tests can run in environments without deepagents
     # installed.
-    from deepagents import DeepAgents
+    from deepagents import create_deep_agent
 
     # PR 9: wire the LLM-usage callback. The closure emits one NDJSON
     # llm_usage event per model call; the Go runtime consumes it and
@@ -647,28 +651,18 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     if langsmith_callbacks(request):
         callbacks.extend(langsmith_callbacks(request))
 
-    agent_kwargs = {
-        "model": model,
-        "system_prompt": prompt,
-        "backend": backend,
-        "tools": wemob_tools,
-        "context": context,
-        "thread_id": request.run_id,
-        "subagents": subagents,
+    invoke_config: dict[str, Any] = {
+        "configurable": {"thread_id": request.run_id},
         "callbacks": callbacks,
     }
-    try:
-        agent = DeepAgents(**agent_kwargs)
-    except TypeError:
-        agent = DeepAgents(model=model, prompt=prompt, context=context)
-        if hasattr(agent, "backend"):
-            agent.backend = backend
-        if hasattr(agent, "thread_id"):
-            agent.thread_id = request.run_id
-        if hasattr(agent, "tools"):
-            agent.tools = wemob_tools
-        if hasattr(agent, "callbacks"):
-            agent.callbacks = callbacks
+
+    agent = create_deep_agent(
+        model=model,
+        tools=wemob_tools,
+        system_prompt=prompt,
+        backend=backend,
+        subagents=list(subagents.values()),
+    )
 
     # Drop the run's recorder on the way out so subsequent runs start clean.
     from .usage import drop_recorder
@@ -679,19 +673,25 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
         except Exception:
             pass
 
+    # CompiledStateGraph from create_deep_agent expects messages-shaped input.
+    from langchain_core.messages import HumanMessage
+
+    agent_input = {"messages": [HumanMessage(content=request.message or "")]}
+
     event_stream = None
-    for method_name in ("stream", "run", "astream", "stream_run", "run_stream"):
+    for method_name in ("stream", "astream", "invoke", "ainvoke"):
         method = getattr(agent, method_name, None)
         if method is None:
             continue
         try:
-            if method_name in {"stream", "run", "stream_run", "run_stream"}:
-                event_stream = method(request.message)
-            else:
-                event_stream = method(request.message, context=context)
+            event_stream = method(agent_input, config=invoke_config)
             break
         except TypeError:
-            continue
+            try:
+                event_stream = method(agent_input)
+                break
+            except TypeError:
+                continue
     if event_stream is None:
         raise RuntimeError("no supported deepagents streaming entrypoint found")
 

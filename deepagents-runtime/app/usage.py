@@ -227,6 +227,14 @@ class WemobUsageCallback:
     # the handler supports. Setting them explicitly avoids AttributeError
     # on older LangChain versions that probe via hasattr.
     run_inline = True
+    raise_error = False
+    ignore_agent = False
+    ignore_chain = False
+    ignore_chat_model = False
+    ignore_llm = False
+    ignore_retriever = False
+    ignore_retry = False
+    ignore_subchain = False
 
     def __init__(self, emit: "Callable[[Mapping[str, Any]], bytes] | None" = None) -> None:
         self._emit = emit

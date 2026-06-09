@@ -93,12 +93,16 @@ def test_stream_rejects_invalid_auth_and_writes_test_file() -> None:
 
         os.environ["DEEPAGENTS_INTERNAL_TOKEN"] = "secret"
         os.environ["WEMOB_REPOS_BASE"] = str(base_path)
+        os.environ["DEEPAGENTS_ALLOW_SCAFFOLD_FALLBACK"] = "true"
+        os.environ["ANTHROPIC_API_KEY"] = "test-key"
         Settings.INTERNAL_TOKEN = "secret"
         Settings.REPO_BASE = str(base_path)
+        Settings.ALLOW_SCAFFOLD_FALLBACK = True
 
         # Validate path resolver for a UUID project id.
-        assert resolve_repo_path("11111111-1111-4111-8111-111111111111") == project_dir
+        assert resolve_repo_path("11111111-1111-4111-8111-111111111111") == project_dir.resolve()
 
+        client = TestClient(app)
         payload = _make_stream_payload(base_path, "11111111-1111-4111-8111-111111111111")
 
         r = client.post(
@@ -117,8 +121,8 @@ def test_stream_rejects_invalid_auth_and_writes_test_file() -> None:
         assert resp.headers["content-type"].startswith("application/x-ndjson")
 
         lines = [line for line in resp.text.strip().splitlines() if line.strip()]
-        assert any('"type":"message_delta"' in line for line in lines)
-        assert any('"type":"done"' in line for line in lines)
+        assert any('"type": "message_delta"' in line for line in lines)
+        assert any('"type": "done"' in line for line in lines)
 
 
 def test_stream_rejects_invalid_repo_metadata() -> None:
@@ -179,12 +183,12 @@ def test_stream_includes_runtime_events() -> None:
         assert resp.status_code == 200
 
         lines = [line for line in resp.text.strip().splitlines() if line.strip()]
-        assert any('"type":"subagent_start"' in line for line in lines)
-        assert any('"type":"reasoning_delta"' in line for line in lines)
-        assert any('"type":"tool_call_start"' in line for line in lines)
-        assert any('"type":"tool_call_result"' in line for line in lines)
-        assert any('"type":"subagent_end"' in line for line in lines)
-        assert any('"type":"done"' in line for line in lines)
+        assert any('"type": "subagent_start"' in line for line in lines)
+        assert any('"type": "reasoning_delta"' in line for line in lines)
+        assert any('"type": "tool_call_start"' in line for line in lines)
+        assert any('"type": "tool_call_result"' in line for line in lines)
+        assert any('"type": "subagent_end"' in line for line in lines)
+        assert any('"type": "done"' in line for line in lines)
 
 
 def test_stream_fallback_can_write_workspace_file() -> None:
