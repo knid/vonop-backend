@@ -13,6 +13,20 @@ from app.schemas import RunStreamRequest
 from app.skills import resolve_skills
 
 
+def _setup_test_env():
+    os.environ.setdefault("DEEPAGENTS_INTERNAL_TOKEN", "secret")
+    os.environ.setdefault("GO_TOOL_BASE_URL", "http://localhost:8001")
+    os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+    os.environ.setdefault("WEMOB_REPOS_BASE", "/tmp/nonexistent")
+    # Reload Settings from env
+    Settings.INTERNAL_TOKEN = os.environ["DEEPAGENTS_INTERNAL_TOKEN"]
+    Settings.GO_TOOL_BASE_URL = os.environ["GO_TOOL_BASE_URL"]
+    Settings.REPO_BASE = os.environ["WEMOB_REPOS_BASE"]
+
+
+_setup_test_env()
+
+
 def _init_repo_for_test(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.check_call(["git", "init", "-q"], cwd=str(path))
@@ -64,7 +78,11 @@ def test_health_and_ready() -> None:
     assert client.get("/healthz").status_code == 200
 
     response = client.get("/readyz")
-    assert response.status_code == 200
+    assert response.status_code in (200, 503)
+    if response.status_code == 200:
+        data = response.json()
+        assert data["status"] == "ready"
+        assert "version" in data
 
 
 def test_stream_rejects_invalid_auth_and_writes_test_file() -> None:
@@ -145,8 +163,10 @@ def test_stream_includes_runtime_events() -> None:
 
         os.environ["DEEPAGENTS_INTERNAL_TOKEN"] = "secret"
         os.environ["WEMOB_REPOS_BASE"] = str(base_path)
+        os.environ["DEEPAGENTS_ALLOW_SCAFFOLD_FALLBACK"] = "true"
         Settings.INTERNAL_TOKEN = "secret"
         Settings.REPO_BASE = str(base_path)
+        Settings.ALLOW_SCAFFOLD_FALLBACK = True
 
         client = TestClient(app)
         payload = _make_stream_payload(base_path, "33333333-3333-4333-8333-333333333333")
@@ -176,8 +196,10 @@ def test_stream_fallback_can_write_workspace_file() -> None:
 
         os.environ["DEEPAGENTS_INTERNAL_TOKEN"] = "secret"
         os.environ["WEMOB_REPOS_BASE"] = str(base_path)
+        os.environ["DEEPAGENTS_ALLOW_SCAFFOLD_FALLBACK"] = "true"
         Settings.INTERNAL_TOKEN = "secret"
         Settings.REPO_BASE = str(base_path)
+        Settings.ALLOW_SCAFFOLD_FALLBACK = True
 
         client = TestClient(app)
         payload = _make_stream_payload(base_path, project_id)

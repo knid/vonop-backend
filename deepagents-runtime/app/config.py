@@ -25,6 +25,11 @@ class Settings:
     LANGSMITH_PROJECT = os.getenv("LANGSMITH_PROJECT", "wemob-deepagents-prod")
     LANGSMITH_API_KEY = os.getenv("LANGSMITH_API_KEY", "").strip()
 
+    # Production hardening: disable scaffold fallback by default.
+    # When false, DeepAgents import/model/runtime failures emit error events
+    # instead of silently falling back to stub behavior.
+    ALLOW_SCAFFOLD_FALLBACK = (os.getenv("DEEPAGENTS_ALLOW_SCAFFOLD_FALLBACK", "false").lower() in {"1", "true", "yes"})
+
 
 def require_internal_token() -> str:
     token = Settings.INTERNAL_TOKEN.strip()

@@ -41,13 +41,13 @@ jobs:
       - name: Install dependencies
         run: pip install -e "deepagents-runtime/[dev]"
       - name: Lint
-        run: pip install ruff && ruff check deepagents-runtime/app deepagents-runtime/tests || true
+        run: pip install ruff && ruff check deepagents-runtime/app deepagents-runtime/tests
       - name: Test
         run: cd deepagents-runtime && python -m pytest
 
   build:
     name: Build & push images
-    needs: test
+    needs: [test, test-python]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -160,6 +160,20 @@ func (v *HttpViews) HandleDeepAgentsToolExecute(w http.ResponseWriter, r *http.R
 		return
 	}
 
+	// Apply Go guardrails before executing the tool. This catches
+	// read-only-mode blocking, human-approval requirements, and skill-
+	// scoped tool allowlists.
+	if decision := agent.ApplyToolGuardrails(rc, toolName, body.Arguments); !decision.Allowed {
+		slog.Warn("deepagents tool execute: blocked by guardrail", "run_id", runID, "tool", toolName, "message", decision.Message)
+		writeToolResult(w, DeepAgentsToolResult{
+			Result:     decision.Message,
+			IsError:    true,
+			Summary:    decision.Message,
+			DurationMs: 0,
+		})
+		return
+	}
+
 	startedAt := time.Now()
 	result, isError, execErr := registry.Execute(r.Context(), rc, toolName, body.Arguments)
 	duration := time.Since(startedAt)

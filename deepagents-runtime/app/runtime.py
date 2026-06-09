@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Mapping
@@ -13,6 +14,7 @@ from .permissions import is_allowed_workspace_path
 from .repo_paths import resolve_repo_path
 from .schemas import RunStreamRequest
 from .skills import SKILLS_ROOT, resolve_skills
+from .streaming import ndjson_event
 
 
 _MODEL_CACHE: dict[tuple[str, str, str | None, int | float | None, int | float | None], Any] = {}
@@ -22,7 +24,7 @@ _WRITE_DIRECTIVE_RE = re.compile(
 )
 
 
-def build_model(model_config: Any) -> Any:
+def build_model(model_config: Any, *, limits: dict[str, int] | None = None) -> Any:
     """Build a LangChain chat model for DeepAgents integration.
 
     This function is intentionally defensive: production-capable adapters are used
@@ -37,15 +39,15 @@ def build_model(model_config: Any) -> Any:
     ).strip()
 
     if not provider or not model_name:
-	        raise ValueError("provider and model are required")
+        raise ValueError("provider and model are required")
 
     base_model = model_name
     if langchain_model and ":" in langchain_model and not langchain_model.startswith(("file:", "http")):
         if provider in {"openrouter", "openrouter-compatible", "openrouter-compatible-api"} or langchain_model.startswith("openrouter:"):
             base_model = langchain_model.split(":", 1)[1]
 
-    max_output_tokens = _extract_max_tokens(model_config)
-    model_timeout = _extract_model_timeout(model_config)
+    max_output_tokens = _extract_max_tokens_from_limits(limits)
+    model_timeout = _extract_model_timeout_from_limits(limits)
     cache_key = (provider.strip().lower(), model_name.strip(), (langchain_model or "").strip() or None, max_output_tokens, model_timeout)
     if cache_key in _MODEL_CACHE:
         return _MODEL_CACHE[cache_key]
@@ -92,9 +94,51 @@ def build_model(model_config: Any) -> Any:
     raise ValueError(f"unsupported model provider: {provider}")
 
 
-def _extract_max_tokens(model_config: Any) -> int | None:
+def _extract_max_tokens_from_limits(limits: dict[str, int] | None) -> int | None:
+    if limits is None:
+        return None
+    max_tok = limits.get("max_output_tokens_per_call", 0) or 0
+    if isinstance(max_tok, (int, float)) and max_tok > 0:
+        return int(max_tok)
+    return None
+
+
+def _extract_model_timeout_from_limits(limits: dict[str, int] | None) -> int | None:
+    if limits is None:
+        return 300
+    max_wallclock_ms = limits.get("max_wallclock_ms", 0) or 0
+    if isinstance(max_wallclock_ms, (int, float)) and max_wallclock_ms > 0:
+        per_call = max(30, min(int(max_wallclock_ms / 10 / 1000), 300))
+        return per_call
+    return 300
+
+
+def _extract_limits(model_config: Any) -> dict[str, int] | None:
     limits = getattr(model_config, "limits", None)
     if limits is None:
+        return None
+    if isinstance(limits, dict):
+        return limits
+    if hasattr(limits, "model_dump"):
+        try:
+            return dict(limits.model_dump())
+        except Exception:
+            pass
+    return None
+
+
+def _extract_max_tokens(model_config: Any) -> int | None:
+    limits = None
+    if hasattr(model_config, "limits"):
+        limits = getattr(model_config, "limits")
+    elif isinstance(model_config, dict) and "limits" in model_config:
+        limits = model_config["limits"]
+    if limits is None:
+        return None
+    if isinstance(limits, dict):
+        max_tok = limits.get("max_output_tokens_per_call", 0) or 0
+        if isinstance(max_tok, (int, float)) and max_tok > 0:
+            return int(max_tok)
         return None
     max_tokens = getattr(limits, "max_output_tokens_per_call", 0) or getattr(limits, "get", lambda _: None)("max_output_tokens_per_call") or 0
     if isinstance(max_tokens, (int, float)) and max_tokens > 0:
@@ -103,13 +147,16 @@ def _extract_max_tokens(model_config: Any) -> int | None:
 
 
 def _extract_model_timeout(model_config: Any) -> int | None:
-    """Extract per-model-call timeout from config. Falls back to 300s (5 min)
-    default if no explicit timeout is configured. Returns None only when
-    the model is explicitly intended to have no timeout (which we don't
-    want in production)."""
-    limits = getattr(model_config, "limits", None)
+    limits = None
+    if hasattr(model_config, "limits"):
+        limits = getattr(model_config, "limits")
+    elif isinstance(model_config, dict) and "limits" in model_config:
+        limits = model_config["limits"]
     if limits is not None:
-        max_wallclock_ms = getattr(limits, "max_wallclock_ms", 0) or getattr(limits, "get", lambda _: None)("max_wallclock_ms") or 0
+        if isinstance(limits, dict):
+            max_wallclock_ms = limits.get("max_wallclock_ms", 0) or 0
+        else:
+            max_wallclock_ms = getattr(limits, "max_wallclock_ms", 0) or getattr(limits, "get", lambda _: None)("max_wallclock_ms") or 0
         if isinstance(max_wallclock_ms, (int, float)) and max_wallclock_ms > 0:
             per_call = max(30, min(int(max_wallclock_ms / 10 / 1000), 300))
             return per_call
@@ -526,7 +573,7 @@ def _coerce_output_preview(value: Any) -> dict[str, Any]:
 
 
 async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> AsyncGenerator[bytes, None]:
-    model = build_model(request)
+    model = build_model(request.model, limits=_extract_limits(request.model))
     backend = build_workspace_backend(repo_root)
     selected_skills = resolve_skills(request)
     prompt = _system_prompt(request, selected_skills)
@@ -556,17 +603,13 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     seq_counter = {"value": 0}
 
     def _queued_emit(raw: bytes) -> None:
-        # Replace seq=0 with the next monotonic counter so the SSE client
-        # sees strictly increasing seq even when the tool fires multiple
-        # events between two agent-level events.
         seq_counter["value"] += 1
         try:
             payload = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             tool_emit_queue.put_nowait(raw)
             return
-        if payload.get("seq") == 0:
-            payload["seq"] = seq_counter["value"]
+        payload["seq"] = seq_counter["value"]
         tool_emit_queue.put_nowait(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
     client = GoToolClient(
@@ -650,13 +693,10 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     if event_stream is None:
         raise RuntimeError("no supported deepagents streaming entrypoint found")
 
-    seq = 1
     run_id = request.run_id
     if hasattr(event_stream, "__aiter__"):
         iterator = event_stream.__aiter__()
         while True:
-            # Drain any tool events the model produced between agent events.
-            drained_any = False
             while not tool_emit_queue.empty():
                 try:
                     item = tool_emit_queue.get_nowait()
@@ -665,51 +705,49 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
                 if item is None:
                     continue
                 yield item
-                drained_any = True
-            if drained_any:
-                continue
             try:
                 raw_event = await asyncio.wait_for(iterator.__anext__(), timeout=0.05)
-            except (StopAsyncIteration, asyncio.TimeoutError):
+            except StopAsyncIteration:
                 break
+            except asyncio.TimeoutError:
+                continue
             event_type = _extract_event_type(raw_event)
             payload = _extract_event_payload(raw_event)
-            mapped = _map_event(event_type, payload, request, seq)
+            mapped = _map_event(event_type, payload, request, seq_counter["value"])
             if mapped is None:
                 continue
             etype, data = mapped
+            seq_counter["value"] += 1
             yield _make_event(
                 etype,
                 run_id=run_id,
                 job_id=request.job_id,
-                seq=seq,
+                seq=seq_counter["value"],
                 data=data,
             )
-            seq += 1
     else:
-        for raw_event in event_stream:  # type: ignore[assignment]
+        for raw_event in event_stream:
             event_type = _extract_event_type(raw_event)
             payload = _extract_event_payload(raw_event)
-            mapped = _map_event(event_type, payload, request, seq)
+            mapped = _map_event(event_type, payload, request, seq_counter["value"])
             if mapped is None:
                 continue
             etype, data = mapped
+            seq_counter["value"] += 1
             yield _make_event(
                 etype,
                 run_id=run_id,
                 job_id=request.job_id,
-                seq=seq,
+                seq=seq_counter["value"],
                 data=data,
             )
-            seq += 1
 
-    # Ensure completion signal even when upstream stream ends early.
-    if seq == 1:
+    if seq_counter["value"] == 0:
         yield _make_event(
             "done",
             run_id=run_id,
             job_id=request.job_id,
-            seq=seq,
+            seq=seq_counter["value"],
             data={"summary": "deepagents completed", "turns": 1, "tool_calls": 0, "model_calls": 0},
         )
 
@@ -856,12 +894,27 @@ async def stream_run(
             yield event
         return
     except Exception as exc:
-        # DeepAgents and its adapters are not guaranteed to be installed in
-        # every environment (CI, smoke tests). Log so we don't lose the
-        # diagnostic, then fall through to the deterministic scaffold so
-        # the stream always terminates with a `done` event.
-        import logging
+        from .config import Settings
+        if not Settings.ALLOW_SCAFFOLD_FALLBACK:
+            import logging
+            logging.getLogger("deepagents.stream").error(
+                "deepagents runtime failed and scaffold fallback is disabled: %s", exc, exc_info=True
+            )
+            yield ndjson_event(
+                "error",
+                run_id=request.run_id,
+                seq=1,
+                job_id=request.job_id,
+                data={
+                    "code": "runtime_error",
+                    "message": f"runtime failed: {exc}",
+                    "phase": "runtime",
+                    "recoverable": False,
+                },
+            )
+            return
 
+        import logging
         logging.getLogger("deepagents.stream").warning(
             "deepagents runtime unavailable, falling back to scaffold: %s", exc, exc_info=True
         )

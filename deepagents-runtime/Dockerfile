@@ -8,10 +8,10 @@ RUN groupadd -r runtime && useradd -r -g runtime -d /app -s /sbin/nologin runtim
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml requirements.txt ./
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir fastapi uvicorn pydantic deepagents langchain langgraph langchain-anthropic langchain-openai
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 RUN pip install --no-cache-dir -e . \
