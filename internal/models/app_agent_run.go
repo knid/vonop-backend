@@ -43,6 +43,10 @@ type AppAgentRun struct {
 	Error            string          `bun:",type:text,default:''" json:"error,omitempty"`
 	Todos            json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"todos"`
 	Memory           json.RawMessage `bun:",type:jsonb,notnull,default:'{}'" json:"memory"`
+	RuntimeKind      string          `bun:",notnull,default:''" json:"runtime_kind"`
+	RuntimeVersion   string          `bun:",notnull,default:''" json:"runtime_version"`
+	SkillIDs         json.RawMessage `bun:",type:jsonb,notnull,default:'[]'" json:"skill_ids"`
+	PythonServiceVersion string      `bun:",notnull,default:''" json:"python_service_version"`
 	CreatedAt        time.Time       `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
 	CompletedAt      time.Time       `bun:",nullzero" json:"completed_at,omitempty"`
 }

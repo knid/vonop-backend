@@ -20,6 +20,7 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -41,6 +42,18 @@ func writeAppLimitError(w http.ResponseWriter, err error) bool {
 		"is_mobile": limitErr.IsMobile,
 		"limit":     limitErr.Limit,
 		"used":      limitErr.Used,
+	})
+	return true
+}
+
+func writeWorkspaceConflictError(w http.ResponseWriter, err error) bool {
+	var lockErr *workspacelock.LockBusyError
+	if !errors.As(err, &lockErr) {
+		return false
+	}
+	utils.JSONError(w, constants.ErrConflict, "workspace is currently locked by another process", http.StatusConflict, map[string]any{
+		"project_id": lockErr.ProjectID,
+		"owner":      lockErr.Owner,
 	})
 	return true
 }
@@ -519,6 +532,9 @@ func (v *HttpViews) CreateAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.CreateAppFile(project, req.FilePath, req.Content, req.FileType); err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}
@@ -568,6 +584,9 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 
 	// fid is the file path
 	if err := v.Controller.UpdateAppFile(project, fid, req.Content); err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}
@@ -605,6 +624,9 @@ func (v *HttpViews) DeleteAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := v.Controller.DeleteAppFile(project, fid); err != nil {
+		if writeWorkspaceConflictError(w, err) {
+			return
+		}
 		utils.JSONInternalError(w, err)
 		return
 	}

@@ -32,6 +32,7 @@ const (
 	CodeGitError           ErrorCode = "GIT_ERROR"
 	CodeRunInProgress      ErrorCode = "RUN_IN_PROGRESS"
 	CodeInternal           ErrorCode = "INTERNAL"
+	CodeRuntimeError       ErrorCode = "RUNTIME_ERROR"
 )
 
 // Error is a typed agent error that carries a phase label and an error code.

@@ -24,6 +24,7 @@ import (
 	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/revenuecat"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
@@ -64,6 +65,7 @@ type Controller struct {
 	// project's current org — see app deletion path).
 	NeonRegistry           *neon.Registry
 	GitRepoService         *gitrepo.Service
+	WorkspaceLock          *workspacelock.WorkspaceLocker
 	MCPService             atomic.Pointer[mcpclient.Service]
 	PostHog                posthog.Client // nil = disabled
 	RemoteConfig           *remoteconfig.Service
@@ -97,6 +99,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	remoteConfigService *remoteconfig.Service,
 	e2b *e2bService.Service,
 	edgeIPs []string,
+	workspaceLock *workspacelock.WorkspaceLocker,
 	caddyAdmin *caddyService.Admin) *Controller {
 
 	return &Controller{
@@ -121,6 +124,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		NeonService:            neonService,
 		NeonRegistry:           neonRegistry,
 		GitRepoService:         gitRepoService,
+		WorkspaceLock:          workspaceLock,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,

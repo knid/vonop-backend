@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
 	"github.com/knid/wemob/internal/bootstrap"
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
@@ -471,6 +472,10 @@ func createSchema(db *bun.DB) error {
 		// Compact agent memory used to resume and condense long tool loops
 		// without mutating the user-visible chat transcript.
 		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS memory jsonb NOT NULL DEFAULT '{}'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_kind text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_version text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS skill_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS python_service_version text NOT NULL DEFAULT ''`,
 		// Sub-credit gateway audit: stores the fractional credit cost when a
 		// gateway_chat_pending row is written (Amount=0). Nullable so legacy
 		// rows and non-gateway transactions stay untouched.
@@ -906,6 +911,20 @@ END $$`,
 	for _, stmt := range mcpSchemaMigrations {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
 			slog.Warn("mcp schema migration skipped", "statement", stmt, "error", err)
+		}
+	}
+
+	// Runtime observability columns landed after the main canary had passed
+	// on production DBs. Run unconditionally with IF NOT EXISTS.
+	runtimeObservabilityMigrations := []string{
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_kind text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS runtime_version text NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS skill_ids jsonb NOT NULL DEFAULT '[]'::jsonb`,
+		`ALTER TABLE app_agent_runs ADD COLUMN IF NOT EXISTS python_service_version text NOT NULL DEFAULT ''`,
+	}
+	for _, stmt := range runtimeObservabilityMigrations {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			slog.Warn("runtime observability migration skipped", "statement", stmt, "error", err)
 		}
 	}
 
@@ -1394,6 +1413,8 @@ func isSensitiveLogPath(path string) bool {
 
 func main() {
 	controller, _ := bootstrap.BootstrapController()
+
+	agent.ValidateRuntimeStartup()
 
 	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
 	// Failure-soft — log+continue so a missing IAM permission doesn't block startup.
@@ -2426,6 +2447,14 @@ func main() {
 		})
 
 		r.Post("/internal/e2b/agent/authorize", httpViews.AuthorizeE2BAgentSandbox)
+
+		// PR 8: deepagents-runtime calls this for every first-class Wemob
+		// tool the model invokes. Auth is the DEEPAGENTS_INTERNAL_TOKEN
+		// bearer; no anonymous access. The endpoint is also used for MCP
+		// approval flow when an MCP tool's policy is "ask".
+		r.Route("/internal/v1/agent-runs", func(r chi.Router) {
+			r.Post("/{run_id}/tools/{tool_name}/execute", httpViews.HandleDeepAgentsToolExecute)
+		})
 
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
 		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot

@@ -3,16 +3,30 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    # volumes:
-    #   - .:/app
     ports:
       - "8001:8001"
     env_file:
       - ./.env.dev
     environment:
       - BUNDEBUG=1
+      - DEEPAGENTS_RUNTIME_URL=http://deepagents-runtime:8000
     depends_on:
       - db
+      - deepagents-runtime
+
+  deepagents-runtime:
+    build:
+      context: ./deepagents-runtime
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env.dev
+    environment:
+      - WEMOB_REPOS_BASE=/data/repos
+      - GO_TOOL_BASE_URL=http://api:8001
+    volumes:
+      - repo-data:/data/repos
 
   db:
     image: postgres:13
@@ -28,3 +42,4 @@ services:
 volumes:
   db_data:
   redis_data:
+  repo-data:

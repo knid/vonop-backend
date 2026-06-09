@@ -25,6 +25,15 @@ func (c *Controller) SetAppEnvVar(project *models.AppProject, req requests.SetEn
 	if err := req.Validate(validate); err != nil {
 		return nil, err
 	}
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:env-var:set:"+req.Key)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
 
 	// Check if key already exists — upsert
 	existing, err := c.DB.GetAppEnvVarByKey(project.ID.String(), req.Key)
@@ -51,6 +60,16 @@ func (c *Controller) UpdateAppEnvVar(id string, project *models.AppProject, req 
 		return nil, err
 	}
 
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:env-var:update:"+id)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	envVar, err := c.DB.GetAppEnvVarByID(id)
 	if err != nil {
 		return nil, fmt.Errorf("env var not found")
@@ -72,6 +91,16 @@ func (c *Controller) UpdateAppEnvVar(id string, project *models.AppProject, req 
 
 // DeleteAppEnvVar deletes an env var
 func (c *Controller) DeleteAppEnvVar(id string, project *models.AppProject) error {
+	lease, err := c.acquireWorkspaceLease(project.ID.String(), "manual:env-var:delete:"+id)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if lease != nil {
+			_ = lease.Release()
+		}
+	}()
+
 	envVar, err := c.DB.GetAppEnvVarByID(id)
 	if err != nil {
 		return fmt.Errorf("env var not found")

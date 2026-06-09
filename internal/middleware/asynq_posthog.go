@@ -17,12 +17,12 @@
 // agent:run jobs had no terminal event).
 //
 // Distinct ID resolution — best-effort, in priority order:
-//   1. user_id from payload (agent:run carries this directly)
-//   2. org_id from payload (billing:org-grace-teardown)
-//   3. deployment_id (deploy:web — no user in payload, but joinable in queries)
-//   4. runtime_app_id (fly:delete-app)
-//   5. job_id (agent:run secondary key, also unique)
-//   6. "system" (fallback for tasks with empty payloads)
+//  1. user_id from payload (agent:run carries this directly)
+//  2. org_id from payload (billing:org-grace-teardown)
+//  3. deployment_id (deploy:web — no user in payload, but joinable in queries)
+//  4. runtime_app_id (fly:delete-app)
+//  5. job_id (agent:run secondary key, also unique)
+//  6. "system" (fallback for tasks with empty payloads)
 package middleware
 
 import (

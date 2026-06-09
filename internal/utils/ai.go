@@ -374,6 +374,14 @@ type TokenEntry struct {
 	RecordedAt         time.Time  // wall-clock time when this entry was recorded
 	CostUSD            float64    // upstream or estimated cost in USD
 	CostSource         string     // "upstream" when usage.cost was provided, otherwise "catalog_estimate"
+	// Subagent is the DeepAgents subagent name (e.g. "design_direction_agent")
+	// that produced this entry, or "" for the main agent. Set by the
+	// Python callback that emitted the llm_usage event.
+	Subagent string
+	// SpanID is the upstream span identifier. Stored verbatim so PostHog
+	// can pivot from a Python LangSmith trace to the same $ai_generation
+	// event in Wemob's analytics.
+	SpanID string
 }
 
 // modelCosts maps normalized model names to per-million-token pricing {input, output}.
@@ -670,6 +678,73 @@ func (t *TokenTracker) SetLastEntryToolCalls(toolCalls []ToolCall) {
 	}
 	t.entries[len(t.entries)-1].ToolCalls = make([]ToolCall, len(toolCalls))
 	copy(t.entries[len(t.entries)-1].ToolCalls, toolCalls)
+}
+
+// PythonUsageEntry mirrors the JSON payload the Python DeepAgents runtime
+// emits on each llm_usage NDJSON event. Field names match the Python side
+// (snake_case) so the JSON unmarshaller is a 1:1 mapping.
+//
+// Used by the Go DeepAgents runtime to forward per-model-call usage from
+// Python's LangChain callback into the same TokenTracker that the native
+// Go runtime populates. This keeps finaliseSuccess / finaliseFailureV2
+// accounting unified regardless of which runtime produced the calls.
+type PythonUsageEntry struct {
+	SpanID             string  `json:"span_id"`
+	Provider           string  `json:"provider"`
+	Model              string  `json:"model"`
+	PromptTokens       int     `json:"prompt_tokens"`
+	CompletionTokens   int     `json:"completion_tokens"`
+	CacheReadTokens    int     `json:"cache_read_tokens"`
+	CacheWriteTokens   int     `json:"cache_write_tokens"`
+	CostUSD            float64 `json:"cost_usd"`
+	LatencyMs          int     `json:"latency_ms"`
+	Subagent           string  `json:"subagent"`
+	// RuntimeKind is informational ("deepagents") so PostHog can split
+	// native vs deepagents usage when both are running side-by-side.
+	RuntimeKind string `json:"runtime_kind"`
+}
+
+// RecordFromPythonUsage appends one TokenEntry from a Python-emitted
+// llm_usage event. The tracker's mutex is held for the duration.
+//
+// Cost is taken verbatim from the Python payload because the upstream
+// provider is the source of truth (OpenRouter returns usage.cost when
+// usage.include=true). When cost is zero we fall back to the catalog
+// estimator so downstream dashboards still see a number for free
+// providers that don't bill.
+func (t *TokenTracker) RecordFromPythonUsage(u PythonUsageEntry) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	total := u.PromptTokens + u.CompletionTokens
+	cost := u.CostUSD
+	source := "upstream"
+	if cost <= 0 {
+		cost = estimateCostUSD(u.Model, u.PromptTokens, u.CompletionTokens, u.CacheWriteTokens, u.CacheReadTokens)
+		source = "catalog_estimate"
+	}
+	entry := TokenEntry{
+		Model:                    u.Model,
+		PromptTokens:             u.PromptTokens,
+		CompletionTokens:         u.CompletionTokens,
+		TotalTokens:              total,
+		CacheCreationInputTokens: u.CacheWriteTokens,
+		CacheReadInputTokens:     u.CacheReadTokens,
+		CacheReadInclusive:       cacheReadIsInclusive(u.Model),
+		LatencyMs:                int64(u.LatencyMs),
+		IsStreaming:              true,
+		SpanName:                 "deepagents_" + u.Subagent,
+		RecordedAt:               time.Now(),
+		CostUSD:                  cost,
+		CostSource:               source,
+		Subagent:                 u.Subagent,
+		SpanID:                   u.SpanID,
+	}
+	if u.Subagent != "" {
+		// Track subagent names in the toolsUsed list so PostHog $ai_trace
+		// can surface which subagents the main agent delegated to.
+		t.toolsUsed = append(t.toolsUsed, "subagent:"+u.Subagent)
+	}
+	t.entries = append(t.entries, entry)
 }
 
 // Entries returns a copy of all recorded token entries.

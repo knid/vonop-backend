@@ -14,10 +14,31 @@ services:
     environment:
       - CADDY_ADMIN_URL=http://caddy:2019
       - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
+      - DEEPAGENTS_RUNTIME_URL=http://deepagents-runtime:8000
+      - AGENT_RUNTIME=deepagents
     volumes:
       - repo-data:/data/repos
       - custom-domains:/data/custom-domains
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+  deepagents-runtime:
+    image: ghcr.io/knid/wemob-backend-deepagents-runtime:${DEEPAGENTS_RUNTIME_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "8000"
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')" ]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    env_file:
+      - ./.env
+    environment:
+      - WEMOB_REPOS_BASE=/data/repos
+      - GO_TOOL_BASE_URL=http://api:8001
+    volumes:
+      - repo-data:/data/repos
 
   caddy:
     image: ghcr.io/knid/wemob-backend-caddy:${CADDY_IMAGE_TAG:-latest}
@@ -43,11 +64,6 @@ services:
     image: ghcr.io/knid/wemob-backend:${IMAGE_TAG:-latest}
     entrypoint: ["/app/worker"]
     restart: unless-stopped
-    # Agent runs can take up to agent.defaultMaxWallclockMs (45 min) plus
-    # finalisation; matches asynq.Timeout(50min) at enqueue time. Asynq's
-    # srv.Shutdown() (cmd/worker/main.go) drains in-flight tasks before the
-    # binary exits, so this grace window lets a deploy finish out a customer
-    # generation rather than SIGKILLing it.
     stop_grace_period: 60m
     env_file:
       - ./.env
@@ -55,6 +71,8 @@ services:
       - CADDY_ADMIN_URL=http://caddy:2019
       - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
       - DB_MAX_OPEN_CONNS=10
+      - DEEPAGENTS_RUNTIME_URL=http://deepagents-runtime:8000
+      - AGENT_RUNTIME=deepagents
     volumes:
       - repo-data:/data/repos
       - custom-domains:/data/custom-domains

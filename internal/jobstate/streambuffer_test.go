@@ -138,3 +138,50 @@ func TestStreamStateBufferTodoSnapshot(t *testing.T) {
 		t.Fatalf("unexpected todos snapshot: %+v", got.Todos)
 	}
 }
+
+func TestStreamStateBufferIgnoresSubagentProgressEvents(t *testing.T) {
+	b := NewStreamStateBuffer()
+	runID := uuid.New()
+
+	b.Apply(responses.SSEEvent{
+		Seq:   1,
+		Event: "narration",
+		Data: agent.NarrationEvent{
+			RunID: runID,
+			Turn:  1,
+			Delta: "starting",
+		},
+	})
+	raw, ok := b.Snapshot()
+	if !ok {
+		t.Fatal("expected dirty snapshot after narration")
+	}
+
+	var replay struct {
+		StreamingText string `json:"streaming_text"`
+	}
+	if err := json.Unmarshal(raw, &replay); err != nil {
+		t.Fatalf("unmarshal snapshot: %v", err)
+	}
+	if replay.StreamingText != "starting" {
+		t.Fatalf("streaming_text = %q, want %q", replay.StreamingText, "starting")
+	}
+
+	changed := b.Apply(responses.SSEEvent{
+		Seq:   2,
+		Event: "subagent_progress",
+		Data: agent.SubagentProgressEvent{
+			RunID:      runID,
+			SubagentID: "sub-1",
+			Name:       "planner",
+			Message:    "creating plan",
+		},
+	})
+	if changed {
+		t.Fatal("expected subagent_progress to be ignored by stream state")
+	}
+
+	if _, ok := b.Snapshot(); ok {
+		t.Fatal("expected no snapshot update for ignored subagent_progress event")
+	}
+}

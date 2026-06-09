@@ -33,6 +33,7 @@ import (
 	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
+	"github.com/knid/wemob/internal/services/workspacelock"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/revenuecat"
 	"github.com/knid/wemob/internal/services/secret"
@@ -356,6 +357,10 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		TLSConfig: redisOpts.TLSConfig,
 	})
 
+	// Cross-process workspace lock for Python direct repo writes (PR 2).
+	// Refresh/release use Lua compare-and-delete; see workspacelock package.
+	workspaceLock := workspacelock.New(redisClient)
+
 	edgeIPsCSV := sm.GetSecret("EDGE_IPS")
 	var edgeIPs []string
 	if edgeIPsCSV != "" {
@@ -406,6 +411,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		remoteConfigService,
 		e2b,
 		edgeIPs,
+		workspaceLock,
 		caddyAdmin,
 	)
 

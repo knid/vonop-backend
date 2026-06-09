@@ -9,3 +9,14 @@ storage/private
 docs/superpowers/
 .superpowers/
 .worktrees/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
