@@ -23,18 +23,15 @@ func Run(
 		return New(CodeInternal, "setup", "failed to initialize agent runtime", err)
 	}
 	req := RuntimeRequest{
-		RunID:           uuid.NewString(),
-		JobID:           deps.JobID,
-		Project:         project,
-		User:            user,
-		Message:         message,
-		ExpandedMessage: message,
-		Deps:            deps,
-		Attachments:     turnAttachments,
-		Provider:        deps.LLMProvider,
-		// Native runtime currently computes this itself; preserve a known-good
-		// default for runtimes that rely on an explicit limit envelope.
-		Limits: defaultRuntimeLimits(),
+		RunID:       uuid.NewString(),
+		JobID:       deps.JobID,
+		Project:     project,
+		User:        user,
+		Message:     message,
+		Deps:        deps,
+		Attachments: turnAttachments,
+		Provider:    deps.LLMProvider,
+		Limits:      defaultRuntimeLimits(),
 	}
 	_, err = runtime.Run(ctx, req, emitter)
 	return err

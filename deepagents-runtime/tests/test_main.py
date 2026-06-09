@@ -55,7 +55,6 @@ def _make_stream_payload(base_path: Path, project_id: str) -> dict:
         "is_first_generation": True,
         "read_only": False,
         "message": "Build a landing page redesign for our SaaS app.",
-        "history": [],
         "attachments": [],
         "repo": {
             "mount_base": str(base_path),

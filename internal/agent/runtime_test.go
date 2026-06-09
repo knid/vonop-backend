@@ -9,25 +9,25 @@ import (
 
 func TestResolveAgentRuntimeKind_DefaultFallsBackToNative(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME", "")
-	got := ResolveAgentRuntimeKind()
+	got := resolveEnvRuntimeKind()
 	assert.Equal(t, AgentRuntimeNativeGo, got)
 }
 
 func TestResolveAgentRuntimeKind_ExplicitNativeGo(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME", "native_go")
-	got := ResolveAgentRuntimeKind()
+	got := resolveEnvRuntimeKind()
 	assert.Equal(t, AgentRuntimeNativeGo, got)
 }
 
 func TestResolveAgentRuntimeKind_ExplicitDeepAgents(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME", "deepagents")
-	got := ResolveAgentRuntimeKind()
+	got := resolveEnvRuntimeKind()
 	assert.Equal(t, AgentRuntimeDeepAgents, got)
 }
 
 func TestResolveAgentRuntimeKind_UnknownFallsBackToNative(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME", "unsupported-runtime")
-	got := ResolveAgentRuntimeKind()
+	got := resolveEnvRuntimeKind()
 	assert.Equal(t, AgentRuntimeNativeGo, got)
 }
 

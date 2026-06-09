@@ -55,7 +55,6 @@ class RunStreamRequest(BaseModel):
     is_first_generation: bool = False
     read_only: bool = False
     message: str
-    history: list[dict] = Field(default_factory=list)
     attachments: list[Attachment] = Field(default_factory=list)
     repo: RepoInfo
     model: ModelSpec

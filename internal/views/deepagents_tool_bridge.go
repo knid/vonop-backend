@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +20,8 @@ import (
 	"github.com/knid/wemob/internal/services/jobstream"
 	"github.com/knid/wemob/internal/utils"
 )
+
+var deepAgentsRegistryCache sync.Map
 
 // DeepAgentsToolResult is the canonical response body for the Python
 // tool-execute bridge. Python wraps one tool function per ToolSpec; each
@@ -133,13 +136,12 @@ func (v *HttpViews) HandleDeepAgentsToolExecute(w http.ResponseWriter, r *http.R
 	// Build a per-call registry. The Python runtime must NEVER see file
 	// tools, skill tools, update_todos, or create_design — see the
 	// FilterRegistryForDeepAgents rationale in registry.go.
-	modelName := strings.TrimSpace(v.Controller.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL"))
+	//
+	// The filtered registry is cached per runID to avoid rebuilding it
+	// on every tool call from Python (which can be hundreds per run).
+	registry := getOrCreateDeepAgentsRegistry(runID, v, user, body.JobID, project)
 	deps := v.Controller.AgentDeps(user, body.JobID, "deepagents-bridge")
-	profile := agent.ResolveAgentProfile(project)
-	rc := agent.NewRunContext(runID, profile, project, user, deps)
-
-	registry := agent.BuildRegistryFor(project, deps, modelName)
-	registry = agent.FilterRegistryForDeepAgents(registry)
+	rc := agent.NewRunContext(runID, agent.ResolveAgentProfile(project), project, user, deps)
 	allowed := map[string]bool{}
 	for _, n := range registry.Names() {
 		allowed[n] = true
@@ -195,6 +197,23 @@ func (v *HttpViews) HandleDeepAgentsToolExecute(w http.ResponseWriter, r *http.R
 		Summary:    firstLine(result),
 		DurationMs: int(duration.Milliseconds()),
 	})
+}
+
+// getOrCreateDeepAgentsRegistry returns the filtered registry for the given
+// runID, building and caching it on the first call. This avoids rebuilding
+// the full tool registry (including MCP tool discovery) on every tool call
+// from Python, which can be hundreds per run.
+func getOrCreateDeepAgentsRegistry(runID uuid.UUID, v *HttpViews, user *models.User, jobID string, project *models.AppProject) *agent.Registry {
+	key := runID.String()
+	if cached, ok := deepAgentsRegistryCache.Load(key); ok {
+		return cached.(*agent.Registry)
+	}
+	modelName := strings.TrimSpace(v.Controller.SecretManager.GetSecret("WEBSITE_BUILDER_LLM_MODEL"))
+	deps := v.Controller.AgentDeps(user, jobID, "deepagents-bridge")
+	registry := agent.BuildRegistryFor(project, deps, modelName)
+	registry = agent.FilterRegistryForDeepAgents(registry)
+	deepAgentsRegistryCache.Store(key, registry)
+	return registry
 }
 
 // executeMCPToolForDeepAgents runs an MCP-prefixed tool through the same
