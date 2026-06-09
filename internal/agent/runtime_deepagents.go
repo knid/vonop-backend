@@ -147,6 +147,35 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 	}()
 	defer close(streamDone)
 
+	lastEventAt := time.Now()
+	heartbeatDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		defer close(heartbeatDone)
+		for {
+			select {
+			case <-streamDone:
+				return
+			case <-ticker.C:
+				hbCtx, hbCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if hbErr := r.client.Heartbeat(hbCtx, runID.String()); hbErr != nil {
+					slog.Warn("agent: deepagents heartbeat failed", "run_id", runID, "error", hbErr)
+				}
+				hbCancel()
+				stallDuration := time.Since(lastEventAt)
+				if stallDuration > 60*time.Second {
+					slog.Warn("agent: deepagents stream stall detected",
+						"run_id", runID,
+						"stall_seconds", int(stallDuration.Seconds()))
+				}
+			}
+		}
+	}()
+	defer func() {
+		<-heartbeatDone
+	}()
+
 	if existing, existingErr := req.Deps.DB.GetActiveAgentRun(req.Project.ID); existingErr == nil && existing != nil {
 		return nil, New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
 	}
@@ -356,6 +385,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 			"pre_commit": preCommit,
 		},
 	}, func(evt deepagents.DeepAgentsEvent) error {
+		lastEventAt = time.Now()
 		switch evt.Type {
 		case "message_delta":
 			var payload deepAgentsEventDataMessage
@@ -575,8 +605,10 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 			_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, "agent_loop", code, msg, ctx.Err(), tracker, runStart, fileMap, req.Message)
 			return nil, New(code, "agent_loop", msg, ctx.Err())
 		}
-		_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, "agent_loop", CodeProviderError, "runtime communication failed", err, tracker, runStart, fileMap, req.Message)
-		return nil, New(CodeProviderError, "agent_loop", "runtime communication failed", err)
+		code := CodeRuntimeError
+		msg := "runtime communication failed"
+		_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, "agent_loop", code, msg, err, tracker, runStart, fileMap, req.Message)
+		return nil, New(code, "agent_loop", msg, err)
 	}
 
 	if firstErr != nil {
@@ -688,6 +720,8 @@ func mapPythonErrorCode(raw string) ErrorCode {
 		return CodeValidationFailed
 	case "budget_exceeded", "timeout", "deadline_exceeded":
 		return CodeBudgetExceeded
+	case "runtime_error", "runtime_fault", "python_crash":
+		return CodeRuntimeError
 	default:
 		return CodeProviderError
 	}

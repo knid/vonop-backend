@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -154,7 +155,8 @@ func (c *Client) StreamRun(ctx context.Context, req DeepAgentsRunRequest, onEven
 		}
 		var event DeepAgentsEvent
 		if err := json.Unmarshal(line, &event); err != nil {
-			return fmt.Errorf("deepagents: parse event: %w", err)
+			slog.Warn("deepagents: skipping malformed event line", "error", err)
+			continue
 		}
 		if err := onEvent(event); err != nil {
 			return err
@@ -201,5 +203,32 @@ func (c *Client) CancelRun(ctx context.Context, runID string) error {
 		return fmt.Errorf("deepagents: cancel failed (%d): %s", resp.StatusCode, msg)
 	}
 
+	return nil
+}
+
+func (c *Client) Heartbeat(ctx context.Context, runID string) error {
+	if c == nil {
+		return fmt.Errorf("deepagents: nil client")
+	}
+	runID = strings.TrimSpace(runID)
+	if runID == "" {
+		return fmt.Errorf("deepagents: run_id is required")
+	}
+	endpoint := strings.TrimRight(c.BaseURL, "/") + "/internal/v1/runs/" + runID + "/heartbeat"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(c.Token) != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+strings.TrimSpace(c.Token))
+	}
+	resp, err := c.httpClient().Do(httpReq)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("deepagents: heartbeat failed (%d)", resp.StatusCode)
+	}
 	return nil
 }

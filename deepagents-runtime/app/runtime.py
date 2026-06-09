@@ -15,15 +15,11 @@ from .schemas import RunStreamRequest
 from .skills import SKILLS_ROOT, resolve_skills
 
 
-_MODEL_CACHE: dict[tuple[str, str, str | None], Any] = {}
+_MODEL_CACHE: dict[tuple[str, str, str | None, int | float | None, int | float | None], Any] = {}
 _WRITE_DIRECTIVE_RE = re.compile(
     r"write\s+(?P<path>/workspace/[^\n:]+?)\s+with:\s*(?P<content>.*)$",
     re.IGNORECASE | re.DOTALL,
 )
-
-
-def _model_cache_key(provider: str, model: str, langchain_model: str | None) -> tuple[str, str, str | None]:
-    return provider.strip().lower(), model.strip(), (langchain_model or "").strip() or None
 
 
 def build_model(model_config: Any) -> Any:
@@ -41,16 +37,18 @@ def build_model(model_config: Any) -> Any:
     ).strip()
 
     if not provider or not model_name:
-        raise ValueError("provider and model are required")
-
-    cache_key = _model_cache_key(provider, model_name, langchain_model or None)
-    if cache_key in _MODEL_CACHE:
-        return _MODEL_CACHE[cache_key]
+	        raise ValueError("provider and model are required")
 
     base_model = model_name
     if langchain_model and ":" in langchain_model and not langchain_model.startswith(("file:", "http")):
         if provider in {"openrouter", "openrouter-compatible", "openrouter-compatible-api"} or langchain_model.startswith("openrouter:"):
             base_model = langchain_model.split(":", 1)[1]
+
+    max_output_tokens = _extract_max_tokens(model_config)
+    model_timeout = _extract_model_timeout(model_config)
+    cache_key = (provider.strip().lower(), model_name.strip(), (langchain_model or "").strip() or None, max_output_tokens, model_timeout)
+    if cache_key in _MODEL_CACHE:
+        return _MODEL_CACHE[cache_key]
 
     if provider == "anthropic":
         try:
@@ -58,11 +56,12 @@ def build_model(model_config: Any) -> Any:
         except Exception as exc:
             raise RuntimeError("anthropic adapter unavailable") from exc
 
-        model = ChatAnthropic(
-            model=base_model or model_name,
-            max_tokens=None,
-            timeout=None,
-        )
+        kwargs: dict[str, Any] = {
+            "model": base_model or model_name,
+            "max_tokens": max_output_tokens,
+            "timeout": model_timeout,
+        }
+        model = ChatAnthropic(**kwargs)
         _MODEL_CACHE[cache_key] = model
         return model
 
@@ -79,15 +78,42 @@ def build_model(model_config: Any) -> Any:
         elif provider in {"openrouter", "openrouter-compatible"}:
             base_url = os.getenv("OPENROUTER_BASE_URL", base_url)
 
-        model = ChatOpenAI(
-            model=base_model or model_name,
-            base_url=base_url,
-            timeout=None,
-        )
+        kwargs: dict[str, Any] = {
+            "model": base_model or model_name,
+            "base_url": base_url,
+            "timeout": model_timeout,
+        }
+        if max_output_tokens is not None:
+            kwargs["max_tokens"] = max_output_tokens
+        model = ChatOpenAI(**kwargs)
         _MODEL_CACHE[cache_key] = model
         return model
 
     raise ValueError(f"unsupported model provider: {provider}")
+
+
+def _extract_max_tokens(model_config: Any) -> int | None:
+    limits = getattr(model_config, "limits", None)
+    if limits is None:
+        return None
+    max_tokens = getattr(limits, "max_output_tokens_per_call", 0) or getattr(limits, "get", lambda _: None)("max_output_tokens_per_call") or 0
+    if isinstance(max_tokens, (int, float)) and max_tokens > 0:
+        return int(max_tokens)
+    return None
+
+
+def _extract_model_timeout(model_config: Any) -> int | None:
+    """Extract per-model-call timeout from config. Falls back to 300s (5 min)
+    default if no explicit timeout is configured. Returns None only when
+    the model is explicitly intended to have no timeout (which we don't
+    want in production)."""
+    limits = getattr(model_config, "limits", None)
+    if limits is not None:
+        max_wallclock_ms = getattr(limits, "max_wallclock_ms", 0) or getattr(limits, "get", lambda _: None)("max_wallclock_ms") or 0
+        if isinstance(max_wallclock_ms, (int, float)) and max_wallclock_ms > 0:
+            per_call = max(30, min(int(max_wallclock_ms / 10 / 1000), 300))
+            return per_call
+    return 300
 
 
 @dataclass(frozen=True)
@@ -500,7 +526,7 @@ def _coerce_output_preview(value: Any) -> dict[str, Any]:
 
 
 async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> AsyncGenerator[bytes, None]:
-    model = build_model(request.model)
+    model = build_model(request)
     backend = build_workspace_backend(repo_root)
     selected_skills = resolve_skills(request)
     prompt = _system_prompt(request, selected_skills)

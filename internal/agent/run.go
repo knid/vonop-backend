@@ -1702,7 +1702,7 @@ func classifyErrorKind(code ErrorCode, wrapped error) string {
 		}
 		return "context_canceled"
 	case CodeInternal, CodeGitError, CodeToolFailed, CodeValidationFailed,
-		CodeTruncated, CodeRepetitionLoop, CodeRunInProgress:
+		CodeTruncated, CodeRepetitionLoop, CodeRunInProgress, CodeRuntimeError:
 		return "internal"
 	}
 	return "unknown"
