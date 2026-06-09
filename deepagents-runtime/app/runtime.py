@@ -16,7 +16,6 @@ from .schemas import RunStreamRequest
 from .skills import SKILLS_ROOT, resolve_skills
 from .streaming import ndjson_event
 
-
 _MODEL_CACHE: dict[tuple[str, str, str | None, int | float | None, int | float | None], Any] = {}
 _WRITE_DIRECTIVE_RE = re.compile(
     r"write\s+(?P<path>/workspace/[^\n:]+?)\s+with:\s*(?P<content>.*)$",
@@ -130,7 +129,7 @@ def _extract_limits(model_config: Any) -> dict[str, int] | None:
 def _extract_max_tokens(model_config: Any) -> int | None:
     limits = None
     if hasattr(model_config, "limits"):
-        limits = getattr(model_config, "limits")
+        limits = model_config.limits
     elif isinstance(model_config, dict) and "limits" in model_config:
         limits = model_config["limits"]
     if limits is None:
@@ -149,7 +148,7 @@ def _extract_max_tokens(model_config: Any) -> int | None:
 def _extract_model_timeout(model_config: Any) -> int | None:
     limits = None
     if hasattr(model_config, "limits"):
-        limits = getattr(model_config, "limits")
+        limits = model_config.limits
     elif isinstance(model_config, dict) and "limits" in model_config:
         limits = model_config["limits"]
     if limits is not None:
@@ -310,7 +309,11 @@ def _extract_event_payload(event: Any) -> dict[str, Any]:
 def build_workspace_backend(repo_path: str | Path):
     repo_root = Path(repo_path).resolve()
     try:
-        from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+        from deepagents.backends import (
+            CompositeBackend,
+            FilesystemBackend,
+            StateBackend,
+        )
         from deepagents.permissions import FilesystemPermission
     except Exception:
         return {
@@ -635,7 +638,6 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     from .usage import (
         WemobUsageCallback,
         langsmith_callbacks,
-        langsmith_metadata,
         make_event_emitter,
     )
 
@@ -660,13 +662,13 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
     except TypeError:
         agent = DeepAgents(model=model, prompt=prompt, context=context)
         if hasattr(agent, "backend"):
-            setattr(agent, "backend", backend)
+            agent.backend = backend
         if hasattr(agent, "thread_id"):
-            setattr(agent, "thread_id", request.run_id)
+            agent.thread_id = request.run_id
         if hasattr(agent, "tools"):
-            setattr(agent, "tools", wemob_tools)
+            agent.tools = wemob_tools
         if hasattr(agent, "callbacks"):
-            setattr(agent, "callbacks", callbacks)
+            agent.callbacks = callbacks
 
     # Drop the run's recorder on the way out so subsequent runs start clean.
     from .usage import drop_recorder
@@ -747,7 +749,7 @@ async def _stream_deepagents(request: RunStreamRequest, repo_root: Path) -> Asyn
             "done",
             run_id=run_id,
             job_id=request.job_id,
-            seq=seq_counter["value"],
+            seq=1,
             data={"summary": "deepagents completed", "turns": 1, "tool_calls": 0, "model_calls": 0},
         )
 

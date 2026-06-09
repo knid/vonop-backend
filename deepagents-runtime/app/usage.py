@@ -379,7 +379,7 @@ def langsmith_callbacks(run_context: RunStreamRequest) -> list[Any]:
     if not LANGSMITH_TRACING:
         return []
     try:
-        from langsmith import tracing_context  # type: ignore
+        pass  # type: ignore
     except Exception:
         logger.warning(
             "LANGSMITH_TRACING=true but langsmith is not installed; "

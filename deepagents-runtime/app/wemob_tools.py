@@ -7,7 +7,12 @@ from typing import Any, Awaitable, Callable, Mapping
 
 from .schemas import RunStreamRequest
 from .streaming import ndjson_event
-from .tool_bridge import GoToolClient, MAX_TOOL_RESULT_CHARS, ToolBridgeError, truncate_tool_result
+from .tool_bridge import (
+    MAX_TOOL_RESULT_CHARS,
+    GoToolClient,
+    ToolBridgeError,
+    truncate_tool_result,
+)
 
 logger = logging.getLogger("deepagents.wemob_tools")
 
@@ -123,9 +128,9 @@ def make_wemob_tool(
     # recover the spec without re-passing it. `_wemob_tool_spec` is a
     # private attribute; downstream code should use the spec the runtime
     # provided.
-    setattr(_impl, "_wemob_tool_spec", dict(spec))
-    setattr(_impl, "__name__", name)
-    setattr(_impl, "__doc__", description)
+    _impl._wemob_tool_spec = dict(spec)
+    _impl.__name__ = name
+    _impl.__doc__ = description
     _impl.tool_schema = schema  # type: ignore[attr-defined]
     return _impl
 

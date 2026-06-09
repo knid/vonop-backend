@@ -1,12 +1,12 @@
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-import subprocess
 
-from app.main import app
 from app.config import Settings
+from app.main import app
 from app.permissions import is_allowed_workspace_path
 from app.repo_paths import resolve_repo_path
 from app.schemas import RunStreamRequest

@@ -9,8 +9,8 @@ import json
 
 from app.schemas import RunStreamRequest
 from app.tool_bridge import (
-    GoToolClient,
     MAX_TOOL_RESULT_CHARS,
+    GoToolClient,
     ToolBridgeError,
     truncate_tool_result,
 )

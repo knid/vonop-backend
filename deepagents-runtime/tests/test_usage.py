@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 
+from app.schemas import RunStreamRequest
 from app.usage import (
     RUNTIME_KIND,
     UsageRecorder,
@@ -17,10 +18,9 @@ from app.usage import (
     is_langsmith_enabled,
     langsmith_callbacks,
     langsmith_metadata,
-    make_fake_usage_payload,
     make_event_emitter,
+    make_fake_usage_payload,
 )
-from app.schemas import RunStreamRequest
 
 
 def _make_request(run_id: str = "run-1") -> RunStreamRequest:

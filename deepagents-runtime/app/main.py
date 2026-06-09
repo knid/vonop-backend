@@ -11,15 +11,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from starlette.status import HTTP_404_NOT_FOUND
 
-from . import logging as app_logging
 from . import __version__ as service_version
+from . import logging as app_logging
 from .config import Settings
 from .errors import RepoValidationError
 from .repo_paths import resolve_repo_path
 from .schemas import RunStreamRequest
 from .security import InternalAuth
-from .streaming import ndjson_event, run_stream as _stream_run_engine
-
+from .streaming import ndjson_event
+from .streaming import run_stream as _stream_run_engine
 
 app_logging.configure()
 
