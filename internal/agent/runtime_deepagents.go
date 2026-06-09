@@ -556,6 +556,15 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		}
 		poller.Stop()
 	}
+
+	reloadedFileMap, reloadErr := ReloadFileMapFromRepo(repo)
+	if reloadErr == nil {
+		fileMap = reloadedFileMap
+	} else {
+		slog.Warn("agent: failed to reload fileMap after deepagents run",
+			"run_id", runID, "error", reloadErr)
+	}
+
 	if err != nil {
 		if firstErr != nil {
 			_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, firstErr.Phase, firstErr.Code, firstErr.Message, firstErr.Wrapped, tracker, runStart, fileMap, req.Message)
@@ -575,9 +584,13 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		return nil, firstErr
 	}
 
-	if updatedFileMap, finaliseErr := ReloadFileMapFromRepo(repo); finaliseErr == nil {
-		fileMap = updatedFileMap
+	if validationErr := ValidateAgentOutput(nil, fileMap, nil, req.Message, req.IsFirstGen, req.Project, nil); validationErr != nil {
+		_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, "validation",
+			CodeValidationFailed, validationErr.Error(), validationErr,
+			tracker, runStart, fileMap, req.Message)
+		return nil, New(CodeValidationFailed, "validation", validationErr.Error(), validationErr)
 	}
+
 	if doneTurns == 0 {
 		doneTurns = turns
 	}
