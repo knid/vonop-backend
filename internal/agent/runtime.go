@@ -9,7 +9,6 @@ import (
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/deepagents"
-	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -25,6 +24,27 @@ func init() {
 	if runtimeVersion == "" {
 		runtimeVersion = "dev"
 	}
+	cachedRuntimeKind = resolveEnvRuntimeKind()
+}
+
+func resolveEnvRuntimeKind() RuntimeKind {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAgentRuntime))) {
+	case "", string(RuntimeNativeGo):
+		return RuntimeNativeGo
+	case string(RuntimeDeepAgents):
+		return RuntimeDeepAgents
+	default:
+		return RuntimeNativeGo
+	}
+}
+
+var cachedRuntimeKind RuntimeKind
+
+// ResolveAgentRuntimeKind returns the cached runtime kind resolved at process
+// start from AGENT_RUNTIME. Prefer NewAgentRuntime(kind) in tests that need
+// to assert on specific runtime kinds.
+func ResolveAgentRuntimeKind() RuntimeKind {
+	return cachedRuntimeKind
 }
 
 type RuntimeKind string
@@ -54,28 +74,15 @@ type RuntimeLimits struct {
 
 // RuntimeRequest carries runtime-agnostic configuration for a single run.
 type RuntimeRequest struct {
-	RunID           string
-	JobID           string
-	Project         *models.AppProject
-	User            *models.User
-	Message         string
-	ExpandedMessage string
-	IsFirstGen      bool
-	History         []utils.Message
-	Attachments     TurnAttachments
-	Profile         *AgentProfile
-	ContextPacket   AgentContextPacket
-	Registry        *Registry
-	Repo            *gitrepo.Repo
-	PreCommit       string
-	BuildState      *BuildState
-	Todos           *TodoList
-	FileMap         *SafeFileMap
-	Tracker         *utils.TokenTracker
-	Model           string
-	Provider        *utils.LLMProvider
-	Limits          RuntimeLimits
-	Deps            *RunDependencies
+	RunID       string
+	JobID       string
+	Project     *models.AppProject
+	User        *models.User
+	Message     string
+	Attachments TurnAttachments
+	Provider    *utils.LLMProvider
+	Limits      RuntimeLimits
+	Deps        *RunDependencies
 }
 
 // RuntimeResult captures the canonical run output.
@@ -97,20 +104,6 @@ type Runtime interface {
 // AgentRuntime keeps backward compatibility with existing references while
 // retaining the same execution contract as Runtime.
 type AgentRuntime = Runtime
-
-// ResolveAgentRuntimeKind reads AGENT_RUNTIME and maps known values to a runtime
-// kind. Unknown values fall back to native_go for safety and backward
-// compatibility.
-func ResolveAgentRuntimeKind() RuntimeKind {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envAgentRuntime))) {
-	case "", string(RuntimeNativeGo):
-		return RuntimeNativeGo
-	case string(RuntimeDeepAgents):
-		return RuntimeDeepAgents
-	default:
-		return RuntimeNativeGo
-	}
-}
 
 // NewAgentRuntime builds the configured runtime implementation.
 func NewAgentRuntime(kind RuntimeKind) (Runtime, error) {

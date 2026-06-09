@@ -300,6 +300,14 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 	tracker.TraceInput = req.Message
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
+	var creditCheck func() bool
+	if req.Deps.CreditChecker != nil {
+		creditCheck = req.Deps.CreditChecker(req.Project.ID.String(), tracker)
+	}
+	if creditCheck != nil && !creditCheck() {
+		return nil, New(CodeCreditsExhausted, "setup", "insufficient credits to start run", nil)
+	}
+
 	registry := BuildRegistryFor(req.Project, req.Deps, model)
 	filteredRegistry := FilterRegistryForDeepAgents(registry)
 	tools := []string{}
@@ -316,7 +324,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		PreCommit:       preCommit,
 		Model:           model,
 		Provider:        providerName,
-		MaxTurns:        1,
+		MaxTurns:        limits.MaxModelCalls,
 		Tools:           tools,
 		AgentID:         "deepagents",
 		AgentName:       "DeepAgents Runtime",
@@ -337,6 +345,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 			emitWorkspaceDiffEvents(repo, baseFileMap, runID, emitter, paths)
 		})
 		poller.Start()
+		poller.WithContext(ctx)
 	}
 
 	parts := make([]models.ChatMessagePart, 0, 8)
@@ -348,6 +357,8 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 	var doneToolCalls int
 	var stopReason string
 	var firstErr *Error
+
+	expandedMessage, _, _ := ExpandSlashCommand(req.Message)
 
 	err = r.client.StreamRun(ctx, deepagents.DeepAgentsRunRequest{
 		SchemaVersion:     deepagentsSchemaVersion,
@@ -361,8 +372,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		FrontendRuntime:   req.Project.FrontendRuntime,
 		IsFirstGeneration: isFirstGen,
 		ReadOnly:          false,
-		Message:           req.Message,
-		History:           toDeepAgentsHistory(req.History),
+		Message:           expandedMessage,
 		Attachments:       toDeepAgentsAttachments(req.Attachments.Current),
 		Repo: deepagents.RepoSpec{
 			MountBase:   strings.TrimSpace(req.Deps.GitRepo.BasePath),
@@ -575,6 +585,10 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 				Subagent:         payload.Subagent,
 				RuntimeKind:      payload.RuntimeKind,
 			})
+			if creditCheck != nil && !creditCheck() {
+				firstErr = New(CodeCreditsExhausted, "agent_loop", "credits exhausted during run", nil)
+				return fmt.Errorf("credits exhausted")
+			}
 			return nil
 		}
 
@@ -618,7 +632,7 @@ func (r *DeepAgentsRuntime) Run(ctx context.Context, req RuntimeRequest, emitter
 		return nil, firstErr
 	}
 
-	if validationErr := ValidateAgentOutput(nil, fileMap, nil, req.Message, req.IsFirstGen, req.Project, nil); validationErr != nil {
+	if validationErr := ValidateAgentOutput(ResolveAgentProfile(req.Project), fileMap, nil, req.Message, isFirstGen, req.Project, nil); validationErr != nil {
 		_ = finaliseFailureV2(ctx, req.Deps, repo, run, req.Project, emitter, "validation",
 			CodeValidationFailed, validationErr.Error(), validationErr,
 			tracker, runStart, fileMap, req.Message)
@@ -740,30 +754,6 @@ func toDeepAgentsAttachments(in []models.AppAsset) []deepagents.Attachment {
 			URL:         a.PublicURL,
 			IsImage:     strings.HasPrefix(a.ContentType, "image/"),
 		})
-	}
-	return out
-}
-
-func toDeepAgentsHistory(in []utils.Message) []map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(in))
-	for _, msg := range in {
-		entry := map[string]any{"role": msg.Role}
-		if msg.Content != "" {
-			entry["content"] = msg.Content
-		}
-		if len(msg.Images) > 0 {
-			entry["images"] = msg.Images
-		}
-		if len(msg.ToolCalls) > 0 {
-			entry["tool_calls"] = msg.ToolCalls
-		}
-		if len(entry) == 1 {
-			entry["content"] = ""
-		}
-		out = append(out, entry)
 	}
 	return out
 }

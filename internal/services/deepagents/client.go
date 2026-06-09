@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 )
 
 // DeepAgentsRunRequest is the JSON body sent to the Python bridge.
@@ -27,7 +26,6 @@ type DeepAgentsRunRequest struct {
 	IsFirstGeneration bool             `json:"is_first_generation"`
 	ReadOnly          bool             `json:"read_only"`
 	Message           string           `json:"message"`
-	History           []map[string]any `json:"history"`
 	Attachments       []Attachment     `json:"attachments"`
 	Repo              RepoSpec         `json:"repo"`
 	Model             ModelSpec        `json:"model"`
@@ -92,7 +90,9 @@ type Client struct {
 	HTTPClient *http.Client
 }
 
-var defaultHTTPClient = &http.Client{Timeout: 2 * time.Minute}
+// defaultHTTPClient has no client-level timeout — the request context deadline
+// governs cancellation per call (45 min for StreamRun, 5s for Cancel/Heartbeat).
+var defaultHTTPClient = &http.Client{Timeout: 0}
 
 func NewClient(baseURL, token string) *Client {
 	return &Client{BaseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"), Token: strings.TrimSpace(token)}
