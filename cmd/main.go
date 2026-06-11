@@ -1138,7 +1138,7 @@ func main() {
 					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
 
 					// Chat
-					r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/chat", httpViews.ChatApp)
+					r.With(rateLimiter.RateLimit(60, time.Minute, appMiddleware.AIChatUserKey)).Post("/chat", httpViews.ChatApp)
 
 					// Chat history (new AppChatMessage table)
 					r.Get("/messages", httpViews.GetAppMessages)

@@ -127,3 +127,13 @@ func AIUserKey(r *http.Request) string {
 	return "ai:" + IPKey(r)
 }
 
+// AIChatUserKey returns a rate-limit key for interactive app chat launches.
+// Keep this separate from the broader AI bucket so generation retries, schema
+// refreshes, or other AI endpoint bursts cannot poison the Studio chat surface.
+func AIChatUserKey(r *http.Request) string {
+	user := UserFromContext(r.Context())
+	if user != nil {
+		return "ai:chat:" + user.ID.String()
+	}
+	return "ai:chat:" + IPKey(r)
+}
