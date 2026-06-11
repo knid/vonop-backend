@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from starlette.middleware.cors import CORSMiddleware
 from starlette.responses import StreamingResponse
 
 from wemob_agent.config import load_config
@@ -445,6 +446,17 @@ async def authorize_internal_request(
 
 
 app = FastAPI(title="Wemob Deep Agents Internal API")
+_runtime_config = load_config()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=list(_runtime_config.cors_allowed_origins),
+    allow_origin_regex=_runtime_config.cors_allowed_origin_regex or None,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["Link", "Location", "X-Request-ID"],
+    allow_credentials=False,
+    max_age=300,
+)
 runtime_adapter: LangGraphRuntimeAdapter = LangGraphRuntimeAdapter()
 
 

@@ -121,6 +121,41 @@ class InternalAPITests(unittest.TestCase):
         self.assertEqual(payload["context"]["project_id"], "project-1")
         self.assertEqual(payload["context"]["workspace_root"], "/workspace")
 
+    def test_langgraph_proxy_preflight_allows_wemob_app_origin_without_auth(self) -> None:
+        from fastapi.testclient import TestClient
+
+        from wemob_agent import internal_api
+
+        client = TestClient(internal_api.app)
+        response = client.options(
+            "/lg/threads/c041bfe1-63f5-4950-9309-88731bd7db97/state",
+            headers={
+                "Origin": "https://app.wemob.io",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["access-control-allow-origin"], "https://app.wemob.io")
+        self.assertIn("authorization", response.headers["access-control-allow-headers"].lower())
+
+
+class ConfigTests(unittest.TestCase):
+    def test_load_config_parses_agent_cors_allowed_origins(self) -> None:
+        from wemob_agent.config import load_config
+
+        with patch.dict(
+            "os.environ",
+            {"WEMOB_AGENT_CORS_ALLOWED_ORIGINS": "https://app.wemob.io, http://localhost:5173"},
+        ):
+            cfg = load_config()
+
+        self.assertEqual(
+            cfg.cors_allowed_origins,
+            ("https://app.wemob.io", "http://localhost:5173"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

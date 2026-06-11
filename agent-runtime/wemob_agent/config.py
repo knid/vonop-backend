@@ -20,6 +20,13 @@ class RuntimeConfig:
     backend_internal_url: str = ""
     internal_token: str = ""
     run_store_path: str = "/data/wemob-agent-runtime/runs.json"
+    cors_allowed_origins: tuple[str, ...] = (
+        "https://app.wemob.io",
+        "https://dashboard.wemob.io",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    )
+    cors_allowed_origin_regex: str = r"https://.*\.wemob\.app"
 
 
 def load_config() -> RuntimeConfig:
@@ -40,4 +47,18 @@ def load_config() -> RuntimeConfig:
         run_store_path=os.getenv(
             "WEMOB_AGENT_RUN_STORE_PATH", "/data/wemob-agent-runtime/runs.json"
         ),
+        cors_allowed_origins=_split_csv(
+            os.getenv(
+                "WEMOB_AGENT_CORS_ALLOWED_ORIGINS",
+                "https://app.wemob.io,https://dashboard.wemob.io,"
+                "http://localhost:3000,http://127.0.0.1:3000",
+            )
+        ),
+        cors_allowed_origin_regex=os.getenv(
+            "WEMOB_AGENT_CORS_ALLOWED_ORIGIN_REGEX", r"https://.*\.wemob\.app"
+        ),
     )
+
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())
