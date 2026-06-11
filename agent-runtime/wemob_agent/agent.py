@@ -7,6 +7,7 @@ from typing import Any
 
 from wemob_agent.config import load_config
 from wemob_agent.context import WemobContext
+from wemob_agent.daytona import create_runtime_sandbox
 from wemob_agent.subagents import build_subagents
 from wemob_agent.tools import build_product_tools
 
@@ -43,25 +44,55 @@ def _ctx_value(context: Any, key: str, default: str) -> str:
 def _build_deepagents_backend() -> Any:
     """Build the Deep Agents filesystem backend from per-run runtime context."""
 
-    from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+    from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend, StoreBackend
 
     def backend_factory(runtime: Any) -> Any:
         context = getattr(runtime, "context", None)
+        runtime_config = load_config()
+        if runtime_config.allow_local_agent_execution:
+            workspace_backend: Any = FilesystemBackend(
+                root_dir=_ctx_value(context, "host_worktree_path", _ctx_value(context, "workspace_root", "/workspace")),
+                virtual_mode=True,
+            )
+        else:
+            from langchain_daytona import DaytonaSandbox
+
+            if isinstance(context, dict):
+                wemob_context = WemobContext(**context)
+            elif isinstance(context, WemobContext):
+                wemob_context = context
+            else:
+                raise ValueError("WemobContext is required to create a Daytona-backed workspace")
+            workspace_backend = DaytonaSandbox(
+                sandbox=create_runtime_sandbox(wemob_context, runtime_config).sandbox
+            )
+        memory_backend: Any
+        artifact_backend: Any
+        if runtime_config.allow_local_agent_execution:
+            memory_backend = FilesystemBackend(
+                root_dir=_ctx_value(context, "memory_root", "/memories"),
+                virtual_mode=True,
+            )
+            artifact_backend = FilesystemBackend(
+                root_dir=_ctx_value(context, "artifacts_root", "/artifacts"),
+                virtual_mode=True,
+            )
+        else:
+            memory_backend = StoreBackend(
+                namespace=lambda rt: (
+                    "wemob",
+                    _ctx_value(getattr(rt, "context", None), "org_id", "unknown-org"),
+                    _ctx_value(getattr(rt, "context", None), "project_id", "unknown-project"),
+                    "memories",
+                )
+            )
+            artifact_backend = StateBackend()
         return CompositeBackend(
             default=StateBackend(),
             routes={
-                "/workspace/": FilesystemBackend(
-                    root_dir=_ctx_value(context, "workspace_root", "/workspace"),
-                    virtual_mode=True,
-                ),
-                "/memories/": FilesystemBackend(
-                    root_dir=_ctx_value(context, "memory_root", "/memories"),
-                    virtual_mode=True,
-                ),
-                "/artifacts/": FilesystemBackend(
-                    root_dir=_ctx_value(context, "artifacts_root", "/artifacts"),
-                    virtual_mode=True,
-                ),
+                "/workspace/": workspace_backend,
+                "/memories/": memory_backend,
+                "/artifacts/": artifact_backend,
             },
         )
 

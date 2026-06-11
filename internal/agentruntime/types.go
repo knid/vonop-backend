@@ -29,6 +29,7 @@ type RuntimeRun struct {
 	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at,omitempty"`
 	RuntimeAPIURL string    `json:"runtime_api_url,omitempty"`
+	SandboxID     string    `json:"sandbox_id,omitempty"`
 }
 
 type ResumeRunRequest struct {

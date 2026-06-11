@@ -10,9 +10,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from wemob_agent.backends import build_backend
 from wemob_agent.context import WemobContext
-from wemob_agent.daytona import DaytonaWorkspaceManager, PreviewServerRequest
+from wemob_agent.daytona import DaytonaWorkspaceManager, PreviewServerRequest, connect_runtime_sandbox
+from wemob_agent.product_api import ProductAPIClient
 
 
 def build_product_tools(context: WemobContext | None = None) -> list[Any]:
@@ -37,28 +37,8 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
                 return None
         return raw if isinstance(raw, WemobContext) else None
 
-    def active_backend():
-        return build_backend(active_context())
-
-    def read_workspace_file(path: str) -> str:
-        """Read a UTF-8 text file from the current project workspace."""
-
-        return active_backend().workspace.read_text(path)
-
-    def write_workspace_file(path: str, content: str) -> str:
-        """Write a UTF-8 text file inside the current project workspace."""
-
-        return active_backend().workspace.write_text(path, content)
-
-    def list_workspace_files() -> list[str]:
-        """List files in the current project workspace."""
-
-        return active_backend().workspace.list_files()
-
-    def update_project_memory(key: str, content: str) -> str:
-        """Write persistent project memory under /memories/project."""
-
-        return active_backend().store.update_project_memory(key, content)
+    def product_api() -> ProductAPIClient:
+        return ProductAPIClient()
 
     def get_project_context() -> dict[str, Any]:
         """Return scoped Wemob project context for this run."""
@@ -88,10 +68,7 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
         ctx = active_context()
         if ctx is None:
             raise ValueError("list_project_assets requires WemobContext")
-        raise RuntimeError(
-            "list_project_assets is not wired to a Wemob product API yet; "
-            f"project_id={ctx.project_id}"
-        )
+        return product_api().list_project_assets(ctx)
 
     def generate_image(prompt: str, width: int = 1024, height: int = 1024, style: str = "") -> dict[str, Any]:
         """Request image generation for the current project."""
@@ -99,15 +76,7 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
         ctx = active_context()
         if ctx is None:
             raise ValueError("generate_image requires WemobContext")
-        raise RuntimeError(
-            "generate_image is not wired to a Wemob product API yet; "
-            f"project_id={ctx.project_id}, size={width}x{height}, style={style}, prompt={prompt[:80]}"
-        )
-
-    def create_artifact(name: str, content: str, content_type: str = "text/plain") -> dict[str, str]:
-        """Create a text artifact outside model context under /artifacts."""
-
-        return active_backend().artifacts.create_text_artifact(name, content, content_type)
+        return product_api().generate_image(ctx, prompt, width, height, style)
 
     def start_preview_server(
         framework: str,
@@ -121,7 +90,9 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
         ctx = active_context()
         if ctx is None:
             raise ValueError("start_preview_server requires WemobContext")
-        manager = DaytonaWorkspaceManager(ctx)
+        if not ctx.sandbox_id:
+            raise RuntimeError("start_preview_server requires an active Daytona sandbox")
+        manager = DaytonaWorkspaceManager(ctx, sandbox=connect_runtime_sandbox(ctx.sandbox_id).provider)
         result = manager.start_preview_server(
             PreviewServerRequest(
                 framework=framework,
@@ -141,14 +112,9 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
         }
 
     return [
-        _named_tool(read_workspace_file, "read_workspace_file"),
-        _named_tool(write_workspace_file, "write_workspace_file"),
-        _named_tool(list_workspace_files, "list_workspace_files"),
-        _named_tool(update_project_memory, "update_project_memory"),
         _named_tool(get_project_context, "get_project_context"),
         _named_tool(list_project_assets, "list_project_assets"),
         _named_tool(generate_image, "generate_image"),
-        _named_tool(create_artifact, "create_artifact"),
         _named_tool(start_preview_server, "start_preview_server"),
     ]
 

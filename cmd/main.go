@@ -1535,6 +1535,8 @@ func main() {
 		r.Route("/internal/deepagents", func(r chi.Router) {
 			r.Use(appMiddleware.InternalOnly(sm.GetSecret("AGENT_RUNTIME_INTERNAL_TOKEN")))
 			r.Post("/runs/{runId}/finalize", httpViews.FinalizeDeepAgentsRunCallback)
+			r.Get("/runs/{runId}/assets", httpViews.ListDeepAgentsRunAssets)
+			r.Post("/runs/{runId}/images", httpViews.GenerateDeepAgentsRunImage)
 		})
 
 		r.Get("/health", httpViews.Health)

@@ -128,6 +128,7 @@ func (c *Controller) StartDeepAgentsRunForJob(
 	runtimeRun.DeepAgentsRunID = started.RunID
 	runtimeRun.Status = models.AgentRuntimeRunStatusRunning
 	runtimeRun.StartedAt = now
+	runtimeRun.SandboxID = started.SandboxID
 	if err := c.DB.UpdateAgentRuntimeRun(ctx, runtimeRun); err != nil {
 		return nil, fmt.Errorf("update runtime run: %w", err)
 	}

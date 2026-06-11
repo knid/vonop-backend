@@ -30,6 +30,8 @@ class WemobContext:
     credit_budget: int = 0
     feature_flags: dict[str, object] = field(default_factory=dict)
     workspace_root: str = "/workspace"
+    host_worktree_path: str = ""
+    sandbox_id: str = ""
     memory_root: str = "/memories"
     skills_root: str = "/skills"
     artifacts_root: str = "/artifacts"

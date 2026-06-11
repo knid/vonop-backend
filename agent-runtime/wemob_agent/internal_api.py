@@ -15,8 +15,9 @@ import json
 import os
 import time
 import uuid
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -26,6 +27,7 @@ from starlette.responses import StreamingResponse
 
 from wemob_agent.config import load_config
 from wemob_agent.context import WemobContext
+from wemob_agent.daytona import connect_runtime_sandbox, create_runtime_sandbox
 
 
 class StartRunRequest(BaseModel):
@@ -59,6 +61,7 @@ class RuntimeRunResponse(BaseModel):
     status: str
     created_at: datetime | None = None
     runtime_api_url: str
+    sandbox_id: str = ""
 
 
 class RunRecord(BaseModel):
@@ -68,20 +71,86 @@ class RunRecord(BaseModel):
     status: str
     created_at: datetime
     runtime_api_url: str
+    runtime_run_id: str = ""
+    host_worktree_path: str = ""
+    sandbox_id: str = ""
+    context: dict[str, Any] = Field(default_factory=dict)
+    finalized: bool = False
+
+
+class JsonRunStore:
+    def __init__(self, path: str | None = None) -> None:
+        self.path = Path(path or load_config().run_store_path)
+        self._lock = asyncio.Lock()
+
+    async def load_all(self) -> dict[str, RunRecord]:
+        async with self._lock:
+            return self._load_all_unlocked()
+
+    async def get(self, run_id: str) -> RunRecord | None:
+        async with self._lock:
+            return self._load_all_unlocked().get(run_id)
+
+    async def put(self, record: RunRecord) -> None:
+        async with self._lock:
+            records = self._load_all_unlocked()
+            records[record.run_id] = record
+            self._write_all_unlocked(records)
+
+    def _load_all_unlocked(self) -> dict[str, RunRecord]:
+        if not self.path.exists():
+            return {}
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        records: dict[str, RunRecord] = {}
+        if not isinstance(raw, dict):
+            return records
+        for run_id, data in raw.items():
+            if not isinstance(data, dict):
+                continue
+            try:
+                records[str(run_id)] = RunRecord(**data)
+            except Exception:
+                continue
+        return records
+
+    def _write_all_unlocked(self, records: dict[str, RunRecord]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(
+            json.dumps(
+                {run_id: record.model_dump(mode="json") for run_id, record in records.items()},
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        tmp.replace(self.path)
 
 
 class LangGraphRuntimeAdapter:
-    def __init__(self, runtime_api_url: str | None = None, assistant_id: str | None = None) -> None:
+    def __init__(
+        self,
+        runtime_api_url: str | None = None,
+        assistant_id: str | None = None,
+        store: JsonRunStore | None = None,
+    ) -> None:
         self.runtime_api_url = (runtime_api_url or os.getenv("WEMOB_LANGGRAPH_API_URL") or "http://127.0.0.1:2024").rstrip("/")
         self.assistant_id = assistant_id or os.getenv("WEMOB_AGENT_ASSISTANT_ID", "wemob_agent")
-        self._runs: dict[str, RunRecord] = {}
+        self.store = store or JsonRunStore()
 
     async def start_run(self, req: StartRunRequest) -> RunRecord:
         await self._ensure_thread(req.thread_id)
+        context = _context_from_request(req)
+        if not load_config().allow_local_agent_execution:
+            sandbox = create_runtime_sandbox(context)
+            context = replace(context, sandbox_id=sandbox.provider.sandbox_id)
         payload = {
             "assistant_id": self.assistant_id,
             "input": {"messages": [{"role": "user", "content": req.message}]},
-            "config": {"configurable": {"wemob_context": asdict(_context_from_request(req))}},
+            "context": asdict(context),
+            "config": {"configurable": {"wemob_context": asdict(context)}},
             "metadata": {
                 "job_id": req.job_id,
                 "project_id": req.project_id,
@@ -89,6 +158,7 @@ class LangGraphRuntimeAdapter:
                 "user_id": req.user_id,
                 "mode": req.mode,
                 "base_commit": req.base_commit or "",
+                "sandbox_id": context.sandbox_id,
             },
             "multitask_strategy": "enqueue",
         }
@@ -101,36 +171,43 @@ class LangGraphRuntimeAdapter:
             status=str(data.get("status") or "running"),
             created_at=datetime.now(UTC),
             runtime_api_url=self.runtime_api_url,
+            runtime_run_id=req.agent_runtime_run_id,
+            host_worktree_path=req.worktree_path,
+            sandbox_id=context.sandbox_id,
+            context=asdict(context),
         )
-        self._runs[run_id] = record
+        await self.store.put(record)
         return record
 
     async def get_run(self, run_id: str) -> RunRecord:
-        record = self._runs.get(run_id)
+        record = await self.store.get(run_id)
         if record is None:
             raise KeyError(run_id)
         try:
             data = await self._request("GET", f"/threads/{record.thread_id}/runs/{run_id}")
-        except HTTPException:
+        except HTTPException as exc:
+            if exc.status_code >= 500:
+                raise
             return record
         status_value = data.get("status")
         if status_value:
             record.status = str(status_value)
-            self._runs[run_id] = record
+            await self.store.put(record)
         return record
 
     async def cancel_run(self, run_id: str) -> None:
         record = await self.get_run(run_id)
         await self._request("POST", f"/threads/{record.thread_id}/runs/{run_id}/cancel", json={})
         record.status = "canceled"
-        self._runs[run_id] = record
+        await self.store.put(record)
 
     async def resume_run(self, run_id: str, req: ResumeRunRequest) -> RunRecord:
         record = await self.get_run(run_id)
         payload: dict[str, Any] = {
             "assistant_id": record.assistant_id,
             "input": req.input or {},
-            "config": {"configurable": {}},
+            "context": record.context,
+            "config": {"configurable": {"wemob_context": record.context}},
             "multitask_strategy": "enqueue",
         }
         if req.command is not None:
@@ -140,7 +217,7 @@ class LangGraphRuntimeAdapter:
         data = await self._request("POST", f"/threads/{record.thread_id}/runs", json=payload)
         record.run_id = str(data.get("run_id") or data.get("id") or record.run_id)
         record.status = str(data.get("status") or "running")
-        self._runs[record.run_id] = record
+        await self.store.put(record)
         return record
 
     async def monitor_and_finalize(self, run_id: str, runtime_run_id: str) -> None:
@@ -154,11 +231,32 @@ class LangGraphRuntimeAdapter:
                 return
             status_value = record.status.lower()
             if status_value in terminal_success:
-                await _notify_backend_finalizer(runtime_run_id, successful=True, summary="Deep Agents run completed")
+                await self.finalize_record(record, successful=True, summary="Deep Agents run completed")
                 return
             if status_value in terminal_failure:
-                await _notify_backend_finalizer(runtime_run_id, successful=False, summary=f"Deep Agents run ended with status {record.status}")
+                await self.finalize_record(record, successful=False, summary=f"Deep Agents run ended with status {record.status}")
                 return
+
+    async def resume_monitors(self) -> None:
+        records = await self.store.load_all()
+        terminal = {"success", "succeeded", "completed", "error", "failed", "cancelled", "canceled", "timeout", "interrupted"}
+        for record in records.values():
+            if record.finalized:
+                continue
+            if record.status.lower() in terminal:
+                asyncio.create_task(self.finalize_record(record, successful=record.status.lower() in {"success", "succeeded", "completed"}, summary=f"Deep Agents run ended with status {record.status}"))
+            else:
+                asyncio.create_task(self.monitor_and_finalize(record.run_id, record.runtime_run_id))
+
+    async def finalize_record(self, record: RunRecord, successful: bool, summary: str) -> None:
+        if record.finalized:
+            return
+        if record.sandbox_id and record.host_worktree_path and not load_config().allow_local_agent_execution:
+            sandbox = connect_runtime_sandbox(record.sandbox_id)
+            sandbox.provider.download_tree("/workspace", Path(record.host_worktree_path))
+        await _notify_backend_finalizer(record.runtime_run_id, successful=successful, summary=summary)
+        record.finalized = True
+        await self.store.put(record)
 
     async def _ensure_thread(self, thread_id: str) -> None:
         try:
@@ -195,7 +293,8 @@ def _context_from_request(req: StartRunRequest) -> WemobContext:
         base_commit=req.base_commit,
         credit_budget=req.credit_budget,
         feature_flags=req.feature_flags,
-        workspace_root=req.worktree_path,
+        workspace_root="/workspace",
+        host_worktree_path=req.worktree_path,
         memory_root=os.getenv("WEMOB_AGENT_MEMORY_ROOT", "/memories"),
         skills_root=os.getenv("WEMOB_AGENT_SKILLS_ROOT", "/skills"),
         artifacts_root=os.getenv("WEMOB_AGENT_ARTIFACTS_ROOT", "/artifacts"),
@@ -211,6 +310,7 @@ def _runtime_response(record: RunRecord) -> RuntimeRunResponse:
         status=record.status,
         created_at=record.created_at,
         runtime_api_url=record.runtime_api_url,
+        sandbox_id=record.sandbox_id,
     )
 
 
@@ -270,6 +370,11 @@ async def authorize_internal_request(
 
 app = FastAPI(title="Wemob Deep Agents Internal API")
 runtime_adapter: LangGraphRuntimeAdapter = LangGraphRuntimeAdapter()
+
+
+@app.on_event("startup")
+async def resume_runtime_monitors() -> None:
+    await runtime_adapter.resume_monitors()
 
 
 @app.post(
@@ -366,13 +471,23 @@ async def proxy_langgraph(path: str, request: Request, authorization: str | None
 
 
 async def _notify_backend_finalizer(runtime_run_id: str, successful: bool, summary: str) -> None:
-    backend_url = os.getenv("WEMOB_BACKEND_INTERNAL_URL", "").rstrip("/")
-    token = os.getenv("AGENT_RUNTIME_INTERNAL_TOKEN", "")
+    cfg = load_config()
+    backend_url = cfg.backend_internal_url
+    token = cfg.internal_token
     if not backend_url or not token:
-        return
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        await client.post(
-            f"{backend_url}/internal/deepagents/runs/{runtime_run_id}/finalize",
-            headers={"X-Internal-Token": token},
-            json={"successful": successful, "summary": summary},
-        )
+        raise RuntimeError("WEMOB_BACKEND_INTERNAL_URL and AGENT_RUNTIME_INTERNAL_TOKEN are required")
+    last_error: Exception | None = None
+    for attempt in range(5):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{backend_url}/internal/deepagents/runs/{runtime_run_id}/finalize",
+                    headers={"X-Internal-Token": token},
+                    json={"successful": successful, "summary": summary},
+                )
+            response.raise_for_status()
+            return
+        except Exception as exc:
+            last_error = exc
+            await asyncio.sleep(min(2**attempt, 30))
+    raise RuntimeError(f"backend finalizer callback failed: {last_error}")

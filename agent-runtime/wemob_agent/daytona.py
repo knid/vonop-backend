@@ -135,6 +135,135 @@ class DaytonaWorkspaceManager:
         return self.sandbox.preview_url(port, ttl_seconds)
 
 
+@dataclass(frozen=True)
+class DaytonaRuntimeSandbox:
+    sandbox: Any
+    provider: DaytonaSDKProvider
+
+
+def create_runtime_sandbox(context: WemobContext, config: RuntimeConfig | None = None) -> DaytonaRuntimeSandbox:
+    """Create the per-run Daytona sandbox used by Deep Agents in production."""
+
+    cfg = config or load_config()
+    if context.sandbox_id:
+        return connect_runtime_sandbox(context.sandbox_id, cfg)
+    if not os.getenv("DAYTONA_API_KEY"):
+        raise DaytonaUnavailable("DAYTONA_API_KEY is required for production Deep Agents execution")
+
+    try:
+        from daytona import Daytona
+    except Exception as exc:  # pragma: no cover - depends on optional production package
+        raise DaytonaUnavailable("daytona package is not installed") from exc
+
+    client = Daytona()
+    labels = DaytonaWorkspaceManager(context, config=cfg).labels()
+    sandbox = _create_daytona_sandbox(client, cfg, labels)
+    sandbox_id = str(
+        getattr(sandbox, "id", "")
+        or getattr(sandbox, "sandbox_id", "")
+        or getattr(sandbox, "name", "")
+        or context.sandbox_id
+    )
+    provider = DaytonaSDKProvider(sandbox, sandbox_id)
+    if context.host_worktree_path:
+        provider.upload_tree(Path(context.host_worktree_path), "/workspace")
+    return DaytonaRuntimeSandbox(sandbox=sandbox, provider=provider)
+
+
+def connect_runtime_sandbox(sandbox_id: str, config: RuntimeConfig | None = None) -> DaytonaRuntimeSandbox:
+    cfg = config or load_config()
+    if not os.getenv("DAYTONA_API_KEY"):
+        raise DaytonaUnavailable("DAYTONA_API_KEY is required for production Deep Agents execution")
+    try:
+        from daytona import Daytona
+    except Exception as exc:  # pragma: no cover - depends on optional production package
+        raise DaytonaUnavailable("daytona package is not installed") from exc
+    client = Daytona()
+    last_error: Exception | None = None
+    for method_name in ("get", "get_sandbox", "sandbox"):
+        method = getattr(client, method_name, None)
+        if method is None:
+            continue
+        try:
+            sandbox = method(sandbox_id)
+            return DaytonaRuntimeSandbox(
+                sandbox=sandbox,
+                provider=DaytonaSDKProvider(sandbox, sandbox_id),
+            )
+        except Exception as exc:  # pragma: no cover - SDK-version dependent
+            last_error = exc
+    raise DaytonaUnavailable(f"unable to connect to Daytona sandbox {sandbox_id}: {last_error}")
+
+
+def _create_daytona_sandbox(client: Any, config: RuntimeConfig, labels: dict[str, str]) -> Any:
+    create_methods = ("create", "create_sandbox", "start")
+    params_candidates: list[Any] = []
+    if config.daytona_snapshot_id:
+        params_candidates.extend(
+            _construct_daytona_params(
+                "CreateSandboxFromSnapshotParams",
+                snapshot=config.daytona_snapshot_id,
+                snapshot_id=config.daytona_snapshot_id,
+                labels=labels,
+                auto_stop_interval=config.daytona_idle_ttl_seconds,
+            )
+        )
+    if config.daytona_template_id:
+        params_candidates.extend(
+            _construct_daytona_params(
+                "CreateSandboxParams",
+                template=config.daytona_template_id,
+                template_id=config.daytona_template_id,
+                labels=labels,
+                auto_stop_interval=config.daytona_idle_ttl_seconds,
+            )
+        )
+    params_candidates.append({"labels": labels})
+    params_candidates.append(None)
+
+    last_error: Exception | None = None
+    for method_name in create_methods:
+        method = getattr(client, method_name, None)
+        if method is None:
+            continue
+        for params in params_candidates:
+            try:
+                if params is None:
+                    return method()
+                if isinstance(params, dict):
+                    try:
+                        return method(**params)
+                    except TypeError:
+                        return method(params)
+                return method(params)
+            except Exception as exc:  # pragma: no cover - SDK-version dependent
+                last_error = exc
+    raise DaytonaUnavailable(f"unable to create Daytona sandbox: {last_error}")
+
+
+def _construct_daytona_params(class_name: str, **values: Any) -> list[Any]:
+    try:
+        import daytona
+    except Exception:
+        return []
+    cls = getattr(daytona, class_name, None)
+    if cls is None:
+        return []
+    candidates = []
+    for key_name in ("snapshot", "snapshot_id", "template", "template_id"):
+        value = values.get(key_name)
+        if not value:
+            continue
+        payload = {"labels": values["labels"], key_name: value}
+        if values.get("auto_stop_interval"):
+            payload["auto_stop_interval"] = values["auto_stop_interval"]
+        try:
+            candidates.append(cls(**payload))
+        except TypeError:
+            continue
+    return candidates
+
+
 class DaytonaSDKProvider:
     """Thin adapter for the Daytona SDK object.
 
@@ -180,6 +309,116 @@ class DaytonaSDKProvider:
                 "token": str(data.get("token") or data.get("preview_token") or ""),
             }
         raise DaytonaUnavailable("configured Daytona sandbox does not expose preview URL creation")
+
+    def upload_tree(self, source: Path, target_root: str = "/workspace") -> None:
+        source = source.resolve()
+        if not source.exists():
+            raise FileNotFoundError(source)
+        for path in source.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(source).as_posix()
+            if should_exclude(rel):
+                continue
+            self._upload_file(path, f"{target_root.rstrip('/')}/{rel}")
+
+    def download_tree(self, source_root: str, target: Path) -> None:
+        target.mkdir(parents=True, exist_ok=True)
+        files = self._list_files(source_root)
+        source_files: set[str] = set()
+        for remote_path in files:
+            rel = remote_path.removeprefix(source_root.rstrip("/") + "/").strip("/")
+            if not rel or should_exclude(rel):
+                continue
+            source_files.add(rel)
+            content = self._read_file(remote_path)
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(content)
+        for path in sorted(target.rglob("*"), reverse=True):
+            rel = path.relative_to(target).as_posix()
+            if should_exclude(rel):
+                continue
+            if path.is_file() and rel not in source_files:
+                path.unlink()
+            elif path.is_dir():
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
+
+    def _upload_file(self, source: Path, remote_path: str) -> None:
+        data = source.read_bytes()
+        candidates = (
+            ("fs", "upload_file"),
+            ("fs", "write_file"),
+            ("filesystem", "upload_file"),
+            ("filesystem", "write_file"),
+            (None, "upload_file"),
+            (None, "write_file"),
+        )
+        for owner_name, method_name in candidates:
+            owner = getattr(self.sandbox, owner_name) if owner_name else self.sandbox
+            method = getattr(owner, method_name, None)
+            if method is None:
+                continue
+            try:
+                method(remote_path, data)
+                return
+            except TypeError:
+                method(remote_path, data.decode("utf-8"))
+                return
+        raise DaytonaUnavailable("configured Daytona sandbox does not expose file upload")
+
+    def _list_files(self, source_root: str) -> list[str]:
+        candidates = (
+            ("fs", "find_files"),
+            ("fs", "list_files"),
+            ("filesystem", "find_files"),
+            ("filesystem", "list_files"),
+            (None, "find_files"),
+            (None, "list_files"),
+        )
+        for owner_name, method_name in candidates:
+            owner = getattr(self.sandbox, owner_name) if owner_name else self.sandbox
+            method = getattr(owner, method_name, None)
+            if method is None:
+                continue
+            result = method(source_root)
+            data = _result_to_dict(result)
+            values = data.get("files") or data.get("paths") or result
+            if isinstance(values, list):
+                out: list[str] = []
+                for item in values:
+                    if isinstance(item, str):
+                        out.append(item)
+                    elif isinstance(item, dict) and item.get("path"):
+                        out.append(str(item["path"]))
+                return out
+        raise DaytonaUnavailable("configured Daytona sandbox does not expose file listing")
+
+    def _read_file(self, remote_path: str) -> bytes:
+        candidates = (
+            ("fs", "read_file"),
+            ("filesystem", "read_file"),
+            (None, "read_file"),
+        )
+        for owner_name, method_name in candidates:
+            owner = getattr(self.sandbox, owner_name) if owner_name else self.sandbox
+            method = getattr(owner, method_name, None)
+            if method is None:
+                continue
+            result = method(remote_path)
+            if isinstance(result, bytes):
+                return result
+            if isinstance(result, str):
+                return result.encode("utf-8")
+            data = _result_to_dict(result)
+            content = data.get("content") or data.get("data") or b""
+            if isinstance(content, bytes):
+                return content
+            return str(content).encode("utf-8")
+        raise DaytonaUnavailable("configured Daytona sandbox does not expose file reads")
 
 
 def sync_tree(source: Path, target: Path) -> None:
