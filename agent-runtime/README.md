@@ -30,6 +30,15 @@ the frontend-reachable authenticated proxy path, for example
 `https://agents.wemob.io/lg`. If omitted, the Go client returns
 `AGENT_RUNTIME_URL + /lg`.
 
+The default agent model is configured with `WEMOB_AGENT_MODEL`. Deep Agents
+supports provider-prefixed model IDs, including OpenRouter when the runtime has
+`OPENROUTER_API_KEY` set:
+
+```env
+WEMOB_AGENT_MODEL=openrouter:anthropic/claude-sonnet-4-6
+OPENROUTER_API_KEY=...
+```
+
 ## Local Development
 
 ```bash
