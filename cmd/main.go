@@ -97,6 +97,7 @@ func createSchema(db *bun.DB) error {
 		(*models.AgentRuntimeRun)(nil),
 		(*models.AgentApproval)(nil),
 		(*models.AgentWorkspaceArtifact)(nil),
+		(*models.ProjectPreviewSession)(nil),
 		// Dashboard analytics
 		(*models.AppDashboard)(nil),
 		(*models.AppDashboardPanel)(nil),
@@ -184,6 +185,9 @@ func ensureDeepAgentsSchema(db *bun.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_agent_approvals_pending_org ON agent_approvals(organization_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_workspace_artifacts_project ON agent_workspace_artifacts(app_project_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_workspace_artifacts_job ON agent_workspace_artifacts(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_project ON project_preview_sessions(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_job ON project_preview_sessions(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_status ON project_preview_sessions(status)`,
 	}
 	for _, stmt := range statements {
 		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
@@ -687,6 +691,7 @@ func main() {
 
 	r.Use(middleware.Recoverer)
 	r.Use(appMiddleware.Locale)
+	r.Use(httpViews.PreviewGatewayMiddleware)
 
 	r.Route("/", func(r chi.Router) {
 		mcpServer := mcpserver.New(controller)

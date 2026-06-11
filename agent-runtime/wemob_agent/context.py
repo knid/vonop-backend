@@ -33,6 +33,7 @@ class WemobContext:
     memory_root: str = "/memories"
     skills_root: str = "/skills"
     artifacts_root: str = "/artifacts"
+    preview_domain: str = "preview.wemob.app"
     user_timezone: str = "UTC"
     locale: str = "en"
     model_policy: dict[str, object] = field(default_factory=dict)

@@ -23,6 +23,12 @@ const (
 	AgentApprovalStatusRejected = "rejected"
 	AgentApprovalStatusEdited   = "edited"
 	AgentApprovalStatusExpired  = "expired"
+
+	PreviewSessionStatusStarting = "starting"
+	PreviewSessionStatusReady    = "ready"
+	PreviewSessionStatusStopped  = "stopped"
+	PreviewSessionStatusExpired  = "expired"
+	PreviewSessionStatusFailed   = "failed"
 )
 
 // AgentThread maps a Wemob project conversation to the Deep Agents thread
@@ -154,4 +160,38 @@ type AgentWorkspaceArtifact struct {
 	PublicURL         string         `bun:",notnull,default:''" json:"public_url"`
 	Metadata          map[string]any `bun:",type:jsonb,notnull,default:'{}'" json:"metadata"`
 	CreatedAt         time.Time      `bun:"created_at,nullzero,notnull,default:current_timestamp" json:"created_at"`
+}
+
+// ProjectPreviewSession maps a Wemob branded preview slug to the provider
+// preview endpoint. The frontend receives only PublicPreviewURL; Daytona
+// preview URLs/tokens remain server-side for the preview gateway.
+type ProjectPreviewSession struct {
+	ID                        uuid.UUID      `bun:",pk,type:uuid,default:uuid_generate_v4()" json:"id"`
+	PreviewSlug               string         `bun:",notnull,unique" json:"preview_slug"`
+	AppProjectID              uuid.UUID      `bun:",notnull,type:uuid" json:"app_project_id"`
+	AppProject                *AppProject    `bun:"rel:belongs-to,join:app_project_id=id" json:"-"`
+	GenerationJobID           *uuid.UUID     `bun:",type:uuid,nullzero" json:"generation_job_id,omitempty"`
+	AgentRuntimeRunID         *uuid.UUID     `bun:",type:uuid,nullzero" json:"agent_runtime_run_id,omitempty"`
+	OrganizationID            uuid.UUID      `bun:",notnull,type:uuid" json:"organization_id"`
+	Organization              *Organization  `bun:"rel:belongs-to,join:organization_id=id" json:"-"`
+	UserID                    uuid.UUID      `bun:",notnull,type:uuid" json:"user_id"`
+	User                      *User          `bun:"rel:belongs-to,join:user_id=id" json:"-"`
+	SandboxProvider           string         `bun:",notnull,default:'daytona'" json:"sandbox_provider"`
+	SandboxID                 string         `bun:",notnull" json:"sandbox_id"`
+	SandboxStatus             string         `bun:",notnull,default:'running'" json:"sandbox_status"`
+	Port                      int            `bun:",notnull" json:"port"`
+	Command                   string         `bun:",notnull" json:"command"`
+	Cwd                       string         `bun:",notnull,default:'/workspace'" json:"cwd"`
+	DaytonaPreviewURL         string         `bun:",notnull,default:''" json:"-"`
+	DaytonaPreviewToken       string         `bun:",notnull,default:''" json:"-"`
+	DaytonaSignedPreviewURL   string         `bun:",notnull,default:''" json:"-"`
+	DaytonaSignedPreviewToken string         `bun:",notnull,default:''" json:"-"`
+	PublicPreviewURL          string         `bun:",notnull" json:"public_preview_url"`
+	Status                    string         `bun:",notnull,default:'starting'" json:"status"`
+	StartedAt                 time.Time      `bun:",nullzero,notnull,default:current_timestamp" json:"started_at"`
+	ReadyAt                   time.Time      `bun:",nullzero" json:"ready_at,omitempty"`
+	ExpiresAt                 time.Time      `bun:",nullzero,notnull" json:"expires_at"`
+	LastHealthcheckAt         time.Time      `bun:",nullzero" json:"last_healthcheck_at,omitempty"`
+	LastAccessedAt            time.Time      `bun:",nullzero" json:"last_accessed_at,omitempty"`
+	Metadata                  map[string]any `bun:",type:jsonb,notnull,default:'{}'" json:"metadata"`
 }
