@@ -1277,7 +1277,7 @@ func postHogCostSplit(entry utils.TokenEntry) (inputCost, outputCost float64, so
 // built-in LLM Analytics dashboard.
 //
 // When tracker.TraceID is set, it is used as the $ai_trace_id so callers
-// (e.g. agent.Run) can bind the PostHog trace to an external identifier
+// (e.g. runtime launch) can bind the PostHog trace to an external identifier
 // like AppAgentRun.ID — this lets RecordLLMError emit error events on the
 // same trace, and lets operators pivot from a failed run row straight to
 // the PostHog trace view.
@@ -1730,7 +1730,7 @@ func (c *Controller) GetTopExpensiveGenerationsForProject(user *models.User, pro
 // shows up as a child node in the PostHog trace timeline alongside the run's
 // successful generations. Skipped when the tracker has zero entries — the
 // $ai_trace event already carries TraceErrorCode/Message in that case (set by
-// agent.Run before invoking RecordLLMUsage), so emitting an extra
+// agent runtime before invoking RecordLLMUsage), so emitting an extra
 // $ai_generation here would only inflate error-rate panels with a synthetic
 // 0-token row that filters like `input_tokens > 0` would silently miss anyway.
 //

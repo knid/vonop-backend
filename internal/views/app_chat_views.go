@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
@@ -185,17 +184,13 @@ func (v *HttpViews) GetAppActiveJob(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK)
 }
 
-// loadTurnAttachments resolves the user's attached IDs against the project's
-// AppAsset table, enforces ownership and the per-turn image cap, and loads
-// the project-wide pool used to build the LLM's manifest.
-//
-// Returns a HTTP-message-grade error suitable for utils.ValidationError.
 func loadTurnAttachments(
 	ctx context.Context,
 	db *database.Database,
 	projectID uuid.UUID,
 	attachmentIDs []uuid.UUID,
-) (agent.TurnAttachments, error) {
+) (struct{}, error) {
+	_ = ctx
 	var current []models.AppAsset
 	if len(attachmentIDs) > 0 {
 		ids := make([]string, 0, len(attachmentIDs))
@@ -204,33 +199,26 @@ func loadTurnAttachments(
 		}
 		fetched, err := db.GetAppAssetsByIDs(ids)
 		if err != nil {
-			return agent.TurnAttachments{}, fmt.Errorf("failed to load attachments: %w", err)
+			return struct{}{}, fmt.Errorf("failed to load attachments: %w", err)
 		}
-		// Reject if any ID is missing or belongs to another project.
-		// 404-style behaviour to avoid leaking existence — collapse to a
-		// single message that tells the client "one or more attachments are
-		// invalid" without naming the specific ID.
 		byID := make(map[string]models.AppAsset, len(fetched))
 		for _, a := range fetched {
 			if a.AppProjectID != projectID {
-				return agent.TurnAttachments{}, fmt.Errorf("one or more attachments are invalid")
+				return struct{}{}, fmt.Errorf("one or more attachments are invalid")
 			}
 			byID[a.ID.String()] = a
 		}
 		for _, id := range ids {
 			if _, ok := byID[id]; !ok {
-				return agent.TurnAttachments{}, fmt.Errorf("one or more attachments are invalid")
+				return struct{}{}, fmt.Errorf("one or more attachments are invalid")
 			}
 		}
-		// Preserve user-specified order so the order in the manifest matches
-		// the user's mental model.
 		current = make([]models.AppAsset, 0, len(ids))
 		for _, id := range ids {
 			current = append(current, byID[id])
 		}
 	}
 
-	// Per-turn image-count cap (applies after classification).
 	imgCount := 0
 	for _, a := range current {
 		if constants.ClassifyAttachment(a.ContentType) == constants.AttachmentKindImage {
@@ -238,13 +226,7 @@ func loadTurnAttachments(
 		}
 	}
 	if imgCount > constants.MaxImageAttachmentsPerTurn {
-		return agent.TurnAttachments{}, fmt.Errorf("too many image attachments (max %d per message)", constants.MaxImageAttachmentsPerTurn)
+		return struct{}{}, fmt.Errorf("too many image attachments (max %d per message)", constants.MaxImageAttachmentsPerTurn)
 	}
-
-	pool, err := db.GetRecentAppAssets(projectID, constants.ManifestMaxAssets)
-	if err != nil {
-		return agent.TurnAttachments{}, fmt.Errorf("failed to load asset pool: %w", err)
-	}
-
-	return agent.TurnAttachments{Current: current, Pool: pool}, nil
+	return struct{}{}, nil
 }

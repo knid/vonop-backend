@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Refresh the vendored wemob-expo-template files under
-# internal/agent/templates/expo_native/. Run after pulling a new version
+# internal/templates/expo_native/. Run after pulling a new version
 # of wemob-expo-template; commit the updated files alongside the bump.
 #
 # The vendored copy is what gets embedded into the wemob-backend binary
@@ -13,7 +13,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DEFAULT="${REPO_ROOT}/../wemob-expo-template"
 SOURCE="${WEMOB_EXPO_TEMPLATE_PATH:-$SOURCE_DEFAULT}"
-DEST="${REPO_ROOT}/internal/agent/templates/expo_native"
+DEST="${REPO_ROOT}/internal/templates/expo_native"
 
 if [[ ! -d "$SOURCE" ]]; then
   echo "error: wemob-expo-template not found at $SOURCE" >&2
@@ -53,5 +53,5 @@ echo ""
 echo "Next steps:"
 echo "  cd $REPO_ROOT"
 echo "  go test -tags=integration ./internal/controllers/ -run TestCreateAppProject_MobileAppNative"
-echo "  git add internal/agent/templates/expo_native"
+echo "  git add internal/templates/expo_native"
 echo "  git commit -m 'chore(template): refresh vendored expo template to <upstream sha>'"

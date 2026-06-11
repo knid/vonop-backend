@@ -141,7 +141,7 @@ func (db *Database) SetAppProjectV1ProjectID(projectID string, v1ProjectID strin
 }
 
 // UpdateAppProjectStatus performs a targeted single-column update on
-// app_projects.status. Used by agent.Run to flip "draft" → "ready" without
+// app_projects.status. Used by runtime finalization to flip "draft" → "ready" without
 // risking a constraint failure on unrelated JSONB columns the way a full
 // UpdateAppProject would.
 func (db *Database) UpdateAppProjectStatus(projectID string, status string) error {

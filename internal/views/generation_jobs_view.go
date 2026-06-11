@@ -55,7 +55,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Outer job ctx must exceed the agent's own wallclock cap
-	// (defaultMaxWallclockMs in internal/agent/run.go) so the agent's
+	// (legacy max agent wallclock) so the agent's
 	// DeadlineExceeded fires first and produces a user-facing "time limit"
 	// message. If this shrinks below the agent cap, the outer cancel fires
 	// instead and the error looks like a silent server timeout.

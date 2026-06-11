@@ -33,7 +33,7 @@ type AppChatRequest struct {
 
 	// AttachmentIDs are AppAsset UUIDs the user attached to this turn. The
 	// view resolves them, enforces per-turn caps, and passes the resulting
-	// AppAsset rows down to agent.Run.
+	// AppAsset IDs down to the Deep Agents runtime.
 	AttachmentIDs []uuid.UUID `json:"attachment_ids,omitempty"`
 
 	// Images is the legacy field — was a list of proxy URLs (the comment

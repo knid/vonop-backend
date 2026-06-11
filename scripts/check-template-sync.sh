@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify the embedded Expo template under
-# internal/agent/templates/expo_native/ is in sync with the standalone
+# internal/templates/expo_native/ is in sync with the standalone
 # wemob-expo-template repo (the scaffold Codemagic clones at build time).
 #
 # These two trees can drift silently because the agent reads the embedded
@@ -21,7 +21,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOURCE_DEFAULT="${REPO_ROOT}/../wemob-expo-template"
 SOURCE="${WEMOB_EXPO_TEMPLATE_PATH:-$SOURCE_DEFAULT}"
-DEST="${REPO_ROOT}/internal/agent/templates/expo_native"
+DEST="${REPO_ROOT}/internal/templates/expo_native"
 
 if [[ ! -d "$SOURCE" ]]; then
   echo "error: wemob-expo-template not found at $SOURCE" >&2

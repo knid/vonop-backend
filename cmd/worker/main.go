@@ -33,10 +33,7 @@ func main() {
 		Queues: map[string]int{
 			"deploy-web-pro":  6,
 			"deploy-web-free": 2,
-			"agent":           5, // agent runs are I/O-bound (LLM streaming);
-			// weight 5 keeps them ahead of free-tier deploys
-			// but behind paid web deploys.
-			"cron": 1,
+			"cron":            1,
 		},
 		RetryDelayFunc: func(n int, _ error, _ *asynq.Task) time.Duration {
 			delays := []time.Duration{
@@ -90,7 +87,6 @@ func main() {
 	mux.Use(middleware.AsynqPostHogLifecycle(controller))
 	mux.HandleFunc(tasks.TypeDeployWeb, controller.HandleWebDeployTask)
 	mux.HandleFunc(tasks.TypeDeleteFlyApp, controller.HandleDeleteFlyAppTask)
-	mux.HandleFunc(tasks.TypeAgentRun, controller.HandleAgentRunTask)
 	// A6: 7-day grace teardown of an org's Fly + Neon resources after a
 	// Stripe customer.subscription.deleted event. Re-checks the org's status
 	// before destroying anything (re-subscribe wins).

@@ -1500,14 +1500,6 @@ func main() {
 				})
 			})
 
-			// Admin AI agent system management
-			r.Route("/admin/agents", func(r chi.Router) {
-				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireAdmin())
-				r.Get("/", httpViews.GetAdminAgentSystem)
-				r.Post("/skills/lint", httpViews.LintAdminAgentSkill)
-			})
-
 			// Public integration providers
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 

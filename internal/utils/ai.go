@@ -500,7 +500,7 @@ type TokenTracker struct {
 	ProjectID      string   // for slog attribution
 	OrganizationID string   // for PostHog org_id attribution on $ai_generation / $ai_trace
 	// TraceID, when non-empty, overrides the auto-generated trace id in
-	// RecordTokenUsage so callers (agent.Run) can bind the PostHog trace to
+	// RecordTokenUsage so callers can bind the PostHog trace to
 	// an external identifier such as AppAgentRun.ID. Error events emitted
 	// separately via RecordLLMError also use this id to stay linked to the
 	// trace's $ai_generation events.
@@ -508,7 +508,7 @@ type TokenTracker struct {
 	RunID   string // optional: written to events as a "run_id" property for cross-system correlation
 	// TraceErrorCode / TraceErrorMessage, when non-empty, mark the $ai_trace
 	// event as errored so PostHog's trace list surfaces the failure without
-	// relying on scanning child generations. Populated by agent.Run's failure
+	// relying on scanning child generations. Populated by runtime failure
 	// path before RecordLLMUsage is invoked.
 	TraceErrorCode    string
 	TraceErrorMessage string

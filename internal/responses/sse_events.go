@@ -1,6 +1,6 @@
 package responses
 
-// SSEEvent is the in-process envelope passed from the agent / view StreamFunc
+// SSEEvent is the in-process envelope passed from legacy view StreamFuncs
 // to handleStreamOrAsync's main goroutine. The main goroutine is the single
 // owner of `Seq` — it stamps a monotonic per-job sequence number on every
 // event before persisting and publishing. The seq flows out to clients as
@@ -10,47 +10,6 @@ type SSEEvent struct {
 	Seq   int64  `json:"seq,omitempty"`
 	Event string `json:"event"`
 	Data  any    `json:"data"`
-}
-
-const EventUIMessagePart = "ui_message_part"
-
-// UIMessagePartEvent is an additive, normalized stream contract for chat UIs.
-// Legacy agent events still stream unchanged; clients that render AI SDK /
-// AI Elements-style messages can consume this event instead of rebuilding
-// custom timeline cards from Wemob-specific event vocabulary.
-type UIMessagePartEvent struct {
-	RunID       string        `json:"run_id,omitempty"`
-	SourceEvent string        `json:"source_event,omitempty"`
-	Part        UIMessagePart `json:"part"`
-}
-
-// UIMessagePart intentionally mirrors the useful subset of AI SDK UI message
-// parts without importing frontend packages into the backend. Tool states use
-// the AI Elements vocabulary: input-available, output-available, output-error,
-// approval-requested, and approval-responded.
-type UIMessagePart struct {
-	Type string `json:"type"`
-
-	// type=reasoning-delta or type=text-delta
-	Text string `json:"text,omitempty"`
-
-	// type=tool
-	ToolCallID string `json:"tool_call_id,omitempty"`
-	ToolName   string `json:"tool_name,omitempty"`
-	State      string `json:"state,omitempty"`
-	Input      any    `json:"input,omitempty"`
-	Output     any    `json:"output,omitempty"`
-	ErrorText  string `json:"error_text,omitempty"`
-	DurationMs int    `json:"duration_ms,omitempty"`
-	RiskLevel  string `json:"risk_level,omitempty"`
-
-	// type=tool-approval
-	ApprovalID   string `json:"approval_id,omitempty"`
-	ConnectionID string `json:"connection_id,omitempty"`
-	Approved     *bool  `json:"approved,omitempty"`
-
-	// type=plan
-	Todos any `json:"todos,omitempty"`
 }
 
 type GenerationErrorEvent struct {
