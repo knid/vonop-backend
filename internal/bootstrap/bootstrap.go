@@ -18,6 +18,7 @@ import (
 	awsCreds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/agentruntime"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
@@ -204,6 +205,18 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		"worktree_root", bareGitRepoService.WorktreeRoot,
 		"legacy_root", bareGitRepoService.LegacyRoot,
 	)
+
+	var deepAgentsClient *agentruntime.Client
+	if runtimeURL := strings.TrimSpace(sm.GetSecret("AGENT_RUNTIME_URL")); runtimeURL != "" {
+		deepAgentsClient = agentruntime.NewClient(
+			runtimeURL,
+			sm.GetSecret("AGENT_RUNTIME_INTERNAL_TOKEN"),
+			sm.GetSecret("AGENT_RUNTIME_ACCESS_TOKEN_SECRET"),
+		)
+		slog.Info("Deep Agents runtime client initialized", "runtime_url", runtimeURL)
+	} else {
+		slog.Warn("AGENT_RUNTIME_URL not set — Deep Agents runtime client disabled")
+	}
 
 	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
 	var codemagicService *codemagic.Service
@@ -414,6 +427,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		posthogClient,
 		gitRepoService,
 		bareGitRepoService,
+		deepAgentsClient,
 		codemagicService,
 		revenueCatService,
 		metaCAPI,

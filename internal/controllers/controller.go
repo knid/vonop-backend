@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/agentruntime"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
@@ -65,6 +66,7 @@ type Controller struct {
 	NeonRegistry          *neon.Registry
 	GitRepoService        *gitrepo.Service
 	BareGitRepoService    *gitrepo.BareService
+	DeepAgentsClient      *agentruntime.Client
 	MCPService            atomic.Pointer[mcpclient.Service]
 	PostHog               posthog.Client // nil = disabled
 	RemoteConfig          *remoteconfig.Service
@@ -93,6 +95,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
 	bareGitRepoService *gitrepo.BareService,
+	deepAgentsClient *agentruntime.Client,
 	codemagicService *codemagic.Service,
 	revenueCatService *revenuecat.Service,
 	metaCAPI *meta.Service,
@@ -124,6 +127,7 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		NeonRegistry:           neonRegistry,
 		GitRepoService:         gitRepoService,
 		BareGitRepoService:     bareGitRepoService,
+		DeepAgentsClient:       deepAgentsClient,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,
