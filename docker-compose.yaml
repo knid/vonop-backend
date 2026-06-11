@@ -50,6 +50,10 @@ services:
       - "2025"
     env_file:
       - ./.env
+    environment:
+      - LANGGRAPH_SERVER_PORT=2024
+      - DATABASE_URI=${LANGGRAPH_DATABASE_URI:?LANGGRAPH_DATABASE_URI is required for the production LangGraph Agent Server}
+      - REDIS_URI=${LANGGRAPH_REDIS_URI:?LANGGRAPH_REDIS_URI is required for the production LangGraph Agent Server}
     volumes:
       - wemob-git-data:/data/wemob-git
       - agent-runtime-data:/data/wemob-agent-runtime

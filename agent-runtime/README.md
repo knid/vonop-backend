@@ -18,8 +18,9 @@ protocol, `UIMessagePart` bridge, or event mapper here.
 
 The container exposes two HTTP surfaces:
 
-- `:2024` runs `langgraph dev` and is the native LangGraph / Deep Agents API.
-  The frontend should connect here directly with `@langchain/react`.
+- `:2024` runs the production LangGraph Agent Server and is the native
+  LangGraph / Deep Agents API. The frontend should connect here directly with
+  `@langchain/react`.
 - `:2025` runs `wemob_agent.internal_api:app`, a small internal control API for
   the Go backend. It creates, reads, cancels, and resumes runs by calling the
   LangGraph API. It does not consume or transform stream events.
@@ -29,6 +30,19 @@ API, for example `http://agent-runtime:2025`. Set `AGENT_RUNTIME_STREAM_URL` to
 the frontend-reachable authenticated proxy path, for example
 `https://agents.wemob.io/lg`. If omitted, the Go client returns
 `AGENT_RUNTIME_URL + /lg`.
+
+Production deployments must provide the standalone Agent Server backing
+services required by LangGraph:
+
+```env
+LANGGRAPH_DATABASE_URI=postgres://...
+LANGGRAPH_REDIS_URI=rediss://...
+LANGGRAPH_CLOUD_LICENSE_KEY=...
+```
+
+`docker-compose.yaml` maps `LANGGRAPH_DATABASE_URI` to `DATABASE_URI` and
+`LANGGRAPH_REDIS_URI` to `REDIS_URI`, which are the environment names consumed
+by the official LangGraph Agent Server image.
 
 The default agent model is configured with `WEMOB_AGENT_MODEL`. Deep Agents
 supports provider-prefixed model IDs, including OpenRouter when the runtime has
