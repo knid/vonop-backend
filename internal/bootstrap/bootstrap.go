@@ -192,6 +192,19 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	gitRepoService := gitrepo.NewService(repoBasePath)
 	slog.Info("Git repo service initialized", "base_path", repoBasePath)
 
+	bareRoot := os.Getenv("WEMOB_GIT_BARE_ROOT")
+	worktreeRoot := os.Getenv("WEMOB_WORKTREE_ROOT")
+	legacyRoot := os.Getenv("WEMOB_LEGACY_REPO_ROOT")
+	if legacyRoot == "" {
+		legacyRoot = repoBasePath
+	}
+	bareGitRepoService := gitrepo.NewBareService(bareRoot, worktreeRoot, legacyRoot)
+	slog.Info("Deep Agents Git workspace service initialized",
+		"bare_root", bareGitRepoService.BareRoot,
+		"worktree_root", bareGitRepoService.WorktreeRoot,
+		"legacy_root", bareGitRepoService.LegacyRoot,
+	)
+
 	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
 	var codemagicService *codemagic.Service
 	if cmToken := sm.GetSecret("CODEMAGIC_API_TOKEN"); cmToken != "" {
@@ -400,6 +413,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		neonRegistry,
 		posthogClient,
 		gitRepoService,
+		bareGitRepoService,
 		codemagicService,
 		revenueCatService,
 		metaCAPI,
