@@ -362,6 +362,9 @@ class DaytonaSDKProvider:
             method = getattr(owner, method_name, None)
             if method is None:
                 continue
+            if method_name == "upload_file":
+                method(data, remote_path)
+                return
             try:
                 method(remote_path, data)
                 return

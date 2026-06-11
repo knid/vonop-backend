@@ -8,6 +8,7 @@ from typing import Any
 from wemob_agent.config import RuntimeConfig
 from wemob_agent.context import WemobContext
 from wemob_agent.daytona import (
+    DaytonaSDKProvider,
     DaytonaWorkspaceManager,
     PreviewServerRequest,
     should_exclude,
@@ -40,6 +41,22 @@ class FakeSandbox:
         return {"url": f"https://daytona.example/{port}", "token": f"token-{ttl_seconds}"}
 
 
+class FakeFilesystem:
+    def __init__(self) -> None:
+        self.uploads: list[tuple[bytes, str]] = []
+
+    def upload_file(self, src: bytes | str, dst: str, timeout: int = 1800) -> None:
+        del timeout
+        if isinstance(src, str):
+            raise AssertionError("upload_file source should be bytes, not a local path")
+        self.uploads.append((src, dst))
+
+
+class FakeDaytonaSandbox:
+    def __init__(self) -> None:
+        self.fs = FakeFilesystem()
+
+
 class DaytonaTests(unittest.TestCase):
     def test_sync_tree_excludes_build_secret_and_git_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,6 +83,18 @@ class DaytonaTests(unittest.TestCase):
         self.assertTrue(should_exclude(".env.production"))
         self.assertTrue(should_exclude("_wemob/runtime-cache/log.txt"))
         self.assertFalse(should_exclude("src/App.tsx"))
+
+    def test_daytona_provider_uploads_bytes_to_remote_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source"
+            (source / "src").mkdir(parents=True)
+            (source / "src/App.tsx").write_text("app\n", encoding="utf-8")
+
+            sandbox = FakeDaytonaSandbox()
+            provider = DaytonaSDKProvider(sandbox, "sandbox-1")
+            provider.upload_tree(source, "/workspace")
+
+            self.assertEqual(sandbox.fs.uploads, [(b"app\n", "/workspace/src/App.tsx")])
 
     def test_start_preview_server_returns_public_url_without_provider_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
