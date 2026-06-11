@@ -25,3 +25,4 @@ Use this skill on every mobile-builder turn.
 - Prefer platform-appropriate gestures, loading states, empty states, and error states.
 - When fixing build failures, read the relevant build or deploy logs before editing.
 - Preserve template-managed native configuration and helper files unless the prompt or tool result says they need to change.
+- Import React hooks (`useState`, `useEffect`, `useCallback`, `useMemo`, `useRef`, `useContext`, `useReducer`) from `"react"`, never from `"react-native"` or `"react-native-web"`. Import React Native primitives (`View`, `Text`, `ScrollView`, `FlatList`, etc.) from `"react-native"`.
