@@ -60,6 +60,12 @@ type AppProject struct {
 	// CanChooseRegion=true (Pro+); the deploy controller falls back to the
 	// primary region otherwise. See web_deploy_controller.go:resolveDeployRegion.
 	Region string `bun:",notnull,default:''"`
+	// Deep Agents runtime pointers. Source is still Git; runtime state lives in
+	// Deep Agents/LangGraph checkpoints and stores.
+	CurrentCommit   string     `bun:",notnull,default:''"`
+	AgentThreadID   *uuid.UUID `bun:",type:uuid,nullzero"`
+	AgentRuntime    string     `bun:",notnull,default:'deepagents'"`
+	RepoStorageMode string     `bun:",notnull,default:'bare_worktree'"`
 	// BetterAuthSecretCredRef is the encrypted-at-rest reference to this
 	// project's per-customer BETTER_AUTH_SECRET (32 random bytes hex-encoded,
 	// envelope-encrypted via CredStore). Generated lazily on the first build
