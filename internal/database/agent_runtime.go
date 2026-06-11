@@ -120,6 +120,39 @@ func (db *Database) UpdateAgentRuntimeRun(
 	return err
 }
 
+func (db *Database) UpdateProjectCurrentCommit(
+	ctx context.Context,
+	projectID uuid.UUID,
+	currentCommit string,
+) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.AppProject)(nil)).
+		Set("current_commit = ?", currentCommit).
+		Set("updated_at = ?", time.Now()).
+		Where("id = ?", projectID).
+		Exec(ctx)
+	if err == nil {
+		db.InvalidateProjectCache(projectID.String())
+	}
+	return err
+}
+
+func (db *Database) UpdateProjectGitRepositoryCurrentCommit(
+	ctx context.Context,
+	projectID uuid.UUID,
+	currentCommit string,
+	lastSuccessfulRunRef string,
+) error {
+	_, err := db.DB.NewUpdate().
+		Model((*models.ProjectGitRepository)(nil)).
+		Set("current_commit = ?", currentCommit).
+		Set("last_successful_run_ref = ?", lastSuccessfulRunRef).
+		Set("updated_at = ?", time.Now()).
+		Where("app_project_id = ?", projectID).
+		Exec(ctx)
+	return err
+}
+
 func (db *Database) LinkGenerationJobToAgentRuntimeRun(
 	ctx context.Context,
 	jobID uuid.UUID,
