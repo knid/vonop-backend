@@ -7,6 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from deepagents import create_deep_agent
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
 from wemob_agent.context import WemobContext
 from wemob_agent.subagents import build_subagents
 from wemob_agent.tools import build_product_tools, runtime_context
@@ -46,6 +49,17 @@ class BackendTests(unittest.TestCase):
 
             subagents = build_subagents(context)
             self.assertTrue(any(agent["name"] == "frontend-builder" for agent in subagents))
+            self.assertTrue(all("system_prompt" in agent for agent in subagents))
+            self.assertTrue(all("prompt" not in agent for agent in subagents))
+
+    def test_agent_graph_can_be_created_with_subagents(self) -> None:
+        agent = create_deep_agent(
+            model=FakeListChatModel(responses=["ok"]),
+            subagents=build_subagents(),
+            system_prompt="test supervisor",
+        )
+
+        self.assertIsNotNone(agent)
 
     def test_tools_read_context_from_langgraph_runtime_module(self) -> None:
         context = make_context(Path("/tmp/wemob-test"))

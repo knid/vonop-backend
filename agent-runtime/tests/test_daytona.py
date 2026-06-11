@@ -155,9 +155,22 @@ class DaytonaTests(unittest.TestCase):
         backend = DaytonaWorkspaceBackend(provider)
 
         result = backend.ls("/")
+        execute_result = backend.execute("test -f package.json")
 
         self.assertEqual(provider.executions[0][1], ".")
+        self.assertEqual(provider.executions[1][1], "workspace")
         self.assertEqual(result.entries[0]["path"], "/src")
+        self.assertEqual(execute_result.exit_code, 0)
+
+    def test_daytona_workspace_backend_write_does_not_double_prefix_uploads(self) -> None:
+        provider = FakeDaytonaProvider()
+        backend = DaytonaWorkspaceBackend(provider)
+
+        result = backend.write("/src/New.tsx", "new\n")
+
+        self.assertEqual(provider.executions[0][1], ".")
+        self.assertIsNone(result.error)
+        self.assertEqual(provider.uploads[0], ("workspace/src/New.tsx", b"new\n"))
 
     def test_daytona_workspace_backend_preserves_absolute_daytona_root(self) -> None:
         provider = FakeDaytonaProvider()
