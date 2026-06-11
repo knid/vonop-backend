@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/agentruntime"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -44,17 +44,17 @@ func TestSanitizeMCPReturnURL(t *testing.T) {
 
 func TestClassifyMCPRiskDestructiveFalseIsNotHigh(t *testing.T) {
 	got := classifyMCPRisk("sync_messages", map[string]any{"destructiveHint": false})
-	if got != agent.ToolRiskMedium {
-		t.Fatalf("risk = %q, want %q", got, agent.ToolRiskMedium)
+	if got != agentruntime.ToolRiskMedium {
+		t.Fatalf("risk = %q, want %q", got, agentruntime.ToolRiskMedium)
 	}
 }
 
 func TestClassifyMCPRiskUsesAnnotations(t *testing.T) {
-	if got := classifyMCPRisk("read_inbox", map[string]any{"readOnlyHint": true}); got != agent.ToolRiskLow {
-		t.Fatalf("readOnlyHint risk = %q, want %q", got, agent.ToolRiskLow)
+	if got := classifyMCPRisk("read_inbox", map[string]any{"readOnlyHint": true}); got != agentruntime.ToolRiskLow {
+		t.Fatalf("readOnlyHint risk = %q, want %q", got, agentruntime.ToolRiskLow)
 	}
-	if got := classifyMCPRisk("archive_email", map[string]any{"destructiveHint": true}); got != agent.ToolRiskDestructive {
-		t.Fatalf("destructiveHint risk = %q, want %q", got, agent.ToolRiskDestructive)
+	if got := classifyMCPRisk("archive_email", map[string]any{"destructiveHint": true}); got != agentruntime.ToolRiskDestructive {
+		t.Fatalf("destructiveHint risk = %q, want %q", got, agentruntime.ToolRiskDestructive)
 	}
 }
 

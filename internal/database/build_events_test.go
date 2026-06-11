@@ -11,7 +11,7 @@ import (
 )
 
 // fakeBuildEventStore is an in-memory implementation of BuildEventStore for testing.
-// Mirrors the pattern from internal/agent/context_test.go (mobileConfigGetter fake).
+// Mirrors the pattern from controller integration tests (mobileConfigGetter fake).
 type fakeBuildEventStore struct {
 	events []*models.BuildEvent
 }

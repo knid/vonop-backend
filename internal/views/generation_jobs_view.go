@@ -55,7 +55,7 @@ func (v *HttpViews) handleStreamOrAsync(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Outer job ctx must exceed the agent's own wallclock cap
-	// (defaultMaxWallclockMs in internal/agent/run.go) so the agent's
+	// (legacy max agent wallclock) so the agent's
 	// DeadlineExceeded fires first and produces a user-facing "time limit"
 	// message. If this shrinks below the agent cap, the outer cancel fires
 	// instead and the error looks like a silent server timeout.
@@ -445,6 +445,10 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 	job, err := v.Controller.GetJob(jobID, user.ID)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+	if job.Type == "generate_app" || job.Type == "app_chat" {
+		utils.JSONError(w, "native_runtime_stream_required", "agent jobs stream through the Deep Agents runtime", http.StatusGone, nil)
 		return
 	}
 

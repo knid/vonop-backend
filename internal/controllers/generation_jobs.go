@@ -145,8 +145,7 @@ func (c *Controller) GetAppActiveJob(appID uuid.UUID) (*models.GenerationJob, er
 
 // CancelJob cancels a running or awaiting_input job. For agent-run jobs
 // (executed in the worker) this publishes to jobstream.CancelChannel(jobID);
-// the worker subscribes for the duration of agent.Run and unwinds via its
-// existing ctx-aware paths. For legacy in-API-process jobs (dashboards) it
+// the Deep Agents runtime is cancelled through its runtime API; legacy jobs may still listen for Redis cancel signals. For legacy in-API-process jobs (dashboards) it
 // invokes the in-process cancelFn registered in RunningJobs.
 //
 // In both cases the DB row is flipped to "cancelled" so the UI sees the
@@ -163,6 +162,23 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 	}
 	if job.Status != "running" && job.Status != "awaiting_input" {
 		return fmt.Errorf("job is not running")
+	}
+
+	if c.DeepAgentsClient != nil && (job.DeepAgentsRunID != "" || job.AgentRuntimeRunID != nil) {
+		runID := job.DeepAgentsRunID
+		if runID == "" {
+			if runtimeRun, err := c.DB.GetAgentRuntimeRunByGenerationJob(context.Background(), job.ID); err == nil {
+				runID = runtimeRun.DeepAgentsRunID
+			}
+		}
+		if runID != "" {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := c.DeepAgentsClient.CancelRun(cancelCtx, runID); err != nil {
+				slog.Warn("CancelJob: Deep Agents cancel failed",
+					"job_id", jobID, "deepagents_run_id", runID, "error", err)
+			}
+		}
 	}
 
 	// Drop pending clarification channel if present (legacy path; no production

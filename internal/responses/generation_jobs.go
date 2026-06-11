@@ -5,11 +5,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/agentruntime"
 )
 
 type JobCreatedResponse struct {
-	JobID  uuid.UUID `json:"job_id"`
-	Status string    `json:"status"`
+	JobID   uuid.UUID                       `json:"job_id"`
+	Status  string                          `json:"status"`
+	Runtime *agentruntime.RuntimeAccessInfo `json:"runtime,omitempty"`
 }
 
 type JobResponse struct {

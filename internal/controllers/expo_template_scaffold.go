@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/knid/wemob/internal/agent/templates/expo_native"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/templates/expo_native"
 )
 
 // scaffoldExpoTemplate copies every file in the embedded wemob-expo-template

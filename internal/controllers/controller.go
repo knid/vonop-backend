@@ -7,25 +7,26 @@ import (
 	"sync/atomic"
 
 	"github.com/hibiken/asynq"
+	"github.com/knid/wemob/internal/agentruntime"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
+	caddyService "github.com/knid/wemob/internal/services/caddy"
+	"github.com/knid/wemob/internal/services/codemagic"
+	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/events"
-	"github.com/knid/wemob/internal/services/mcpclient"
+	"github.com/knid/wemob/internal/services/fly"
+	"github.com/knid/wemob/internal/services/gitea"
 	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/mcpclient"
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
-	"github.com/knid/wemob/internal/constants"
+	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/services/revenuecat"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
-	"github.com/knid/wemob/internal/services/codemagic"
-	"github.com/knid/wemob/internal/services/fly"
-	"github.com/knid/wemob/internal/services/gitea"
-	"github.com/knid/wemob/internal/services/remoteconfig"
-	"github.com/knid/wemob/internal/services/revenuecat"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
-	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/posthog/posthog-go"
 	"github.com/redis/go-redis/v9"
 )
@@ -47,34 +48,36 @@ type Controller struct {
 	// RevenueCatService is nil when REVENUECAT_API_KEY is unset (graceful
 	// degrade: IAP auto-provisioning skips, builds proceed with empty IAP
 	// keys, the template's lib/iap.ts initIAP() no-ops + warns).
-	RevenueCatService      *revenuecat.Service
+	RevenueCatService *revenuecat.Service
 	// MetaCAPI is nil when META_PIXEL_ID or META_CAPI_ACCESS_TOKEN is unset.
 	// Conversion events skip silently in that case; client-side Pixel still
 	// fires PageView from the front-end if NEXT_PUBLIC_META_PIXEL_ID is set.
-	MetaCAPI               *meta.Service
-	FlyService             *fly.Service
-	FlyInspector           FlyInspector
-	GiteaService           *gitea.Service
-	NeonService            *neon.Service
+	MetaCAPI     *meta.Service
+	FlyService   *fly.Service
+	FlyInspector FlyInspector
+	GiteaService *gitea.Service
+	NeonService  *neon.Service
 	// NeonRegistry routes Neon API calls to the right org-scoped service
 	// (free vs paid) based on a project's tier. NeonService remains a
 	// back-compat pointer to the paid-tier service for callers that don't
 	// need tier routing (e.g. project deletion: the registry's For() handles
 	// any tier so the legacy field is fine for one-shot DELETEs against the
 	// project's current org — see app deletion path).
-	NeonRegistry           *neon.Registry
-	GitRepoService         *gitrepo.Service
-	MCPService             atomic.Pointer[mcpclient.Service]
-	PostHog                posthog.Client // nil = disabled
-	RemoteConfig           *remoteconfig.Service
-	E2BService             *e2bService.Service
-	RunningJobs            sync.Map       // map[string]context.CancelFunc for in-flight background jobs
-	PendingClarifications  sync.Map       // map[string]chan ClarificationResult for jobs awaiting user input
-	JobEventBuses          sync.Map       // map[string]*EventBus for live SSE fan-out to multiple clients
-	identifiedUsers        sync.Map       // user.ID.String() → time.Time of last $identify (TTL-gated, see identifyCacheTTL)
-	personalOrgIDs         sync.Map       // user.ID.String() → cachedBilling (org_id + plan + subscription_status with TTL)
-	EdgeIPs                []string       // known Fly edge IPs for DNS verification
-	CaddyAdmin             *caddyService.Admin
+	NeonRegistry          *neon.Registry
+	GitRepoService        *gitrepo.Service
+	BareGitRepoService    *gitrepo.BareService
+	DeepAgentsClient      *agentruntime.Client
+	MCPService            atomic.Pointer[mcpclient.Service]
+	PostHog               posthog.Client // nil = disabled
+	RemoteConfig          *remoteconfig.Service
+	E2BService            *e2bService.Service
+	RunningJobs           sync.Map // map[string]context.CancelFunc for in-flight background jobs
+	PendingClarifications sync.Map // map[string]chan ClarificationResult for jobs awaiting user input
+	JobEventBuses         sync.Map // map[string]*EventBus for live SSE fan-out to multiple clients
+	identifiedUsers       sync.Map // user.ID.String() → time.Time of last $identify (TTL-gated, see identifyCacheTTL)
+	personalOrgIDs        sync.Map // user.ID.String() → cachedBilling (org_id + plan + subscription_status with TTL)
+	EdgeIPs               []string // known Fly edge IPs for DNS verification
+	CaddyAdmin            *caddyService.Admin
 }
 
 func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
@@ -91,6 +94,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	neonRegistry *neon.Registry,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
+	bareGitRepoService *gitrepo.BareService,
+	deepAgentsClient *agentruntime.Client,
 	codemagicService *codemagic.Service,
 	revenueCatService *revenuecat.Service,
 	metaCAPI *meta.Service,
@@ -121,6 +126,8 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 		NeonService:            neonService,
 		NeonRegistry:           neonRegistry,
 		GitRepoService:         gitRepoService,
+		BareGitRepoService:     bareGitRepoService,
+		DeepAgentsClient:       deepAgentsClient,
 		PostHog:                posthogClient,
 		RemoteConfig:           remoteConfigService,
 		E2BService:             e2b,

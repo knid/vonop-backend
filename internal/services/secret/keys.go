@@ -8,6 +8,11 @@ package secret
 // When you add a new secret, append it here for discoverability.
 // The order is alphabetical for readability.
 var KnownSecretKeys = []string{
+	"AGENT_RUNTIME_ACCESS_TOKEN_SECRET",
+	"AGENT_RUNTIME_API_URL",
+	"AGENT_RUNTIME_INTERNAL_TOKEN",
+	"AGENT_RUNTIME_STREAM_URL",
+	"AGENT_RUNTIME_URL",
 	"ANTHROPIC_API_KEY",
 	"ASC_NOTIFICATIONS_HMAC_SECRET",
 	"AWS_ACCESS_KEY_ID",

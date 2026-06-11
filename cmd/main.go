@@ -68,6 +68,10 @@ func createSchema(db *bun.DB) error {
 		(*models.WebhookEndpoint)(nil),
 		// V2 app builder models
 		(*models.AppProject)(nil),
+		// Deep Agents runtime metadata. Deep Agents owns runtime state; Wemob
+		// stores only product pointers/status.
+		(*models.AgentThread)(nil),
+		(*models.ProjectGitRepository)(nil),
 		(*models.AppDeployment)(nil),
 		(*models.AppIntegration)(nil),
 		(*models.MCPConnection)(nil),
@@ -90,6 +94,10 @@ func createSchema(db *bun.DB) error {
 		(*models.LLMTokenUsage)(nil),
 		// Background jobs
 		(*models.GenerationJob)(nil),
+		(*models.AgentRuntimeRun)(nil),
+		(*models.AgentApproval)(nil),
+		(*models.AgentWorkspaceArtifact)(nil),
+		(*models.ProjectPreviewSession)(nil),
 		// Dashboard analytics
 		(*models.AppDashboard)(nil),
 		(*models.AppDashboardPanel)(nil),
@@ -151,6 +159,41 @@ func createSchema(db *bun.DB) error {
 		}
 	}
 
+	if err := ensureDeepAgentsSchema(db); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ensureDeepAgentsSchema(db *bun.DB) error {
+	statements := []string{
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS current_commit TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS agent_thread_id UUID REFERENCES agent_threads(id)`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS agent_runtime TEXT NOT NULL DEFAULT 'deepagents'`,
+		`ALTER TABLE app_projects ADD COLUMN IF NOT EXISTS repo_storage_mode TEXT NOT NULL DEFAULT 'bare_worktree'`,
+		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS agent_runtime_run_id UUID REFERENCES agent_runtime_runs(id)`,
+		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS deepagents_thread_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE generation_jobs ADD COLUMN IF NOT EXISTS deepagents_run_id TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_threads_project ON agent_threads(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_threads_org ON agent_threads(organization_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runtime_runs_job ON agent_runtime_runs(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runtime_runs_thread ON agent_runtime_runs(agent_thread_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runtime_runs_project_created ON agent_runtime_runs(app_project_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runtime_runs_status ON agent_runtime_runs(status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_approvals_job ON agent_approvals(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_approvals_pending_org ON agent_approvals(organization_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_workspace_artifacts_project ON agent_workspace_artifacts(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_workspace_artifacts_job ON agent_workspace_artifacts(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_project ON project_preview_sessions(app_project_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_job ON project_preview_sessions(generation_job_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_project_preview_sessions_status ON project_preview_sessions(status)`,
+	}
+	for _, stmt := range statements {
+		if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -442,7 +485,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 }
 
-
 // isSensitiveLogPath returns true if a request URL path is known to carry
 // secrets, credentials, or signed third-party payloads that must never land
 // in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
@@ -517,9 +559,7 @@ func main() {
 		slog.Error("seed build annotations failed", "err", err)
 	}
 
-
 	sm := controller.SecretManager
-
 
 	seedPlans(db, sm)
 
@@ -651,6 +691,7 @@ func main() {
 
 	r.Use(middleware.Recoverer)
 	r.Use(appMiddleware.Locale)
+	r.Use(httpViews.PreviewGatewayMiddleware)
 
 	r.Route("/", func(r chi.Router) {
 		mcpServer := mcpserver.New(controller)
@@ -1077,6 +1118,7 @@ func main() {
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
+				r.Get("/jobs/{jobId}/runtime-access", httpViews.GetRuntimeAccess)
 				r.Post("/jobs/{jobId}/approvals/{approvalId}", httpViews.SubmitMCPToolApproval)
 
 				r.Get("/", httpViews.GetApps)
@@ -1458,14 +1500,6 @@ func main() {
 				})
 			})
 
-			// Admin AI agent system management
-			r.Route("/admin/agents", func(r chi.Router) {
-				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireAdmin())
-				r.Get("/", httpViews.GetAdminAgentSystem)
-				r.Post("/skills/lint", httpViews.LintAdminAgentSkill)
-			})
-
 			// Public integration providers
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 
@@ -1496,6 +1530,13 @@ func main() {
 		r.Route("/internal/health", func(r chi.Router) {
 			r.Use(appMiddleware.InternalOnly(edgeToken))
 			r.Get("/deploy-pipeline", httpViews.HandleDeployPipelineHealth)
+		})
+
+		r.Route("/internal/deepagents", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(sm.GetSecret("AGENT_RUNTIME_INTERNAL_TOKEN")))
+			r.Post("/runs/{runId}/finalize", httpViews.FinalizeDeepAgentsRunCallback)
+			r.Get("/runs/{runId}/assets", httpViews.ListDeepAgentsRunAssets)
+			r.Post("/runs/{runId}/images", httpViews.GenerateDeepAgentsRunImage)
 		})
 
 		r.Get("/health", httpViews.Health)

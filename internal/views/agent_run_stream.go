@@ -2,7 +2,6 @@ package views
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,19 +9,17 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/jobstream"
-	"github.com/knid/wemob/internal/tasks"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/redis/go-redis/v9"
 )
 
-// AgentRunRequest carries the inputs needed to enqueue a worker-side
-// agent.Run. The handler (chat or generate) builds this and passes it to
+// AgentRunRequest carries the inputs needed to start a Deep Agents run. The
+// handler (chat or generate) builds this and passes it to
 // enqueueAgentRunAndStream.
 type AgentRunRequest struct {
 	JobType       string // "generate_app" or "app_chat"
@@ -32,11 +29,9 @@ type AgentRunRequest struct {
 	AttachmentIDs []uuid.UUID
 }
 
-// enqueueAgentRunAndStream creates the GenerationJob row, enqueues an
-// agent:run task, and either streams events via SSE (default) or returns
-// 202 immediately (when ?background=true is set). Replaces the agent-run
-// path through handleStreamOrAsync — dashboards still go through the old
-// helper because they don't use agent.Run.
+// enqueueAgentRunAndStream creates the GenerationJob row and starts a native
+// Deep Agents run. It returns runtime connection metadata for the frontend to
+// use with the LangChain/Deep Agents stream client directly.
 func (v *HttpViews) enqueueAgentRunAndStream(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -56,97 +51,24 @@ func (v *HttpViews) enqueueAgentRunAndStream(
 		return
 	}
 
-	// Marshal the payload (cheap; do before subscribe so we can fail fast).
-	attachmentIDs := make([]string, 0, len(req.AttachmentIDs))
-	for _, id := range req.AttachmentIDs {
-		attachmentIDs = append(attachmentIDs, id.String())
-	}
-	payload, err := json.Marshal(tasks.AgentRunPayload{
-		JobID:         job.ID.String(),
-		UserID:        req.UserID.String(),
-		ProjectID:     req.AppID.String(),
-		Message:       req.Message,
-		AttachmentIDs: attachmentIDs,
-	})
+	project, err := v.Controller.DB.GetAppProjectByID(req.AppID.String())
 	if err != nil {
-		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "marshal payload: "+err.Error())
+		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "project lookup: "+err.Error())
 		utils.JSONInternalError(w, err)
 		return
 	}
 
-	// Background mode: enqueue + return 202 immediately. No subscription
-	// needed — the client polls /v1/jobs/{id} for milestones.
-	if r.URL.Query().Get("background") == "true" {
-		task := asynq.NewTask(tasks.TypeAgentRun, payload)
-		if _, err := v.Controller.TaskService.Enqueue(task,
-			asynq.Queue("agent"),
-			asynq.MaxRetry(0), // Non-idempotent — partial unique index on app_agent_runs
-			asynq.Timeout(50*time.Minute),
-			asynq.TaskID(job.ID.String()),
-		); err != nil {
-			_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "enqueue: "+err.Error())
-			utils.JSONInternalError(w, err)
-			return
-		}
-		utils.JSONResponse(w, responses.JobCreatedResponse{
-			JobID:  job.ID,
-			Status: job.Status,
-		}, http.StatusAccepted)
-		return
-	}
-
-	// SSE mode: SUBSCRIBE FIRST so we don't miss any events the worker emits
-	// between enqueue and the start of our read loop. Subscription
-	// confirmation (sub.Receive inside SubscribeEvents) guarantees that by
-	// the time we return from that call, any subsequent Publish on the
-	// channel will be delivered to our subscription.
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		// We haven't enqueued yet — can still report the failure cleanly.
-		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "client does not support streaming")
-		utils.JSONErrorCode(w, constants.ErrStreamingUnsupported, http.StatusInternalServerError, nil)
-		return
-	}
-	utils.SetSSEHeaders(w)
-
-	subCtx, subCancel := context.WithCancel(r.Context())
-	defer subCancel()
-	sub, err := jobstream.SubscribeEvents(subCtx, v.Controller.RedisPubSub, job.ID.String())
+	launch, err := v.Controller.StartDeepAgentsRunForJob(r.Context(), user, project, job, req.Message, req.AttachmentIDs)
 	if err != nil {
-		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "subscribe: "+err.Error())
-		slog.Error("agent_run_stream: subscribe before enqueue failed", "job_id", job.ID, "error", err)
-		// SSE headers already sent — write a clean terminal pair so the
-		// client exits its read loop instead of hanging on an empty stream.
-		_ = utils.WriteSSEEvent(w, flusher, 0, "error", map[string]any{
-			"job_id":  job.ID,
-			"phase":   "subscribe",
-			"message": "failed to subscribe to job events",
-		})
-		_ = utils.WriteSSEEvent(w, flusher, 0, "end", map[string]any{"job_id": job.ID})
-		return
-	}
-	defer sub.Close()
-
-	// NOW enqueue — any event the worker emits will land on our active
-	// subscription.
-	task := asynq.NewTask(tasks.TypeAgentRun, payload)
-	if _, err := v.Controller.TaskService.Enqueue(task,
-		asynq.Queue("agent"),
-		asynq.MaxRetry(0), // Non-idempotent — partial unique index on app_agent_runs
-		// Cap matches agent.defaultMaxWallclockMs (45 min) plus headroom for
-		// finalisation. If a worker fails to drain in this window the task
-		// timer fires; the row is still flipped to failed by the reaper.
-		asynq.Timeout(50*time.Minute),
-		asynq.TaskID(job.ID.String()),
-	); err != nil {
-		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", "enqueue: "+err.Error())
+		_ = v.Controller.DB.UpdateGenerationJobStatus(job.ID.String(), "failed", err.Error())
 		utils.JSONInternalError(w, err)
 		return
 	}
-
-	_ = utils.WriteSSEEvent(w, flusher, 0, "job_started", map[string]any{"job_id": job.ID})
-
-	v.streamFromActiveSubscription(w, r, flusher, job.ID.String(), 0, sub)
+	utils.JSONResponse(w, responses.JobCreatedResponse{
+		JobID:   job.ID,
+		Status:  job.Status,
+		Runtime: launch.Access,
+	}, http.StatusAccepted)
 }
 
 // streamFromJobChannel subscribes to jobstream.EventsChannel(jobID) and

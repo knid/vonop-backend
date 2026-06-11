@@ -466,7 +466,7 @@ func (c *Controller) generateAndStoreSeedImages(
 
 // provisionDatabaseForAgent is the agent-callable entry point for creating a
 // project's wemob db on demand. It is invoked from the ProvisionDatabaseTool
-// in internal/agent via the RunDependencies.ProvisionDatabase callback wired
+// through the Deep Agents product tool runtime
 // in AgentDeps. The chain:
 //
 //  1. Reject if the project already has a Neon integration (defense in depth;

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/agentruntime"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
@@ -636,12 +636,12 @@ func (c *Controller) GetAgentMCPGrantsForOrg(orgID string) ([]responses.AgentMCP
 	return resp, nil
 }
 
-func (c *Controller) AgentMCPTools(projectID, agentID string) ([]agent.MCPRuntimeTool, error) {
+func (c *Controller) AgentMCPTools(projectID, agentID string) ([]agentruntime.MCPRuntimeTool, error) {
 	connections, err := c.DB.GetMCPConnectionsByProjectID(projectID)
 	if err != nil {
 		return nil, err
 	}
-	var result []agent.MCPRuntimeTool
+	var result []agentruntime.MCPRuntimeTool
 	for _, connection := range connections {
 		if connection.Status != models.MCPConnectionStatusConnected {
 			continue
@@ -659,7 +659,7 @@ func (c *Controller) AgentMCPTools(projectID, agentID string) ([]agent.MCPRuntim
 			if policy == models.MCPGrantPolicyBlocked {
 				continue
 			}
-			result = append(result, agent.MCPRuntimeTool{
+			result = append(result, agentruntime.MCPRuntimeTool{
 				ConnectionID: connection.ID.String(),
 				ToolID:       tool.ID.String(),
 				ToolName:     tool.Name,
@@ -675,7 +675,7 @@ func (c *Controller) AgentMCPTools(projectID, agentID string) ([]agent.MCPRuntim
 	return result, nil
 }
 
-func (c *Controller) CreateMCPToolApproval(ctx context.Context, req agent.MCPToolApprovalRequest) (*agent.MCPToolApproval, error) {
+func (c *Controller) CreateMCPToolApproval(ctx context.Context, req agentruntime.MCPToolApprovalRequest) (*agentruntime.MCPToolApproval, error) {
 	jobID, err := uuid.Parse(req.JobID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid job id")
@@ -703,7 +703,7 @@ func (c *Controller) CreateMCPToolApproval(ctx context.Context, req agent.MCPToo
 		AgentID:           req.AgentID,
 		ToolName:          req.ToolName,
 		PrefixedName:      req.PrefixedName,
-		RiskLevel:         nonEmpty(req.RiskLevel, agent.ToolRiskMedium),
+		RiskLevel:         nonEmpty(req.RiskLevel, agentruntime.ToolRiskMedium),
 		ArgumentsPreview:  json.RawMessage(truncateJSON(req.Arguments, 4096)),
 		Status:            models.MCPApprovalStatusPending,
 		RequestedByUserID: userID,
@@ -729,24 +729,24 @@ func (c *Controller) CreateMCPToolApproval(ctx context.Context, req agent.MCPToo
 	})
 	_ = c.DB.UpdateGenerationJobStatus(req.JobID, "awaiting_input", "")
 	_ = ctx
-	return &agent.MCPToolApproval{
+	return &agentruntime.MCPToolApproval{
 		ID:              approval.ID.String(),
 		Status:          approval.Status,
 		ExpiresAtUnixMs: expiresAt.UnixMilli(),
 	}, nil
 }
 
-func (c *Controller) WaitForMCPApproval(ctx context.Context, approvalID string) (agent.MCPApprovalDecision, error) {
+func (c *Controller) WaitForMCPApproval(ctx context.Context, approvalID string) (agentruntime.MCPApprovalDecision, error) {
 	approval, err := c.DB.GetMCPToolApproval(approvalID)
 	if err != nil {
-		return agent.MCPApprovalDecision{}, err
+		return agentruntime.MCPApprovalDecision{}, err
 	}
 	if approval.Status != models.MCPApprovalStatusPending {
 		return approvalDecisionFromModel(approval), nil
 	}
 	sub, err := jobstream.SubscribeApproval(ctx, c.RedisPubSub, approvalID)
 	if err != nil {
-		return agent.MCPApprovalDecision{}, err
+		return agentruntime.MCPApprovalDecision{}, err
 	}
 	defer sub.Close()
 	approval, err = c.DB.GetMCPToolApproval(approvalID)
@@ -760,7 +760,7 @@ func (c *Controller) WaitForMCPApproval(ctx context.Context, approvalID string) 
 	for {
 		select {
 		case <-ctx.Done():
-			return agent.MCPApprovalDecision{}, ctx.Err()
+			return agentruntime.MCPApprovalDecision{}, ctx.Err()
 		case <-timer.C:
 			_ = c.DB.ExpireMCPToolApproval(approvalID)
 			_ = c.DB.UpdateGenerationJobStatus(approval.GenerationJobID.String(), "running", "")
@@ -769,15 +769,15 @@ func (c *Controller) WaitForMCPApproval(ctx context.Context, approvalID string) 
 				call.Error = "approval expired"
 				_, _ = c.DB.UpdateAgentMCPToolCall(call)
 			}
-			return agent.MCPApprovalDecision{Approved: false, Status: models.MCPApprovalStatusExpired}, nil
+			return agentruntime.MCPApprovalDecision{Approved: false, Status: models.MCPApprovalStatusExpired}, nil
 		case msg, ok := <-ch:
 			if !ok {
-				return agent.MCPApprovalDecision{}, fmt.Errorf("approval subscription closed")
+				return agentruntime.MCPApprovalDecision{}, fmt.Errorf("approval subscription closed")
 			}
 			_ = msg
 			approval, err := c.DB.GetMCPToolApproval(approvalID)
 			if err != nil {
-				return agent.MCPApprovalDecision{}, err
+				return agentruntime.MCPApprovalDecision{}, err
 			}
 			if approval.Status == models.MCPApprovalStatusPending {
 				continue
@@ -796,7 +796,7 @@ func (c *Controller) WaitForMCPApproval(ctx context.Context, approvalID string) 
 	}
 }
 
-func (c *Controller) ExecuteMCPTool(ctx context.Context, req agent.MCPToolExecutionRequest) (string, bool, error) {
+func (c *Controller) ExecuteMCPTool(ctx context.Context, req agentruntime.MCPToolExecutionRequest) (string, bool, error) {
 	connection, err := c.DB.GetMCPConnectionByID(req.ConnectionID)
 	if err != nil || connection.AppProjectID.String() != req.ProjectID || connection.Status != models.MCPConnectionStatusConnected {
 		return "MCP connection is not available", true, nil
@@ -823,7 +823,7 @@ func (c *Controller) ExecuteMCPTool(ctx context.Context, req agent.MCPToolExecut
 			ToolName:         req.ToolName,
 			PrefixedName:     req.PrefixedName,
 			Policy:           normalizeMCPPolicy(req.Policy),
-			RiskLevel:        nonEmpty(req.RiskLevel, agent.ToolRiskMedium),
+			RiskLevel:        nonEmpty(req.RiskLevel, agentruntime.ToolRiskMedium),
 			ArgumentsPreview: json.RawMessage(truncateJSON(req.Arguments, 4096)),
 			Status:           models.MCPToolCallStatusPending,
 		}
@@ -1253,7 +1253,7 @@ func policyForMCPTool(grant *models.AgentMCPGrant, tool models.MCPConnectionTool
 	if policy := normalizeMCPPolicy(grant.DefaultPolicy); policy != "" {
 		return policy
 	}
-	if tool.RiskLevel == agent.ToolRiskLow {
+	if tool.RiskLevel == agentruntime.ToolRiskLow {
 		return models.MCPGrantPolicyAuto
 	}
 	return models.MCPGrantPolicyAsk
@@ -1261,21 +1261,21 @@ func policyForMCPTool(grant *models.AgentMCPGrant, tool models.MCPConnectionTool
 
 func classifyMCPRisk(toolName string, annotations map[string]any) string {
 	if boolFromAny(annotations["readOnlyHint"]) {
-		return agent.ToolRiskLow
+		return agentruntime.ToolRiskLow
 	}
 	if boolFromAny(annotations["destructiveHint"]) {
-		return agent.ToolRiskDestructive
+		return agentruntime.ToolRiskDestructive
 	}
 	name := strings.ToLower(toolName)
 	switch {
 	case strings.HasPrefix(name, "get"), strings.HasPrefix(name, "list"), strings.HasPrefix(name, "read"), strings.Contains(name, "search"), strings.Contains(name, "lookup"):
-		return agent.ToolRiskLow
+		return agentruntime.ToolRiskLow
 	case strings.Contains(name, "delete"), strings.Contains(name, "remove"), strings.Contains(name, "destroy"):
-		return agent.ToolRiskDestructive
+		return agentruntime.ToolRiskDestructive
 	case strings.Contains(name, "send"), strings.Contains(name, "create"), strings.Contains(name, "update"), strings.Contains(name, "write"), strings.Contains(name, "charge"), strings.Contains(name, "transfer"):
-		return agent.ToolRiskHigh
+		return agentruntime.ToolRiskHigh
 	default:
-		return agent.ToolRiskMedium
+		return agentruntime.ToolRiskMedium
 	}
 }
 
@@ -1414,15 +1414,15 @@ func truncateJSON(raw json.RawMessage, limit int) string {
 	return string(truncated)
 }
 
-func approvalDecisionFromModel(approval *models.MCPToolApproval) agent.MCPApprovalDecision {
+func approvalDecisionFromModel(approval *models.MCPToolApproval) agentruntime.MCPApprovalDecision {
 	if approval == nil {
-		return agent.MCPApprovalDecision{Approved: false, Status: models.MCPApprovalStatusDenied}
+		return agentruntime.MCPApprovalDecision{Approved: false, Status: models.MCPApprovalStatusDenied}
 	}
 	userID := ""
 	if approval.DecidedByUserID != nil {
 		userID = approval.DecidedByUserID.String()
 	}
-	return agent.MCPApprovalDecision{
+	return agentruntime.MCPApprovalDecision{
 		Approved: approval.Status == models.MCPApprovalStatusApproved,
 		Status:   approval.Status,
 		UserID:   userID,

@@ -4,56 +4,46 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/google/uuid"
-	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 )
 
 func TestStreamStateBufferAgentToolIDsAndCredits(t *testing.T) {
 	b := NewStreamStateBuffer()
-	runID := uuid.New()
 
 	b.Apply(responses.SSEEvent{
 		Seq:   10,
 		Event: "tool_call_start",
-		Data: agent.ToolCallStartEvent{
-			RunID:        runID,
-			Turn:         1,
-			ToolCallID:   "tc-1",
-			ToolName:     "read_files",
-			InputPreview: json.RawMessage(`{"paths":["a.ts"]}`),
+		Data: map[string]any{
+			"tool_call_id":  "tc-1",
+			"tool_name":     "read_files",
+			"input_preview": map[string]any{"paths": []string{"a.ts"}},
 		},
 	})
 	b.Apply(responses.SSEEvent{
 		Seq:   11,
 		Event: "tool_call_start",
-		Data: agent.ToolCallStartEvent{
-			RunID:        runID,
-			Turn:         1,
-			ToolCallID:   "tc-2",
-			ToolName:     "read_files",
-			InputPreview: json.RawMessage(`{"paths":["b.ts"]}`),
+		Data: map[string]any{
+			"tool_call_id":  "tc-2",
+			"tool_name":     "read_files",
+			"input_preview": map[string]any{"paths": []string{"b.ts"}},
 		},
 	})
 	b.Apply(responses.SSEEvent{
 		Seq:   12,
 		Event: "tool_call_result",
-		Data: agent.ToolCallResultEvent{
-			RunID:      runID,
-			ToolCallID: "tc-1",
-			ToolName:   "read_files",
-			Status:     "ok",
-			Summary:    "read a.ts",
+		Data: map[string]any{
+			"tool_call_id": "tc-1",
+			"tool_name":    "read_files",
+			"status":       "ok",
+			"summary":      "read a.ts",
 		},
 	})
 	b.Apply(responses.SSEEvent{
 		Seq:   13,
 		Event: "credits_update",
-		Data: agent.CreditsUpdateEvent{
-			RunID:       runID,
-			Turn:        1,
-			CreditsUsed: 12,
+		Data: map[string]any{
+			"credits_used": 12,
 		},
 	})
 
@@ -103,14 +93,12 @@ func TestStreamStateBufferAgentToolIDsAndCredits(t *testing.T) {
 
 func TestStreamStateBufferTodoSnapshot(t *testing.T) {
 	b := NewStreamStateBuffer()
-	runID := uuid.New()
 
 	ok := b.Apply(responses.SSEEvent{
 		Seq:   8,
 		Event: "todo_snapshot",
-		Data: agent.TodoSnapshotEvent{
-			RunID: runID,
-			Todos: []models.AgentTodo{{
+		Data: map[string]any{
+			"todos": []models.AgentTodo{{
 				ID:     "todo-1",
 				Title:  "dashboard",
 				Status: models.AgentTodoStatusInProgress,

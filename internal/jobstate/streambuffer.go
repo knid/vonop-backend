@@ -2,11 +2,9 @@ package jobstate
 
 import (
 	"encoding/json"
-	"sync"
-
-	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
+	"sync"
 )
 
 // streamStateToolCall mirrors the SSE tool_call payload shape for rehydration.
@@ -74,14 +72,9 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 			}
 		}
 
-	case "chat_thinking", agent.EventReasoning:
+	case "chat_thinking", "reasoning":
 		if d, ok := event.Data.(responses.ChatThinkingEvent); ok && d.Chunk != "" {
 			b.thinkingText += d.Chunk
-			b.dirty = true
-			return true
-		}
-		if d, ok := event.Data.(agent.ReasoningEvent); ok && d.Delta != "" {
-			b.thinkingText += d.Delta
 			b.dirty = true
 			return true
 		}
@@ -244,11 +237,6 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 	case "narration":
 		// Agent narration streams into streamingText so reconnected clients
 		// see the partial assistant reply replayed before live events resume.
-		if d, ok := event.Data.(agent.NarrationEvent); ok && d.Delta != "" {
-			b.streamingText += d.Delta
-			b.dirty = true
-			return true
-		}
 		if m, ok := event.Data.(map[string]any); ok {
 			if delta, _ := m["delta"].(string); delta != "" {
 				b.streamingText += delta
@@ -260,13 +248,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 	case "tool_call_start":
 		// Append a placeholder so an in-flight tool shows up on reconnect.
 		var toolCallID, tool, args string
-		if d, ok := event.Data.(agent.ToolCallStartEvent); ok {
-			toolCallID = d.ToolCallID
-			tool = d.ToolName
-			if len(d.InputPreview) > 0 {
-				args = string(d.InputPreview)
-			}
-		} else if m, ok := event.Data.(map[string]any); ok {
+		if m, ok := event.Data.(map[string]any); ok {
 			toolCallID, _ = m["tool_call_id"].(string)
 			tool, _ = m["tool_name"].(string)
 			if raw, ok := m["input_preview"]; ok && raw != nil {
@@ -292,10 +274,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 
 	case "tool_call_result":
 		var toolCallID, tool string
-		if d, ok := event.Data.(agent.ToolCallResultEvent); ok {
-			toolCallID = d.ToolCallID
-			tool = d.ToolName
-		} else if m, ok := event.Data.(map[string]any); ok {
+		if m, ok := event.Data.(map[string]any); ok {
 			toolCallID, _ = m["tool_call_id"].(string)
 			tool, _ = m["tool_name"].(string)
 		}
@@ -313,9 +292,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 
 	case "credits_update":
 		var credits int
-		if d, ok := event.Data.(agent.CreditsUpdateEvent); ok {
-			credits = d.CreditsUsed
-		} else if m, ok := event.Data.(map[string]any); ok {
+		if m, ok := event.Data.(map[string]any); ok {
 			switch v := m["credits_used"].(type) {
 			case float64:
 				credits = int(v)
@@ -342,7 +319,7 @@ func (b *StreamStateBuffer) Apply(event responses.SSEEvent) bool {
 		return true
 
 	// Agent error: terminal for the partial buffer, same as done.
-	// NOTE: the agent emits "error" (see internal/agent/events.go). A previous
+	// NOTE: the agent emits "error". A previous
 	// version of this reducer checked "agent_error" and silently never cleared
 	// the buffer on failure — reconnects then replayed ghost partial text
 	// forever. Keep this name aligned with the emitter.
@@ -432,9 +409,6 @@ func (b *StreamStateBuffer) attachToolResult(toolCallID, tool, preview, summary,
 }
 
 func extractTodos(data any) ([]models.AgentTodo, bool) {
-	if d, ok := data.(agent.TodoSnapshotEvent); ok {
-		return append([]models.AgentTodo(nil), d.Todos...), true
-	}
 	if m, ok := data.(map[string]any); ok {
 		rawTodos, ok := m["todos"]
 		if !ok {

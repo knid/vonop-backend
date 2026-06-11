@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "wemob_agent": "./wemob_agent/agent.py:create_agent"
+  },
+  "env": ".env"
+}

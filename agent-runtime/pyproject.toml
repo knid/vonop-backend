@@ -1,0 +1,58 @@
+[project]
+name = "wemob-agent-runtime"
+version = "0.1.0"
+description = "Deep Agents runtime for Wemob"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "deepagents>=0.6.8",
+  "langgraph>=1.0.0",
+  "langgraph-sdk>=0.2.0",
+  "langchain>=1.0.0",
+  "langchain-openai>=1.0.0",
+  "langchain-openrouter>=0.0.1",
+  "langchain-anthropic>=1.0.0",
+  "langchain-google-genai>=3.0.0",
+  "langchain-community>=0.4.0",
+  "pydantic>=2.8",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "orjson>=3.10",
+  "tenacity>=8.5",
+  "structlog>=24.4",
+  "opentelemetry-api>=1.27",
+  "opentelemetry-sdk>=1.27",
+  "redis>=5.0",
+  "psycopg[binary,pool]>=3.2",
+  "asyncpg>=0.29",
+  "daytona>=0.18",
+  "langchain-daytona>=0.0.7,<0.1.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "ruff>=0.8",
+  "mypy>=1.13"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["wemob_agent"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
