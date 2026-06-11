@@ -14,11 +14,9 @@ services:
     environment:
       - CADDY_ADMIN_URL=http://caddy:2019
       - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
-      - WEMOB_GIT_BARE_ROOT=/data/repos/deepagents/bare
-      - WEMOB_WORKTREE_ROOT=/data/repos/deepagents/worktrees
-      - WEMOB_LEGACY_REPO_ROOT=/data/repos
     volumes:
       - repo-data:/data/repos
+      - wemob-git-data:/data/wemob-git
       - custom-domains:/data/custom-domains
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
 
@@ -58,11 +56,9 @@ services:
       - CADDY_ADMIN_URL=http://caddy:2019
       - CADDY_CUSTOM_DOMAINS_DIR=/data/custom-domains
       - DB_MAX_OPEN_CONNS=10
-      - WEMOB_GIT_BARE_ROOT=/data/repos/deepagents/bare
-      - WEMOB_WORKTREE_ROOT=/data/repos/deepagents/worktrees
-      - WEMOB_LEGACY_REPO_ROOT=/data/repos
     volumes:
       - repo-data:/data/repos
+      - wemob-git-data:/data/wemob-git
       - custom-domains:/data/custom-domains
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     depends_on:
@@ -104,4 +100,5 @@ volumes:
   caddy_data:
   caddy_config:
   repo-data:
+  wemob-git-data:
   custom-domains:
