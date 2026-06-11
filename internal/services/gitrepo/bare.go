@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	defaultBareRoot     = "/data/git/bare"
-	defaultWorktreeRoot = "/data/worktrees"
+	defaultBareRoot     = "/data/repos/deepagents/bare"
+	defaultWorktreeRoot = "/data/repos/deepagents/worktrees"
 	defaultLegacyRoot   = "/data/repos"
 
 	initCommitMessage      = "chore: initialize Wemob project repository"
