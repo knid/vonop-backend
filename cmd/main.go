@@ -1118,6 +1118,7 @@ func main() {
 				r.With(rateLimiter.RateLimit(20, time.Minute, appMiddleware.AIUserKey)).Post("/generate/stream", httpViews.GenerateAppStream)
 
 				r.Get("/jobs/{jobId}/stream", httpViews.StreamJob)
+				r.Get("/jobs/{jobId}/runtime-access", httpViews.GetRuntimeAccess)
 				r.Post("/jobs/{jobId}/approvals/{approvalId}", httpViews.SubmitMCPToolApproval)
 
 				r.Get("/", httpViews.GetApps)

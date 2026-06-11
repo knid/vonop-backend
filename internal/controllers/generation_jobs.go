@@ -165,6 +165,23 @@ func (c *Controller) CancelJob(jobID string, userID uuid.UUID) error {
 		return fmt.Errorf("job is not running")
 	}
 
+	if c.DeepAgentsClient != nil && (job.DeepAgentsRunID != "" || job.AgentRuntimeRunID != nil) {
+		runID := job.DeepAgentsRunID
+		if runID == "" {
+			if runtimeRun, err := c.DB.GetAgentRuntimeRunByGenerationJob(context.Background(), job.ID); err == nil {
+				runID = runtimeRun.DeepAgentsRunID
+			}
+		}
+		if runID != "" {
+			cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := c.DeepAgentsClient.CancelRun(cancelCtx, runID); err != nil {
+				slog.Warn("CancelJob: Deep Agents cancel failed",
+					"job_id", jobID, "deepagents_run_id", runID, "error", err)
+			}
+		}
+	}
+
 	// Drop pending clarification channel if present (legacy path; no production
 	// agent path emits this today, but the helper still services older clients).
 	if ch, ok := c.PendingClarifications.LoadAndDelete(jobID); ok {
