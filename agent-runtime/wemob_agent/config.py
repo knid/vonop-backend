@@ -15,6 +15,7 @@ class RuntimeConfig:
     daytona_preview_ttl_seconds: int
     daytona_snapshot_id: str = ""
     daytona_template_id: str = ""
+    daytona_workspace_root: str = "workspace"
     allow_local_agent_execution: bool = False
     backend_internal_url: str = ""
     internal_token: str = ""
@@ -30,6 +31,8 @@ def load_config() -> RuntimeConfig:
         daytona_preview_ttl_seconds=int(os.getenv("DAYTONA_PREVIEW_TTL_SECONDS", "3600")),
         daytona_snapshot_id=os.getenv("DAYTONA_SNAPSHOT_ID", ""),
         daytona_template_id=os.getenv("DAYTONA_TEMPLATE_ID", ""),
+        daytona_workspace_root=os.getenv("WEMOB_DAYTONA_WORKSPACE_ROOT", "workspace").strip()
+        or "workspace",
         allow_local_agent_execution=os.getenv("WEMOB_ALLOW_LOCAL_AGENT_EXECUTION", "").lower()
         in {"1", "true", "yes"},
         backend_internal_url=os.getenv("WEMOB_BACKEND_INTERNAL_URL", "").rstrip("/"),

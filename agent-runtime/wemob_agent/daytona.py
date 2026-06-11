@@ -19,7 +19,6 @@ from typing import Any, Protocol
 from wemob_agent.config import RuntimeConfig, load_config
 from wemob_agent.context import WemobContext
 
-
 SYNC_EXCLUDES = (
     "node_modules/",
     ".next/",
@@ -87,6 +86,10 @@ class DaytonaWorkspaceManager:
     def workspace_root(self) -> Path:
         return Path(self.context.workspace_root)
 
+    @property
+    def daytona_workspace_root(self) -> str:
+        return self.context.daytona_workspace_root or self.config.daytona_workspace_root
+
     def labels(self) -> dict[str, str]:
         return {
             "org_id": self.context.org_id,
@@ -105,9 +108,18 @@ class DaytonaWorkspaceManager:
     def sync_workspace_to_worktree(self, host_worktree: str | Path) -> None:
         sync_tree(self.workspace_root, Path(host_worktree))
 
-    def execute(self, command: str, cwd: str = "/workspace", timeout_seconds: int = 120) -> dict[str, Any]:
+    def execute(
+        self,
+        command: str,
+        cwd: str = "/workspace",
+        timeout_seconds: int = 120,
+    ) -> dict[str, Any]:
         if self.sandbox is not None:
-            return self.sandbox.execute(command, cwd, timeout_seconds)
+            return self.sandbox.execute(
+                command,
+                daytona_workspace_path(cwd, self.daytona_workspace_root),
+                timeout_seconds,
+            )
         if os.getenv("WEMOB_ALLOW_LOCAL_AGENT_EXECUTION", "").lower() not in {"1", "true", "yes"}:
             raise DaytonaUnavailable("Daytona sandbox is required for agent execution")
         return _local_execute(command, cwd, timeout_seconds)
@@ -141,7 +153,10 @@ class DaytonaRuntimeSandbox:
     provider: DaytonaSDKProvider
 
 
-def create_runtime_sandbox(context: WemobContext, config: RuntimeConfig | None = None) -> DaytonaRuntimeSandbox:
+def create_runtime_sandbox(
+    context: WemobContext,
+    config: RuntimeConfig | None = None,
+) -> DaytonaRuntimeSandbox:
     """Create the per-run Daytona sandbox used by Deep Agents in production."""
 
     cfg = config or load_config()
@@ -166,12 +181,17 @@ def create_runtime_sandbox(context: WemobContext, config: RuntimeConfig | None =
     )
     provider = DaytonaSDKProvider(sandbox, sandbox_id)
     if context.host_worktree_path:
-        provider.upload_tree(Path(context.host_worktree_path), "/workspace")
+        provider.upload_tree(
+            Path(context.host_worktree_path),
+            context.daytona_workspace_root or cfg.daytona_workspace_root,
+        )
     return DaytonaRuntimeSandbox(sandbox=sandbox, provider=provider)
 
 
-def connect_runtime_sandbox(sandbox_id: str, config: RuntimeConfig | None = None) -> DaytonaRuntimeSandbox:
-    cfg = config or load_config()
+def connect_runtime_sandbox(
+    sandbox_id: str,
+    config: RuntimeConfig | None = None,
+) -> DaytonaRuntimeSandbox:
     if not os.getenv("DAYTONA_API_KEY"):
         raise DaytonaUnavailable("DAYTONA_API_KEY is required for production Deep Agents execution")
     try:
@@ -310,7 +330,7 @@ class DaytonaSDKProvider:
             }
         raise DaytonaUnavailable("configured Daytona sandbox does not expose preview URL creation")
 
-    def upload_tree(self, source: Path, target_root: str = "/workspace") -> None:
+    def upload_tree(self, source: Path, target_root: str = "workspace") -> None:
         source = source.resolve()
         if not source.exists():
             raise FileNotFoundError(source)
@@ -349,6 +369,9 @@ class DaytonaSDKProvider:
 
     def _upload_file(self, source: Path, remote_path: str) -> None:
         data = source.read_bytes()
+        self.upload_bytes(remote_path, data)
+
+    def upload_bytes(self, remote_path: str, data: bytes) -> None:
         candidates = (
             ("fs", "upload_file"),
             ("fs", "write_file"),
@@ -372,6 +395,9 @@ class DaytonaSDKProvider:
                 method(remote_path, data.decode("utf-8"))
                 return
         raise DaytonaUnavailable("configured Daytona sandbox does not expose file upload")
+
+    def read_bytes(self, remote_path: str) -> bytes:
+        return self._read_file(remote_path)
 
     def _list_files(self, source_root: str) -> list[str]:
         candidates = (
@@ -467,9 +493,28 @@ def should_exclude(relative_path: str) -> bool:
             if rel == normalized or rel.startswith(normalized + "/") or normalized in parts:
                 return True
             continue
-        if fnmatch.fnmatch(rel, normalized) or any(fnmatch.fnmatch(part, normalized) for part in parts):
+        if fnmatch.fnmatch(rel, normalized) or any(
+            fnmatch.fnmatch(part, normalized) for part in parts
+        ):
             return True
     return False
+
+
+def daytona_workspace_path(path: str, daytona_root: str = "workspace") -> str:
+    """Translate DeepAgents' virtual /workspace path to Daytona's workspace path."""
+
+    normalized_root = (daytona_root.strip() or "workspace").strip("/")
+    if path in {"", ".", "/"}:
+        return normalized_root
+    if path == "/workspace":
+        return normalized_root
+    if path.startswith("/workspace/"):
+        suffix = path.removeprefix("/workspace/").strip("/")
+        return f"{normalized_root}/{suffix}" if suffix else normalized_root
+    if path.startswith("/tmp/"):
+        return path
+    suffix = path.strip("/")
+    return f"{normalized_root}/{suffix}" if suffix else normalized_root
 
 
 def preview_slug(project_id: str, job_id: str) -> str:
