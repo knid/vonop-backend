@@ -9,6 +9,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/${{ github.repository_owner }}/wemob-backend
   CADDY_IMAGE: ghcr.io/${{ github.repository_owner }}/wemob-backend-caddy
+  AGENT_RUNTIME_IMAGE: ghcr.io/${{ github.repository_owner }}/wemob-agent-runtime
   ADMIN_IMAGE: ghcr.io/${{ github.repository_owner }}/wemob-admin
 
 concurrency:
@@ -78,6 +79,19 @@ jobs:
           cache-from: type=gha,scope=caddy
           cache-to: type=gha,mode=max,scope=caddy
 
+      - name: Build & push agent runtime image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./agent-runtime
+          file: ./agent-runtime/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.AGENT_RUNTIME_IMAGE }}:latest
+            ${{ env.AGENT_RUNTIME_IMAGE }}:sha-${{ steps.vars.outputs.short_sha }}
+          cache-from: type=gha,scope=agent-runtime
+          cache-to: type=gha,mode=max,scope=agent-runtime
+
   build-admin:
     name: Build & push admin image
     needs: test
@@ -129,6 +143,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
           IMAGE_TAG: sha-${{ needs.build.outputs.short_sha }}
+          AGENT_RUNTIME_IMAGE_TAG: sha-${{ needs.build.outputs.short_sha }}
           ADMIN_IMAGE_TAG: sha-${{ needs.build-admin.outputs.short_sha }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -136,7 +151,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           port: 22
           script_stop: true
-          envs: GHCR_TOKEN,GHCR_USER,IMAGE_TAG,ADMIN_IMAGE_TAG
+          envs: GHCR_TOKEN,GHCR_USER,IMAGE_TAG,AGENT_RUNTIME_IMAGE_TAG,ADMIN_IMAGE_TAG
           script: |
             set -euo pipefail
             cd /root/wemob-backend
@@ -147,6 +162,7 @@ jobs:
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
             export IMAGE_TAG
+            export AGENT_RUNTIME_IMAGE_TAG
             export ADMIN_IMAGE_TAG
             # Apply to all services so non-build-pinned ones (asynqmon) pick up
             # compose-only changes (port rebinding, env, etc.) on subsequent
