@@ -43,10 +43,13 @@ func TestStartRunSignsRequest(t *testing.T) {
 		ProjectID:       "project-1",
 		OrgID:           "org-1",
 		UserID:          "user-1",
+		RuntimeRunID:    "runtime-run-1",
 		Message:         "build",
 		Mode:            "edit",
 		ProjectType:     "app",
 		FrontendRuntime: "vite_react",
+		WorktreePath:    "/data/worktrees/project-1/job-1",
+		BaseCommit:      "abc123",
 	})
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
@@ -66,6 +69,15 @@ func TestStartRunSignsRequest(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"thread_id":"thread-1"`) {
 		t.Fatalf("body missing thread id: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"worktree_path":"/data/worktrees/project-1/job-1"`) {
+		t.Fatalf("body missing worktree path: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"base_commit":"abc123"`) {
+		t.Fatalf("body missing base commit: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"agent_runtime_run_id":"runtime-run-1"`) {
+		t.Fatalf("body missing runtime run id: %s", gotBody)
 	}
 }
 

@@ -69,6 +69,7 @@ func (c *Controller) FinalizeDeepAgentsRun(
 		run.Status = models.AgentRuntimeRunStatusFailed
 		run.ErrorCode = "workspace_conflict"
 		run.ErrorMessage = err.Error()
+		run.CompletedAt = now
 	} else if req.Successful {
 		run.Status = models.AgentRuntimeRunStatusCompleted
 		run.CompletedAt = now
@@ -87,6 +88,22 @@ func (c *Controller) FinalizeDeepAgentsRun(
 		if err := c.DB.UpdateProjectGitRepositoryCurrentCommit(ctx, run.AppProjectID, result.FinalCommit, result.RunRef); err != nil {
 			return result, err
 		}
+	}
+	jobStatus := "completed"
+	jobError := ""
+	if errors.Is(err, gitrepo.ErrFinalizationConflict) {
+		jobStatus = "failed"
+		jobError = err.Error()
+	} else if !req.Successful {
+		jobStatus = "failed"
+		if run.ErrorMessage != "" {
+			jobError = run.ErrorMessage
+		} else {
+			jobError = "Deep Agents run failed"
+		}
+	}
+	if updateErr := c.DB.UpdateGenerationJobStatus(run.GenerationJobID.String(), jobStatus, jobError); updateErr != nil {
+		return result, updateErr
 	}
 	return result, err
 }

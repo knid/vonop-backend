@@ -10,10 +10,13 @@ type StartRunRequest struct {
 	ProjectID       string         `json:"project_id"`
 	OrgID           string         `json:"org_id"`
 	UserID          string         `json:"user_id"`
+	RuntimeRunID    string         `json:"agent_runtime_run_id"`
 	Message         string         `json:"message"`
 	Mode            string         `json:"mode"`
 	ProjectType     string         `json:"project_type"`
 	FrontendRuntime string         `json:"frontend_runtime"`
+	WorktreePath    string         `json:"worktree_path"`
+	BaseCommit      string         `json:"base_commit,omitempty"`
 	AttachmentIDs   []string       `json:"attachment_ids,omitempty"`
 	FeatureFlags    map[string]any `json:"feature_flags,omitempty"`
 	CreditBudget    int            `json:"credit_budget,omitempty"`

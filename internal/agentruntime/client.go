@@ -41,6 +41,10 @@ func NewClient(baseURL, internalToken, accessTokenSecret string) *Client {
 	}
 }
 
+func (c *Client) SetRuntimeAPIURL(runtimeAPIURL string) {
+	c.RuntimeAPIURL = strings.TrimRight(runtimeAPIURL, "/")
+}
+
 func (c *Client) StartRun(ctx context.Context, req StartRunRequest) (*RuntimeRun, error) {
 	var out RuntimeRun
 	if err := c.doJSON(ctx, http.MethodPost, "/internal/agent-runs", req, &out); err != nil {

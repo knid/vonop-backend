@@ -16,6 +16,6 @@ COPY wemob_agent ./wemob_agent
 RUN pip install --upgrade pip \
     && pip install -e .
 
-EXPOSE 2024
+EXPOSE 2024 2025
 
-CMD ["langgraph", "dev", "--host", "0.0.0.0", "--port", "2024"]
+CMD ["sh", "-c", "langgraph dev --host 0.0.0.0 --port 2024 & exec uvicorn wemob_agent.internal_api:app --host 0.0.0.0 --port 2025"]

@@ -213,7 +213,10 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 			sm.GetSecret("AGENT_RUNTIME_INTERNAL_TOKEN"),
 			sm.GetSecret("AGENT_RUNTIME_ACCESS_TOKEN_SECRET"),
 		)
-		slog.Info("Deep Agents runtime client initialized", "runtime_url", runtimeURL)
+		if runtimeAPIURL := strings.TrimSpace(sm.GetSecret("AGENT_RUNTIME_API_URL")); runtimeAPIURL != "" {
+			deepAgentsClient.SetRuntimeAPIURL(runtimeAPIURL)
+		}
+		slog.Info("Deep Agents runtime client initialized", "runtime_url", runtimeURL, "runtime_api_url", deepAgentsClient.RuntimeAPIURL)
 	} else {
 		slog.Warn("AGENT_RUNTIME_URL not set — Deep Agents runtime client disabled")
 	}

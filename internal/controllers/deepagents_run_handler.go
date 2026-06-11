@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -27,6 +29,9 @@ func (c *Controller) StartDeepAgentsRunForJob(
 ) (*DeepAgentsRunLaunch, error) {
 	if c.DeepAgentsClient == nil {
 		return nil, fmt.Errorf("deep agents runtime client is not configured")
+	}
+	if c.BareGitRepoService == nil {
+		return nil, fmt.Errorf("bare Git repo service is not configured")
 	}
 	if user == nil || project == nil || job == nil {
 		return nil, fmt.Errorf("user, project, and job are required")
@@ -55,6 +60,21 @@ func (c *Controller) StartDeepAgentsRunForJob(
 	}
 
 	mode := deepAgentsModeForJob(job.Type)
+	baseCommit, err := c.ensureDeepAgentsProjectRepo(ctx, project, orgID)
+	if err != nil {
+		return nil, err
+	}
+	worktree, err := c.BareGitRepoService.CreateRunWorktree(ctx, project.ID.String(), job.ID.String(), baseCommit)
+	if err != nil {
+		return nil, fmt.Errorf("create run worktree: %w", err)
+	}
+	worktreeOwned := true
+	defer func() {
+		if worktreeOwned {
+			_ = worktree.Remove(ctx)
+		}
+	}()
+
 	runtimeRun := &models.AgentRuntimeRun{
 		GenerationJobID:    job.ID,
 		AgentThreadID:      thread.ID,
@@ -66,7 +86,8 @@ func (c *Controller) StartDeepAgentsRunForJob(
 		GraphID:            agentruntime.DefaultAssistantID,
 		Mode:               mode,
 		Status:             models.AgentRuntimeRunStatusQueued,
-		BaseCommit:         project.CurrentCommit,
+		BaseCommit:         baseCommit,
+		WorktreePath:       worktree.Path,
 		Model:              "",
 		Provider:           "",
 		Metadata: map[string]any{
@@ -84,10 +105,13 @@ func (c *Controller) StartDeepAgentsRunForJob(
 		ProjectID:       project.ID.String(),
 		OrgID:           orgID.String(),
 		UserID:          user.ID.String(),
+		RuntimeRunID:    runtimeRun.ID.String(),
 		Message:         message,
 		Mode:            mode,
 		ProjectType:     project.ProjectType,
 		FrontendRuntime: project.FrontendRuntime,
+		WorktreePath:    worktree.Path,
+		BaseCommit:      baseCommit,
 		AttachmentIDs:   uuidStrings(attachmentIDs),
 		FeatureFlags:    map[string]any{},
 		CreditBudget:    0,
@@ -98,6 +122,7 @@ func (c *Controller) StartDeepAgentsRunForJob(
 		_ = c.DB.UpdateAgentRuntimeRun(ctx, runtimeRun)
 		return nil, fmt.Errorf("start deep agents run: %w", err)
 	}
+	worktreeOwned = false
 
 	now := time.Now()
 	runtimeRun.DeepAgentsRunID = started.RunID
@@ -128,6 +153,67 @@ func (c *Controller) StartDeepAgentsRunForJob(
 		Runtime:      runtimeRun,
 		Access:       access,
 	}, nil
+}
+
+func (c *Controller) ensureDeepAgentsProjectRepo(ctx context.Context, project *models.AppProject, orgID uuid.UUID) (string, error) {
+	if project.CurrentCommit != "" {
+		return project.CurrentCommit, nil
+	}
+	if repo, err := c.DB.GetProjectGitRepository(ctx, project.ID); err == nil && repo.CurrentCommit != "" {
+		if err := c.DB.UpdateProjectCurrentCommit(ctx, project.ID, repo.CurrentCommit); err != nil {
+			return "", fmt.Errorf("sync project current commit: %w", err)
+		}
+		project.CurrentCommit = repo.CurrentCommit
+		return repo.CurrentCommit, nil
+	} else if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("load project git repository: %w", err)
+	}
+
+	if migration, err := c.BareGitRepoService.MigrateLegacyRepoToBare(ctx, project.ID.String()); err == nil && migration.CurrentCommit != "" {
+		if _, err := c.DB.UpsertProjectGitRepository(ctx, &models.ProjectGitRepository{
+			AppProjectID:   project.ID,
+			OrganizationID: orgID,
+			StorageMode:    "bare_worktree",
+			BareRepoPath:   migration.BareRepoPath,
+			LegacyRepoPath: migration.LegacyRepoPath,
+			DefaultBranch:  "main",
+			CurrentCommit:  migration.CurrentCommit,
+			MainRef:        "refs/heads/main",
+			Metadata: map[string]any{
+				"created_from":         "legacy_repo_migration",
+				"created_dirty_commit": migration.CreatedDirtyCommit,
+			},
+		}); err != nil {
+			return "", fmt.Errorf("record migrated project repository: %w", err)
+		}
+		if err := c.DB.UpdateProjectCurrentCommit(ctx, project.ID, migration.CurrentCommit); err != nil {
+			return "", fmt.Errorf("update migrated project current commit: %w", err)
+		}
+		project.CurrentCommit = migration.CurrentCommit
+		return migration.CurrentCommit, nil
+	}
+
+	repo, err := c.BareGitRepoService.InitBareProject(ctx, project.ID.String())
+	if err != nil {
+		return "", fmt.Errorf("initialize project bare repository: %w", err)
+	}
+	if _, err := c.DB.UpsertProjectGitRepository(ctx, &models.ProjectGitRepository{
+		AppProjectID:   project.ID,
+		OrganizationID: orgID,
+		StorageMode:    "bare_worktree",
+		BareRepoPath:   repo.Path,
+		DefaultBranch:  repo.DefaultBranch,
+		CurrentCommit:  repo.CurrentCommit,
+		MainRef:        "refs/heads/main",
+		Metadata:       map[string]any{"created_from": "deepagents_launch"},
+	}); err != nil {
+		return "", fmt.Errorf("record initialized project repository: %w", err)
+	}
+	if err := c.DB.UpdateProjectCurrentCommit(ctx, project.ID, repo.CurrentCommit); err != nil {
+		return "", fmt.Errorf("update initialized project current commit: %w", err)
+	}
+	project.CurrentCommit = repo.CurrentCommit
+	return repo.CurrentCommit, nil
 }
 
 func deepAgentsModeForJob(jobType string) string {
