@@ -168,7 +168,6 @@ class LangGraphRuntimeAdapter:
             "assistant_id": self.assistant_id,
             "input": {"messages": [{"role": "user", "content": req.message}]},
             "context": asdict(context),
-            "config": {"configurable": {"wemob_context": asdict(context)}},
             "metadata": {
                 "job_id": req.job_id,
                 "project_id": req.project_id,
@@ -225,7 +224,6 @@ class LangGraphRuntimeAdapter:
             "assistant_id": record.assistant_id,
             "input": req.input or {},
             "context": record.context,
-            "config": {"configurable": {"wemob_context": record.context}},
             "multitask_strategy": "enqueue",
         }
         if req.command is not None:
