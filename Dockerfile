@@ -25,8 +25,8 @@ RUN apk add --no-cache ca-certificates tzdata curl git nodejs npm
 
 RUN addgroup -S appuser \
     && adduser -S -G appuser -h /home/appuser -s /sbin/nologin appuser \
-    && mkdir -p /data/repos /data/custom-domains \
-    && chown -R appuser:appuser /data/repos /data/custom-domains
+    && mkdir -p /data/repos /data/wemob-git /data/custom-domains \
+    && chown -R appuser:appuser /data/repos /data/wemob-git /data/custom-domains
 
 COPY --from=flyctl /flyctl /usr/local/bin/flyctl
 COPY --from=builder --chown=appuser:appuser /app/bin /app/bin
