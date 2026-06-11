@@ -39,6 +39,23 @@ services:
     depends_on:
       api:
         condition: service_healthy
+      agent-runtime:
+        condition: service_started
+
+  agent-runtime:
+    image: ghcr.io/knid/wemob-agent-runtime:${AGENT_RUNTIME_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    expose:
+      - "2024"
+      - "2025"
+    env_file:
+      - ./.env
+    volumes:
+      - wemob-git-data:/data/wemob-git
+      - agent-runtime-data:/data/wemob-agent-runtime
+    depends_on:
+      api:
+        condition: service_healthy
 
   worker:
     image: ghcr.io/knid/wemob-backend:${IMAGE_TAG:-latest}
@@ -101,4 +118,5 @@ volumes:
   caddy_config:
   repo-data:
   wemob-git-data:
+  agent-runtime-data:
   custom-domains:
