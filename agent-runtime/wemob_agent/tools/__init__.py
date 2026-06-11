@@ -11,31 +11,46 @@ from collections.abc import Callable
 from typing import Any
 
 from wemob_agent.context import WemobContext
-from wemob_agent.daytona import DaytonaWorkspaceManager, PreviewServerRequest, connect_runtime_sandbox
+from wemob_agent.daytona import (
+    DaytonaWorkspaceManager,
+    PreviewServerRequest,
+    connect_runtime_sandbox,
+)
 from wemob_agent.product_api import ProductAPIClient
+
+
+def runtime_context() -> WemobContext | None:
+    try:
+        from langgraph.runtime import get_runtime
+    except Exception:
+        try:
+            from langgraph.config import get_runtime
+        except Exception:
+            return None
+    try:
+        runtime = get_runtime()
+    except Exception:
+        return None
+    raw = getattr(runtime, "context", None)
+    return coerce_context(raw)
+
+
+def coerce_context(raw: Any) -> WemobContext | None:
+    if isinstance(raw, WemobContext):
+        return raw
+    if isinstance(raw, dict):
+        try:
+            return WemobContext(**raw)
+        except TypeError:
+            return None
+    return None
 
 
 def build_product_tools(context: WemobContext | None = None) -> list[Any]:
     def active_context() -> WemobContext | None:
         if context is not None:
             return context
-        try:
-            from langgraph.config import get_runtime
-        except Exception:
-            return None
-        try:
-            runtime = get_runtime()
-        except Exception:
-            return None
-        raw = getattr(runtime, "context", None)
-        if isinstance(raw, WemobContext):
-            return raw
-        if isinstance(raw, dict):
-            try:
-                return WemobContext(**raw)
-            except TypeError:
-                return None
-        return raw if isinstance(raw, WemobContext) else None
+        return runtime_context()
 
     def product_api() -> ProductAPIClient:
         return ProductAPIClient()
@@ -70,7 +85,12 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
             raise ValueError("list_project_assets requires WemobContext")
         return product_api().list_project_assets(ctx)
 
-    def generate_image(prompt: str, width: int = 1024, height: int = 1024, style: str = "") -> dict[str, Any]:
+    def generate_image(
+        prompt: str,
+        width: int = 1024,
+        height: int = 1024,
+        style: str = "",
+    ) -> dict[str, Any]:
         """Request image generation for the current project."""
 
         ctx = active_context()
@@ -92,7 +112,10 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
             raise ValueError("start_preview_server requires WemobContext")
         if not ctx.sandbox_id:
             raise RuntimeError("start_preview_server requires an active Daytona sandbox")
-        manager = DaytonaWorkspaceManager(ctx, sandbox=connect_runtime_sandbox(ctx.sandbox_id).provider)
+        manager = DaytonaWorkspaceManager(
+            ctx,
+            sandbox=connect_runtime_sandbox(ctx.sandbox_id).provider,
+        )
         result = manager.start_preview_server(
             PreviewServerRequest(
                 framework=framework,

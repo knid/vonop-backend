@@ -15,7 +15,11 @@ from deepagents.backends.protocol import (
 )
 from deepagents.backends.sandbox import BaseSandbox
 
-from wemob_agent.daytona import DaytonaSDKProvider, daytona_workspace_path
+from wemob_agent.daytona import (
+    DaytonaSDKProvider,
+    daytona_workspace_path,
+    normalize_daytona_workspace_root,
+)
 
 
 class DaytonaWorkspaceBackend(BaseSandbox):
@@ -23,14 +27,14 @@ class DaytonaWorkspaceBackend(BaseSandbox):
 
     def __init__(self, provider: DaytonaSDKProvider, daytona_root: str = "workspace") -> None:
         self.provider = provider
-        self.daytona_root = daytona_root.strip("/") or "workspace"
+        self.daytona_root = normalize_daytona_workspace_root(daytona_root)
 
     @property
     def id(self) -> str:
         return self.provider.sandbox_id
 
     def execute(self, command: str, *, timeout: int | None = None) -> ExecuteResponse:
-        result = self.provider.execute(command, self.daytona_root, timeout or 1800)
+        result = self.provider.execute(command, self._command_cwd(), timeout or 1800)
         return ExecuteResponse(
             output=str(result.get("stdout") or result.get("output") or ""),
             exit_code=int(result.get("exit_code") or result.get("code") or 0),
@@ -104,11 +108,16 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         return daytona_workspace_path(path, self.daytona_root)
 
     def _logical(self, path: str) -> str:
-        normalized = path.strip("/")
-        root = self.daytona_root.strip("/")
+        normalized = path.rstrip("/")
+        root = self.daytona_root.rstrip("/")
         if normalized == root:
             return "/"
-        if normalized.startswith(root + "/"):
+        if root != "/" and normalized.startswith(root + "/"):
             suffix = normalized.removeprefix(root + "/")
             return f"/{suffix}" if suffix else "/"
+        if root == "/" and normalized.startswith("/"):
+            return normalized
         return path if path.startswith("/") else f"/{path}"
+
+    def _command_cwd(self) -> str:
+        return "/" if self.daytona_root.startswith("/") else "."
