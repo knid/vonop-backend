@@ -143,6 +143,10 @@ func (c *Controller) GetAppActiveJob(appID uuid.UUID) (*models.GenerationJob, er
 	return c.DB.GetAppActiveJob(appID.String())
 }
 
+func (c *Controller) GetAppLatestDeepAgentsJob(appID uuid.UUID) (*models.GenerationJob, error) {
+	return c.DB.GetAppLatestDeepAgentsJob(appID.String())
+}
+
 // CancelJob cancels a running or awaiting_input job. For agent-run jobs
 // (executed in the worker) this publishes to jobstream.CancelChannel(jobID);
 // the Deep Agents runtime is cancelled through its runtime API; legacy jobs may still listen for Redis cancel signals. For legacy in-API-process jobs (dashboards) it

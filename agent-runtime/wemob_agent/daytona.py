@@ -216,7 +216,7 @@ def connect_runtime_sandbox(
 
 
 def _create_daytona_sandbox(client: Any, config: RuntimeConfig, labels: dict[str, str]) -> Any:
-    create_methods = ("create", "create_sandbox", "start")
+    create_methods = ("create", "create_sandbox")
     params_candidates: list[Any] = []
     if config.daytona_snapshot_id:
         params_candidates.extend(
@@ -234,6 +234,14 @@ def _create_daytona_sandbox(client: Any, config: RuntimeConfig, labels: dict[str
                 "CreateSandboxParams",
                 template=config.daytona_template_id,
                 template_id=config.daytona_template_id,
+                labels=labels,
+                auto_stop_interval=config.daytona_idle_ttl_seconds,
+            )
+        )
+    if not params_candidates:
+        params_candidates.extend(
+            _construct_daytona_params(
+                "CreateSandboxFromSnapshotParams",
                 labels=labels,
                 auto_stop_interval=config.daytona_idle_ttl_seconds,
             )
@@ -270,6 +278,15 @@ def _construct_daytona_params(class_name: str, **values: Any) -> list[Any]:
     if cls is None:
         return []
     candidates = []
+    if not any(values.get(key) for key in ("snapshot", "snapshot_id", "template", "template_id")):
+        payload = {"labels": values["labels"]}
+        if values.get("auto_stop_interval"):
+            payload["auto_stop_interval"] = values["auto_stop_interval"]
+        try:
+            candidates.append(cls(**payload))
+        except TypeError:
+            pass
+        return candidates
     for key_name in ("snapshot", "snapshot_id", "template", "template_id"):
         value = values.get(key_name)
         if not value:
@@ -413,7 +430,12 @@ class DaytonaSDKProvider:
             method = getattr(owner, method_name, None)
             if method is None:
                 continue
-            result = method(source_root)
+            try:
+                result = method(source_root)
+            except Exception as exc:
+                if method_name != "find_files" or "missing 1 required positional argument: 'pattern'" not in str(exc):
+                    raise
+                result = method(source_root, "**/*")
             data = _result_to_dict(result)
             values = data.get("files") or data.get("paths") or result
             if isinstance(values, list):
@@ -423,6 +445,8 @@ class DaytonaSDKProvider:
                         out.append(item)
                     elif isinstance(item, dict) and item.get("path"):
                         out.append(str(item["path"]))
+                    elif hasattr(item, "path"):
+                        out.append(str(item.path))
                 return out
         raise DaytonaUnavailable("configured Daytona sandbox does not expose file listing")
 

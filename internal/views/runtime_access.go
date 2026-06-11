@@ -37,13 +37,25 @@ func (v *HttpViews) GetRuntimeAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgID := runtimeRun.OrganizationID
+	runtimeAPIURL, _ := runtimeRun.Metadata["runtime_api_url"].(string)
+	if runtimeAPIURL == "" && runtimeRun.DeepAgentsRunID != "" {
+		if run, getErr := v.Controller.DeepAgentsClient.GetRun(r.Context(), runtimeRun.DeepAgentsRunID); getErr == nil && run.RuntimeAPIURL != "" {
+			runtimeAPIURL = run.RuntimeAPIURL
+			if runtimeRun.Metadata == nil {
+				runtimeRun.Metadata = map[string]any{}
+			}
+			runtimeRun.Metadata["runtime_api_url"] = runtimeAPIURL
+			_ = v.Controller.DB.UpdateAgentRuntimeRun(r.Context(), runtimeRun)
+		}
+	}
 	access, err := v.Controller.DeepAgentsClient.IssueRuntimeAccessToken(agentruntime.RuntimeAccessRequest{
-		UserID:      user.ID.String(),
-		OrgID:       orgID.String(),
-		ProjectID:   project.ID.String(),
-		ThreadID:    runtimeRun.DeepAgentsThreadID,
-		AssistantID: agentruntime.DefaultAssistantID,
-		ExpiresIn:   30 * time.Minute,
+		UserID:        user.ID.String(),
+		OrgID:         orgID.String(),
+		ProjectID:     project.ID.String(),
+		ThreadID:      runtimeRun.DeepAgentsThreadID,
+		AssistantID:   agentruntime.DefaultAssistantID,
+		RuntimeAPIURL: runtimeAPIURL,
+		ExpiresIn:     30 * time.Minute,
 	})
 	if err != nil {
 		utils.JSONInternalError(w, err)

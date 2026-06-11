@@ -166,6 +166,28 @@ func (db *Database) GetAppActiveJob(appID string) (*models.GenerationJob, error)
 	return &job, nil
 }
 
+// GetAppLatestDeepAgentsJob returns the most recent job that has been linked
+// to a Deep Agents runtime. This lets clients rehydrate the native LangGraph
+// thread after the launch job has already completed.
+func (db *Database) GetAppLatestDeepAgentsJob(appID string) (*models.GenerationJob, error) {
+	var job models.GenerationJob
+	err := db.DB.NewSelect().
+		Model(&job).
+		Where("app_id = ?", appID).
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.
+				Where("agent_runtime_run_id IS NOT NULL").
+				WhereOr("deepagents_thread_id <> ''")
+		}).
+		OrderExpr("created_at DESC").
+		Limit(1).
+		Scan(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
 // FailStaleAwaitingInputJobs transitions awaiting_input jobs older than the given duration to failed.
 func (db *Database) FailStaleAwaitingInputJobs(maxAge time.Duration) (int, error) {
 	res, err := db.DB.NewUpdate().

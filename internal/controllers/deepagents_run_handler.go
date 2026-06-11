@@ -129,6 +129,10 @@ func (c *Controller) StartDeepAgentsRunForJob(
 	runtimeRun.Status = models.AgentRuntimeRunStatusRunning
 	runtimeRun.StartedAt = now
 	runtimeRun.SandboxID = started.SandboxID
+	if runtimeRun.Metadata == nil {
+		runtimeRun.Metadata = map[string]any{}
+	}
+	runtimeRun.Metadata["runtime_api_url"] = started.RuntimeAPIURL
 	if err := c.DB.UpdateAgentRuntimeRun(ctx, runtimeRun); err != nil {
 		return nil, fmt.Errorf("update runtime run: %w", err)
 	}
@@ -137,12 +141,13 @@ func (c *Controller) StartDeepAgentsRunForJob(
 	}
 
 	access, err := c.DeepAgentsClient.IssueRuntimeAccessToken(agentruntime.RuntimeAccessRequest{
-		UserID:      user.ID.String(),
-		OrgID:       orgID.String(),
-		ProjectID:   project.ID.String(),
-		ThreadID:    thread.DeepAgentsThreadID,
-		AssistantID: started.AssistantID,
-		ExpiresIn:   30 * time.Minute,
+		UserID:        user.ID.String(),
+		OrgID:         orgID.String(),
+		ProjectID:     project.ID.String(),
+		ThreadID:      thread.DeepAgentsThreadID,
+		AssistantID:   started.AssistantID,
+		RuntimeAPIURL: started.RuntimeAPIURL,
+		ExpiresIn:     30 * time.Minute,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("issue runtime access token: %w", err)

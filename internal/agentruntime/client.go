@@ -95,6 +95,10 @@ func (c *Client) IssueRuntimeAccessToken(req RuntimeAccessRequest) (*RuntimeAcce
 	if req.AssistantID == "" {
 		req.AssistantID = c.assistantID()
 	}
+	runtimeAPIURL := strings.TrimRight(strings.TrimSpace(req.RuntimeAPIURL), "/")
+	if runtimeAPIURL == "" {
+		runtimeAPIURL = c.runtimeAPIURL()
+	}
 	if req.ExpiresIn <= 0 {
 		req.ExpiresIn = 30 * time.Minute
 	}
@@ -118,7 +122,7 @@ func (c *Client) IssueRuntimeAccessToken(req RuntimeAccessRequest) (*RuntimeAcce
 	sig := signBytes([]byte(c.accessSecret()), []byte(encodedPayload))
 	token := encodedPayload + "." + base64.RawURLEncoding.EncodeToString(sig)
 	return &RuntimeAccessInfo{
-		RuntimeAPIURL:      c.runtimeAPIURL(),
+		RuntimeAPIURL:      runtimeAPIURL,
 		AssistantID:        req.AssistantID,
 		ThreadID:           req.ThreadID,
 		RuntimeAccessToken: token,

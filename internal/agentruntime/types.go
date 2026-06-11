@@ -39,12 +39,13 @@ type ResumeRunRequest struct {
 }
 
 type RuntimeAccessRequest struct {
-	UserID      string
-	OrgID       string
-	ProjectID   string
-	ThreadID    string
-	AssistantID string
-	ExpiresIn   time.Duration
+	UserID        string
+	OrgID         string
+	ProjectID     string
+	ThreadID      string
+	AssistantID   string
+	RuntimeAPIURL string
+	ExpiresIn     time.Duration
 }
 
 type RuntimeAccessInfo struct {

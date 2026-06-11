@@ -11,6 +11,7 @@ from wemob_agent.daytona import (
     DaytonaSDKProvider,
     DaytonaWorkspaceManager,
     PreviewServerRequest,
+    _create_daytona_sandbox,
     daytona_workspace_path,
     should_exclude,
     sync_tree,
@@ -63,9 +64,63 @@ class FakeFilesystem:
         return self.files[path]
 
 
+class FakePathEntry:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
 class FakeDaytonaSandbox:
     def __init__(self) -> None:
         self.fs = FakeFilesystem()
+
+
+class FakeFindFilesFilesystem(FakeFilesystem):
+    def __init__(self) -> None:
+        super().__init__()
+        self.find_calls: list[tuple[str, str]] = []
+
+    def find_files(self, source_root: str, pattern: str) -> list[FakePathEntry]:
+        self.find_calls.append((source_root, pattern))
+        return [FakePathEntry("workspace/src/App.tsx")]
+
+
+class FakeWrappedFindFilesFilesystem(FakeFilesystem):
+    def __init__(self) -> None:
+        super().__init__()
+        self.find_calls: list[tuple[str, str]] = []
+
+    def find_files(self, source_root: str, pattern: str | None = None) -> list[FakePathEntry]:
+        if pattern is None:
+            raise RuntimeError("FileSystem.find_files() missing 1 required positional argument: 'pattern'")
+        self.find_calls.append((source_root, pattern))
+        return [FakePathEntry("workspace/src/App.tsx")]
+
+
+class FakeFindFilesSandbox:
+    def __init__(self) -> None:
+        self.fs = FakeFindFilesFilesystem()
+        self.fs.files["workspace/src/App.tsx"] = b"app\n"
+
+
+class FakeWrappedFindFilesSandbox:
+    def __init__(self) -> None:
+        self.fs = FakeWrappedFindFilesFilesystem()
+        self.fs.files["workspace/src/App.tsx"] = b"app\n"
+
+
+class FakeCreateClient:
+    def __init__(self) -> None:
+        self.created_with: list[Any] = []
+        self.start_called = False
+
+    def create(self, params: Any = None, **kwargs: Any) -> str:
+        del kwargs
+        self.created_with.append(params)
+        return "sandbox-created"
+
+    def start(self, sandbox: Any) -> None:
+        del sandbox
+        self.start_called = True
 
 
 class FakeDaytonaProvider:
@@ -127,6 +182,44 @@ class DaytonaTests(unittest.TestCase):
             provider.upload_tree(source, "workspace")
 
             self.assertEqual(sandbox.fs.uploads, [(b"app\n", "workspace/src/App.tsx")])
+
+    def test_daytona_provider_downloads_with_find_files_pattern_api(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            sandbox = FakeFindFilesSandbox()
+            provider = DaytonaSDKProvider(sandbox, "sandbox-1")
+
+            provider.download_tree("workspace", target)
+
+            self.assertEqual(sandbox.fs.find_calls, [("workspace", "**/*")])
+            self.assertEqual((target / "src/App.tsx").read_text(encoding="utf-8"), "app\n")
+
+    def test_daytona_provider_downloads_when_sdk_wraps_find_files_type_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            sandbox = FakeWrappedFindFilesSandbox()
+            provider = DaytonaSDKProvider(sandbox, "sandbox-1")
+
+            provider.download_tree("workspace", target)
+
+            self.assertEqual(sandbox.fs.find_calls, [("workspace", "**/*")])
+            self.assertEqual((target / "src/App.tsx").read_text(encoding="utf-8"), "app\n")
+
+    def test_create_daytona_sandbox_uses_create_not_start_for_default_config(self) -> None:
+        client = FakeCreateClient()
+        config = RuntimeConfig(
+            default_model="test:model",
+            runtime_version="test",
+            preview_domain="preview.wemob.app",
+            daytona_idle_ttl_seconds=3600,
+            daytona_preview_ttl_seconds=600,
+        )
+
+        sandbox = _create_daytona_sandbox(client, config, {"project_id": "project-1"})
+
+        self.assertEqual(sandbox, "sandbox-created")
+        self.assertEqual(len(client.created_with), 1)
+        self.assertFalse(client.start_called)
 
     def test_daytona_workspace_path_maps_deepagents_path_to_daytona_path(self) -> None:
         self.assertEqual(daytona_workspace_path("/workspace"), "workspace")

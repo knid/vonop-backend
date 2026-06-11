@@ -312,15 +312,24 @@ class LangGraphRuntimeAdapter:
         await self.store.put(record)
 
     async def _ensure_thread(self, thread_id: str) -> None:
-        try:
-            await self._request("POST", "/threads", json={"thread_id": thread_id})
-        except HTTPException as exc:
-            if exc.status_code != status.HTTP_409_CONFLICT:
-                raise
+        await self._request(
+            "POST",
+            "/threads",
+            json={"thread_id": thread_id},
+            allowed_statuses={status.HTTP_409_CONFLICT},
+        )
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        allowed_statuses: set[int] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.runtime_api_url, timeout=60.0) as client:
             response = await client.request(method, path, **kwargs)
+        if response.status_code in (allowed_statuses or set()):
+            return {}
         if response.status_code < 200 or response.status_code >= 300:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=response.text)
         if not response.content:

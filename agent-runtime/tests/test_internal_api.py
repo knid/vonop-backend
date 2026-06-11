@@ -121,6 +121,30 @@ class InternalAPITests(unittest.TestCase):
         self.assertEqual(payload["context"]["project_id"], "project-1")
         self.assertEqual(payload["context"]["workspace_root"], "/workspace")
 
+    def test_ensure_thread_allows_existing_thread_conflict(self) -> None:
+        from fastapi import status
+
+        from wemob_agent import internal_api
+
+        class CapturingAdapter(internal_api.LangGraphRuntimeAdapter):
+            def __init__(self, store):
+                super().__init__(runtime_api_url="http://langgraph:2024", store=store)
+                self.requests = []
+
+            async def _request(self, method, path, allowed_statuses=None, **kwargs):
+                self.requests.append((method, path, allowed_statuses, kwargs))
+                return {}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = internal_api.JsonRunStore(str(Path(tmp) / "runs.json"))
+            adapter = CapturingAdapter(store)
+            asyncio.run(adapter._ensure_thread("thread-1"))
+
+        self.assertEqual(adapter.requests[0][0], "POST")
+        self.assertEqual(adapter.requests[0][1], "/threads")
+        self.assertEqual(adapter.requests[0][2], {status.HTTP_409_CONFLICT})
+        self.assertEqual(adapter.requests[0][3]["json"], {"thread_id": "thread-1"})
+
     def test_langgraph_proxy_preflight_allows_wemob_app_origin_without_auth(self) -> None:
         from fastapi.testclient import TestClient
 

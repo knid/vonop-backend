@@ -130,6 +130,27 @@ func TestIssueRuntimeAccessToken(t *testing.T) {
 	}
 }
 
+func TestIssueRuntimeAccessTokenUsesRequestRuntimeAPIURL(t *testing.T) {
+	client := NewClient("https://runtime.internal", "internal-secret", "access-secret")
+	client.SetRuntimeAPIURL("https://configured-runtime.example/lg")
+	client.Now = func() time.Time { return time.Unix(1710000000, 0) }
+
+	info, err := client.IssueRuntimeAccessToken(RuntimeAccessRequest{
+		UserID:        "user-1",
+		OrgID:         "org-1",
+		ProjectID:     "project-1",
+		ThreadID:      "thread-1",
+		RuntimeAPIURL: "http://127.0.0.1:2024/",
+		ExpiresIn:     time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("IssueRuntimeAccessToken: %v", err)
+	}
+	if info.RuntimeAPIURL != "http://127.0.0.1:2024" {
+		t.Fatalf("RuntimeAPIURL = %q", info.RuntimeAPIURL)
+	}
+}
+
 func TestCancelAndResumeUseRuntimeEndpoints(t *testing.T) {
 	var paths []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

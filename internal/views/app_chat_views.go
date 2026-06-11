@@ -149,11 +149,10 @@ func (v *HttpViews) ChatApp(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /v2/apps/{appId}/active-job
-// Returns the currently running or awaiting_input generation job for this app,
-// or 200 with {"job_id": null} if none. The frontend calls this on mount to
-// reconnect the SSE stream after a refresh or browser restart — replacing the
-// old localStorage-based job-id recovery, which got stuck on stale jobIds and
-// didn't survive Safari's storage eviction on mobile.
+// Returns the currently running/awaiting_input generation job for this app, or
+// the latest Deep Agents-backed job when there is no active run. The frontend
+// uses the job id to mint runtime access and hydrate the native LangGraph
+// thread after refresh, including after the launch job has completed.
 func (v *HttpViews) GetAppActiveJob(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {
@@ -174,8 +173,11 @@ func (v *HttpViews) GetAppActiveJob(w http.ResponseWriter, r *http.Request) {
 
 	job, err := v.Controller.GetAppActiveJob(project.ID)
 	if err != nil || job == nil {
-		utils.JSONResponse(w, map[string]any{"job_id": nil}, http.StatusOK)
-		return
+		job, err = v.Controller.GetAppLatestDeepAgentsJob(project.ID)
+		if err != nil || job == nil {
+			utils.JSONResponse(w, map[string]any{"job_id": nil}, http.StatusOK)
+			return
+		}
 	}
 	utils.JSONResponse(w, map[string]any{
 		"job_id": job.ID,
