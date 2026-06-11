@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	awsConfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	awsCreds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/hibiken/asynq"
@@ -487,16 +487,16 @@ func initCredStore(sm secret.SecretManager, s3Storage *storage.S3Storage) *stora
 	switch {
 	case kmsKeyID != "":
 		kmsRegion := sm.GetSecret("AWS_REGION")
-		awsCfg, err := awsConfig.LoadDefaultConfig(context.Background(),
-			awsConfig.WithRegion(kmsRegion),
-			awsConfig.WithCredentialsProvider(awsCreds.NewStaticCredentialsProvider(
+		if kmsRegion == "" {
+			panic("bootstrap: AWS_REGION is required for KMS credential storage")
+		}
+		awsCfg := aws.Config{
+			Region: kmsRegion,
+			Credentials: aws.NewCredentialsCache(awsCreds.NewStaticCredentialsProvider(
 				sm.GetSecret("AWS_ACCESS_KEY_ID"),
 				sm.GetSecret("AWS_SECRET_ACCESS_KEY"),
 				"",
 			)),
-		)
-		if err != nil {
-			panic(fmt.Errorf("bootstrap: aws config for KMS: %w", err))
 		}
 		kmsClient := kms.NewFromConfig(awsCfg)
 		kmsManager := secret.NewKMSManager(kmsClient, kmsKeyID)

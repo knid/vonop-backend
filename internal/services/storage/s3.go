@@ -11,7 +11,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -25,12 +24,12 @@ type S3Storage struct {
 }
 
 func NewS3Storage(region, bucket, accessKey, secretKey string) (*S3Storage, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithRegion(region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-	)
-	if err != nil {
-		return nil, err
+	if region == "" || bucket == "" || accessKey == "" || secretKey == "" {
+		return nil, fmt.Errorf("s3 storage: region, bucket, access key, and secret key are required")
+	}
+	cfg := aws.Config{
+		Region:      region,
+		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
 	}
 	client := s3.NewFromConfig(cfg)
 	presignClient := s3.NewPresignClient(client)
