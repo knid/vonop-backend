@@ -72,6 +72,30 @@ mcp.wemob.io {
     }
 }
 
+agents.wemob.io {
+    encode zstd gzip
+
+    handle /lg* {
+        reverse_proxy agent-runtime:2025
+    }
+
+    handle {
+        respond 404
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer-when-downgrade"
+    }
+
+    log {
+        output file /var/log/caddy/agents_access.log
+        format console
+    }
+}
+
 *.preview.wemob.app {
     tls {
         dns cloudflare {env.CF_API_TOKEN}

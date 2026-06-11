@@ -27,7 +27,7 @@ The container exposes two HTTP surfaces:
 Backend configuration should point `AGENT_RUNTIME_URL` at the internal control
 API, for example `http://agent-runtime:2025`. Set `AGENT_RUNTIME_STREAM_URL` to
 the frontend-reachable authenticated proxy path, for example
-`https://agents.example.com/lg`. If omitted, the Go client returns
+`https://agents.wemob.io/lg`. If omitted, the Go client returns
 `AGENT_RUNTIME_URL + /lg`.
 
 ## Local Development
