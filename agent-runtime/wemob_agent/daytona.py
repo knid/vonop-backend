@@ -503,18 +503,35 @@ def should_exclude(relative_path: str) -> bool:
 def daytona_workspace_path(path: str, daytona_root: str = "workspace") -> str:
     """Translate DeepAgents' virtual /workspace path to Daytona's workspace path."""
 
-    normalized_root = (daytona_root.strip() or "workspace").strip("/")
+    normalized_root = normalize_daytona_workspace_root(daytona_root)
     if path in {"", ".", "/"}:
         return normalized_root
     if path == "/workspace":
         return normalized_root
     if path.startswith("/workspace/"):
         suffix = path.removeprefix("/workspace/").strip("/")
-        return f"{normalized_root}/{suffix}" if suffix else normalized_root
+        return _join_daytona_path(normalized_root, suffix)
     if path.startswith("/tmp/"):
         return path
     suffix = path.strip("/")
-    return f"{normalized_root}/{suffix}" if suffix else normalized_root
+    return _join_daytona_path(normalized_root, suffix)
+
+
+def normalize_daytona_workspace_root(daytona_root: str = "workspace") -> str:
+    root = daytona_root.strip()
+    if not root:
+        return "workspace"
+    if root == "/":
+        return "/"
+    return root.rstrip("/")
+
+
+def _join_daytona_path(root: str, suffix: str) -> str:
+    if not suffix:
+        return root
+    if root == "/":
+        return "/" + suffix
+    return f"{root}/{suffix}"
 
 
 def preview_slug(project_id: str, job_id: str) -> str:

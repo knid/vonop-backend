@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from wemob_agent.context import WemobContext
 from wemob_agent.subagents import build_subagents
-from wemob_agent.tools import build_product_tools
+from wemob_agent.tools import build_product_tools, runtime_context
 
 
 def make_context(root: Path) -> WemobContext:
@@ -43,6 +46,17 @@ class BackendTests(unittest.TestCase):
 
             subagents = build_subagents(context)
             self.assertTrue(any(agent["name"] == "frontend-builder" for agent in subagents))
+
+    def test_tools_read_context_from_langgraph_runtime_module(self) -> None:
+        context = make_context(Path("/tmp/wemob-test"))
+        runtime_module = types.ModuleType("langgraph.runtime")
+        runtime_module.get_runtime = lambda: types.SimpleNamespace(context=context.__dict__)
+
+        with patch.dict(sys.modules, {"langgraph.runtime": runtime_module}):
+            self.assertEqual(runtime_context().project_id, "project-1")
+
+            tools = {tool.__name__: tool for tool in build_product_tools()}
+            self.assertEqual(tools["get_project_context"]()["project_id"], "project-1")
 
 
 if __name__ == "__main__":

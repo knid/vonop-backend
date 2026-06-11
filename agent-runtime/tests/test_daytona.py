@@ -68,6 +68,27 @@ class FakeDaytonaSandbox:
         self.fs = FakeFilesystem()
 
 
+class FakeDaytonaProvider:
+    sandbox_id = "sandbox-1"
+
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, str, int]] = []
+        self.uploads: list[tuple[str, bytes]] = []
+
+    def execute(self, command: str, cwd: str, timeout_seconds: int) -> dict[str, Any]:
+        self.executions.append((command, cwd, timeout_seconds))
+        return {
+            "exit_code": 0,
+            "stdout": '{"path": "workspace/src", "is_dir": true}\n',
+        }
+
+    def upload_bytes(self, remote_path: str, data: bytes) -> None:
+        self.uploads.append((remote_path, data))
+
+    def read_bytes(self, remote_path: str) -> bytes:
+        return b"app\n"
+
+
 class DaytonaTests(unittest.TestCase):
     def test_sync_tree_excludes_build_secret_and_git_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -111,6 +132,10 @@ class DaytonaTests(unittest.TestCase):
         self.assertEqual(daytona_workspace_path("/workspace"), "workspace")
         self.assertEqual(daytona_workspace_path("/workspace/src/App.tsx"), "workspace/src/App.tsx")
         self.assertEqual(daytona_workspace_path("/src/App.tsx"), "workspace/src/App.tsx")
+        self.assertEqual(
+            daytona_workspace_path("/workspace/src/App.tsx", "/home/daytona/workspace"),
+            "/home/daytona/workspace/src/App.tsx",
+        )
         self.assertEqual(daytona_workspace_path("/tmp/edit-buffer"), "/tmp/edit-buffer")
 
     def test_daytona_workspace_backend_maps_routed_paths_for_uploads_and_downloads(self) -> None:
@@ -124,6 +149,26 @@ class DaytonaTests(unittest.TestCase):
         self.assertIsNone(upload[0].error)
         self.assertEqual(sandbox.fs.uploads, [(b"app\n", "workspace/src/App.tsx")])
         self.assertEqual(download[0].content, b"app\n")
+
+    def test_daytona_workspace_backend_runs_helpers_from_sandbox_base(self) -> None:
+        provider = FakeDaytonaProvider()
+        backend = DaytonaWorkspaceBackend(provider)
+
+        result = backend.ls("/")
+
+        self.assertEqual(provider.executions[0][1], ".")
+        self.assertEqual(result.entries[0]["path"], "/src")
+
+    def test_daytona_workspace_backend_preserves_absolute_daytona_root(self) -> None:
+        provider = FakeDaytonaProvider()
+        backend = DaytonaWorkspaceBackend(provider, "/home/daytona/workspace")
+
+        upload = backend.upload_files([("/src/App.tsx", b"app\n")])
+        backend.ls("/")
+
+        self.assertIsNone(upload[0].error)
+        self.assertEqual(provider.uploads[0], ("/home/daytona/workspace/src/App.tsx", b"app\n"))
+        self.assertEqual(provider.executions[0][1], "/")
 
     def test_start_preview_server_returns_public_url_without_provider_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
