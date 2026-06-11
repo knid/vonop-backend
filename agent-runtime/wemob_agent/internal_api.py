@@ -7,14 +7,16 @@ the LangGraph runtime directly with the LangChain frontend SDK.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import asyncio
 import base64
+import fcntl
+import hashlib
+import hmac
 import json
 import os
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,21 +83,35 @@ class RunRecord(BaseModel):
 class JsonRunStore:
     def __init__(self, path: str | None = None) -> None:
         self.path = Path(path or load_config().run_store_path)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self._lock = asyncio.Lock()
 
     async def load_all(self) -> dict[str, RunRecord]:
         async with self._lock:
-            return self._load_all_unlocked()
+            with self._file_lock():
+                return self._load_all_unlocked()
 
     async def get(self, run_id: str) -> RunRecord | None:
         async with self._lock:
-            return self._load_all_unlocked().get(run_id)
+            with self._file_lock():
+                return self._load_all_unlocked().get(run_id)
 
     async def put(self, record: RunRecord) -> None:
         async with self._lock:
-            records = self._load_all_unlocked()
-            records[record.run_id] = record
-            self._write_all_unlocked(records)
+            with self._file_lock():
+                records = self._load_all_unlocked()
+                records[record.run_id] = record
+                self._write_all_unlocked(records)
+
+    @contextmanager
+    def _file_lock(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.lock_path.open("a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def _load_all_unlocked(self) -> dict[str, RunRecord]:
         if not self.path.exists():
@@ -136,7 +152,9 @@ class LangGraphRuntimeAdapter:
         assistant_id: str | None = None,
         store: JsonRunStore | None = None,
     ) -> None:
-        self.runtime_api_url = (runtime_api_url or os.getenv("WEMOB_LANGGRAPH_API_URL") or "http://127.0.0.1:2024").rstrip("/")
+        self.runtime_api_url = (
+            runtime_api_url or os.getenv("WEMOB_LANGGRAPH_API_URL") or "http://127.0.0.1:2024"
+        ).rstrip("/")
         self.assistant_id = assistant_id or os.getenv("WEMOB_AGENT_ASSISTANT_ID", "wemob_agent")
         self.store = store or JsonRunStore()
 
@@ -231,30 +249,58 @@ class LangGraphRuntimeAdapter:
                 return
             status_value = record.status.lower()
             if status_value in terminal_success:
-                await self.finalize_record(record, successful=True, summary="Deep Agents run completed")
+                await self.finalize_record(
+                    record, successful=True, summary="Deep Agents run completed"
+                )
                 return
             if status_value in terminal_failure:
-                await self.finalize_record(record, successful=False, summary=f"Deep Agents run ended with status {record.status}")
+                await self.finalize_record(
+                    record,
+                    successful=False,
+                    summary=f"Deep Agents run ended with status {record.status}",
+                )
                 return
 
     async def resume_monitors(self) -> None:
         records = await self.store.load_all()
-        terminal = {"success", "succeeded", "completed", "error", "failed", "cancelled", "canceled", "timeout", "interrupted"}
+        terminal = {
+            "success",
+            "succeeded",
+            "completed",
+            "error",
+            "failed",
+            "cancelled",
+            "canceled",
+            "timeout",
+            "interrupted",
+        }
         for record in records.values():
             if record.finalized:
                 continue
             if record.status.lower() in terminal:
-                asyncio.create_task(self.finalize_record(record, successful=record.status.lower() in {"success", "succeeded", "completed"}, summary=f"Deep Agents run ended with status {record.status}"))
+                asyncio.create_task(
+                    self.finalize_record(
+                        record,
+                        successful=record.status.lower() in {"success", "succeeded", "completed"},
+                        summary=f"Deep Agents run ended with status {record.status}",
+                    )
+                )
             else:
                 asyncio.create_task(self.monitor_and_finalize(record.run_id, record.runtime_run_id))
 
     async def finalize_record(self, record: RunRecord, successful: bool, summary: str) -> None:
         if record.finalized:
             return
-        if record.sandbox_id and record.host_worktree_path and not load_config().allow_local_agent_execution:
+        if (
+            record.sandbox_id
+            and record.host_worktree_path
+            and not load_config().allow_local_agent_execution
+        ):
             sandbox = connect_runtime_sandbox(record.sandbox_id)
             sandbox.provider.download_tree("/workspace", Path(record.host_worktree_path))
-        await _notify_backend_finalizer(record.runtime_run_id, successful=successful, summary=summary)
+        await _notify_backend_finalizer(
+            record.runtime_run_id, successful=successful, summary=summary
+        )
         record.finalized = True
         await self.store.put(record)
 
@@ -323,35 +369,58 @@ def _verify_signature(body: bytes, timestamp: str | None, signature: str | None)
     try:
         ts = int(timestamp)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid timestamp") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid timestamp"
+        ) from exc
     if abs(int(time.time()) - ts) > 300:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="stale signature")
-    expected = hmac.new(secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    expected = hmac.new(
+        secret.encode(), timestamp.encode() + b"." + body, hashlib.sha256
+    ).hexdigest()
     if not hmac.compare_digest(signature, "sha256=" + expected):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
 
 
 def _verify_runtime_access_token(token: str, request_path: str) -> dict[str, Any]:
-    secret = os.getenv("AGENT_RUNTIME_ACCESS_TOKEN_SECRET") or os.getenv("AGENT_RUNTIME_INTERNAL_TOKEN", "")
+    secret = os.getenv("AGENT_RUNTIME_ACCESS_TOKEN_SECRET") or os.getenv(
+        "AGENT_RUNTIME_INTERNAL_TOKEN", ""
+    )
     if not secret:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="runtime access secret is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="runtime access secret is not configured",
+        )
     parts = token.split(".")
     if len(parts) != 2:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token"
+        )
     try:
         payload_bytes = base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4))
         signature = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
         payload = json.loads(payload_bytes)
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token") from exc
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token"
+        ) from exc
     expected = hmac.new(secret.encode(), parts[0].encode(), hashlib.sha256).digest()
     if not hmac.compare_digest(signature, expected):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token"
+        )
     if int(payload.get("exp", 0)) < int(time.time()):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="runtime token expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="runtime token expired"
+        )
     thread_id = str(payload.get("thread_id") or "")
-    if request_path.startswith("threads/") and thread_id and not request_path.startswith(f"threads/{thread_id}/"):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="runtime token thread mismatch")
+    if (
+        request_path.startswith("threads/")
+        and thread_id
+        and not request_path.startswith(f"threads/{thread_id}/")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="runtime token thread mismatch"
+        )
     return payload
 
 
@@ -384,7 +453,9 @@ async def resume_runtime_monitors() -> None:
 )
 async def start_run(req: StartRunRequest, background_tasks: BackgroundTasks) -> RuntimeRunResponse:
     record = await runtime_adapter.start_run(req)
-    background_tasks.add_task(runtime_adapter.monitor_and_finalize, record.run_id, req.agent_runtime_run_id)
+    background_tasks.add_task(
+        runtime_adapter.monitor_and_finalize, record.run_id, req.agent_runtime_run_id
+    )
     return _runtime_response(record)
 
 
@@ -428,9 +499,13 @@ async def resume_run(run_id: str, req: ResumeRunRequest) -> RuntimeRunResponse:
     "/lg/{path:path}",
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 )
-async def proxy_langgraph(path: str, request: Request, authorization: str | None = Header(default=None)) -> StreamingResponse:
+async def proxy_langgraph(
+    path: str, request: Request, authorization: str | None = Header(default=None)
+) -> StreamingResponse:
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing runtime token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="missing runtime token"
+        )
     _verify_runtime_access_token(authorization.removeprefix("Bearer ").strip(), path)
 
     body = await request.body()
@@ -451,7 +526,8 @@ async def proxy_langgraph(path: str, request: Request, authorization: str | None
     response_headers = {
         key: value
         for key, value in upstream.headers.items()
-        if key.lower() not in {"content-encoding", "content-length", "transfer-encoding", "connection"}
+        if key.lower()
+        not in {"content-encoding", "content-length", "transfer-encoding", "connection"}
     }
 
     async def iter_upstream():
@@ -475,7 +551,9 @@ async def _notify_backend_finalizer(runtime_run_id: str, successful: bool, summa
     backend_url = cfg.backend_internal_url
     token = cfg.internal_token
     if not backend_url or not token:
-        raise RuntimeError("WEMOB_BACKEND_INTERNAL_URL and AGENT_RUNTIME_INTERNAL_TOKEN are required")
+        raise RuntimeError(
+            "WEMOB_BACKEND_INTERNAL_URL and AGENT_RUNTIME_INTERNAL_TOKEN are required"
+        )
     last_error: Exception | None = None
     for attempt in range(5):
         try:

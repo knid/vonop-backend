@@ -26,7 +26,7 @@ dependencies = [
   "psycopg[binary,pool]>=3.2",
   "asyncpg>=0.29",
   "daytona>=0.18",
-  "langchain-daytona>=0.1.0"
+  "langchain-daytona>=0.0.7,<0.1.0"
 ]
 
 [project.optional-dependencies]
