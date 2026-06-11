@@ -19,8 +19,10 @@ def _load_supervisor_prompt() -> str:
 def _context_from_config(config: Any) -> WemobContext | None:
     if not isinstance(config, dict):
         return None
-    configurable = config.get("configurable") or {}
-    raw = configurable.get("wemob_context") or configurable.get("context")
+    raw = config.get("context")
+    if raw is None:
+        configurable = config.get("configurable") or {}
+        raw = configurable.get("wemob_context") or configurable.get("context")
     if isinstance(raw, WemobContext):
         return raw
     if isinstance(raw, dict):
