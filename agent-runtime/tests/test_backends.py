@@ -24,6 +24,7 @@ def make_context(root: Path) -> WemobContext:
         workspace_root=str(root / "workspace"),
         memory_root=str(root / "memories"),
         skills_root=str(root / "skills"),
+        artifacts_root=str(root / "artifacts"),
     )
 
 
@@ -62,11 +63,22 @@ class BackendTests(unittest.TestCase):
 
             self.assertIn("write_workspace_file", tools)
             self.assertIn("update_project_memory", tools)
+            self.assertIn("get_project_context", tools)
+            self.assertIn("create_artifact", tools)
 
             tools["write_workspace_file"]("index.tsx", "hello\n")
             self.assertEqual(
                 (Path(context.workspace_root) / "index.tsx").read_text(encoding="utf-8"),
                 "hello\n",
+            )
+            project_context = tools["get_project_context"]()
+            self.assertEqual(project_context["project_id"], "project-1")
+
+            artifact = tools["create_artifact"]("reports/summary.txt", "summary\n", "text/plain")
+            self.assertTrue(artifact["path"].endswith("artifacts/reports/summary.txt"))
+            self.assertEqual(
+                (Path(context.artifacts_root) / "reports/summary.txt").read_text(encoding="utf-8"),
+                "summary\n",
             )
 
             subagents = build_subagents(context)

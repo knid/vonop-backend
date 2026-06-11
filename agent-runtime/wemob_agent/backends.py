@@ -99,10 +99,30 @@ class StoreBackendMemory:
 
 
 @dataclass(frozen=True)
+class ArtifactBackend:
+    artifacts_root: Path
+
+    def create_text_artifact(self, name: str, content: str, content_type: str = "text/plain") -> dict[str, str]:
+        relative = Path(name)
+        if relative.is_absolute():
+            raise BackendPermissionError("artifact names must be relative")
+        path = (self.artifacts_root / relative).resolve()
+        _assert_under_root(path, self.artifacts_root.resolve(), "artifacts")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return {
+            "name": relative.as_posix(),
+            "path": str(path),
+            "content_type": content_type,
+        }
+
+
+@dataclass(frozen=True)
 class CompositeBackend:
     state: StateBackend
     workspace: WorkspaceBackend
     store: StoreBackendMemory
+    artifacts: ArtifactBackend
 
 
 def build_backend(context: WemobContext | None) -> CompositeBackend:
@@ -110,14 +130,17 @@ def build_backend(context: WemobContext | None) -> CompositeBackend:
         workspace_root = Path("/workspace")
         memory_root = Path("/memories")
         skills_root = Path("/skills")
+        artifacts_root = Path("/artifacts")
     else:
         workspace_root = Path(context.workspace_root)
         memory_root = Path(context.memory_root)
         skills_root = Path(context.skills_root)
+        artifacts_root = Path(context.artifacts_root)
     return CompositeBackend(
         state=StateBackend(),
         workspace=WorkspaceBackend(workspace_root=workspace_root, skills_root=skills_root),
         store=StoreBackendMemory(memory_root=memory_root),
+        artifacts=ArtifactBackend(artifacts_root=artifacts_root),
     )
 
 

@@ -38,6 +38,58 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
 
         return backend.store.update_project_memory(key, content)
 
+    def get_project_context() -> dict[str, Any]:
+        """Return scoped Wemob project context for this run."""
+
+        if context is None:
+            raise ValueError("get_project_context requires WemobContext")
+        return {
+            "user_id": context.user_id,
+            "org_id": context.org_id,
+            "project_id": context.project_id,
+            "job_id": context.job_id,
+            "thread_id": context.thread_id,
+            "mode": context.mode,
+            "project_type": context.project_type,
+            "frontend_runtime": context.frontend_runtime,
+            "base_commit": context.base_commit,
+            "plan_name": context.plan_name,
+            "workspace_root": context.workspace_root,
+            "memory_root": context.memory_root,
+            "artifacts_root": context.artifacts_root,
+        }
+
+    def list_project_assets() -> dict[str, Any]:
+        """List product assets available to this project."""
+
+        if context is None:
+            raise ValueError("list_project_assets requires WemobContext")
+        return {
+            "assets": [],
+            "project_id": context.project_id,
+            "integration_required": "backend asset listing endpoint",
+        }
+
+    def generate_image(prompt: str, width: int = 1024, height: int = 1024, style: str = "") -> dict[str, Any]:
+        """Request image generation for the current project."""
+
+        if context is None:
+            raise ValueError("generate_image requires WemobContext")
+        return {
+            "status": "needs_backend_endpoint",
+            "project_id": context.project_id,
+            "prompt": prompt,
+            "width": width,
+            "height": height,
+            "style": style,
+            "integration_required": "backend image generation endpoint",
+        }
+
+    def create_artifact(name: str, content: str, content_type: str = "text/plain") -> dict[str, str]:
+        """Create a text artifact outside model context under /artifacts."""
+
+        return backend.artifacts.create_text_artifact(name, content, content_type)
+
     def start_preview_server(
         framework: str,
         command: str,
@@ -73,6 +125,10 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
         _named_tool(write_workspace_file, "write_workspace_file"),
         _named_tool(list_workspace_files, "list_workspace_files"),
         _named_tool(update_project_memory, "update_project_memory"),
+        _named_tool(get_project_context, "get_project_context"),
+        _named_tool(list_project_assets, "list_project_assets"),
+        _named_tool(generate_image, "generate_image"),
+        _named_tool(create_artifact, "create_artifact"),
         _named_tool(start_preview_server, "start_preview_server"),
     ]
 
