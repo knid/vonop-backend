@@ -297,7 +297,15 @@ class LangGraphRuntimeAdapter:
             and not load_config().allow_local_agent_execution
         ):
             sandbox = connect_runtime_sandbox(record.sandbox_id)
-            sandbox.provider.download_tree("/workspace", Path(record.host_worktree_path))
+            sandbox.provider.download_tree(
+                str(
+                    record.context.get(
+                        "daytona_workspace_root",
+                        load_config().daytona_workspace_root,
+                    )
+                ),
+                Path(record.host_worktree_path),
+            )
         await _notify_backend_finalizer(
             record.runtime_run_id, successful=successful, summary=summary
         )
@@ -340,6 +348,7 @@ def _context_from_request(req: StartRunRequest) -> WemobContext:
         credit_budget=req.credit_budget,
         feature_flags=req.feature_flags,
         workspace_root="/workspace",
+        daytona_workspace_root=runtime_config.daytona_workspace_root,
         host_worktree_path=req.worktree_path,
         memory_root=os.getenv("WEMOB_AGENT_MEMORY_ROOT", "/memories"),
         skills_root=os.getenv("WEMOB_AGENT_SKILLS_ROOT", "/skills"),

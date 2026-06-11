@@ -51,11 +51,15 @@ def _build_deepagents_backend() -> Any:
         runtime_config = load_config()
         if runtime_config.allow_local_agent_execution:
             workspace_backend: Any = FilesystemBackend(
-                root_dir=_ctx_value(context, "host_worktree_path", _ctx_value(context, "workspace_root", "/workspace")),
+                root_dir=_ctx_value(
+                    context,
+                    "host_worktree_path",
+                    _ctx_value(context, "workspace_root", "/workspace"),
+                ),
                 virtual_mode=True,
             )
         else:
-            from langchain_daytona import DaytonaSandbox
+            from wemob_agent.daytona_backend import DaytonaWorkspaceBackend
 
             if isinstance(context, dict):
                 wemob_context = WemobContext(**context)
@@ -63,8 +67,11 @@ def _build_deepagents_backend() -> Any:
                 wemob_context = context
             else:
                 raise ValueError("WemobContext is required to create a Daytona-backed workspace")
-            workspace_backend = DaytonaSandbox(
-                sandbox=create_runtime_sandbox(wemob_context, runtime_config).sandbox
+            runtime_sandbox = create_runtime_sandbox(wemob_context, runtime_config)
+            workspace_backend = DaytonaWorkspaceBackend(
+                provider=runtime_sandbox.provider,
+                daytona_root=wemob_context.daytona_workspace_root
+                or runtime_config.daytona_workspace_root,
             )
         memory_backend: Any
         artifact_backend: Any

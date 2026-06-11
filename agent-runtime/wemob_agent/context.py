@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-
 AgentMode = Literal["generate", "edit", "fix", "deploy", "research", "maintenance"]
 ProjectType = Literal["app", "ecommerce", "mobile_app_native"]
 
@@ -30,6 +29,7 @@ class WemobContext:
     credit_budget: int = 0
     feature_flags: dict[str, object] = field(default_factory=dict)
     workspace_root: str = "/workspace"
+    daytona_workspace_root: str = "workspace"
     host_worktree_path: str = ""
     sandbox_id: str = ""
     memory_root: str = "/memories"

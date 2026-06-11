@@ -11,9 +11,11 @@ from wemob_agent.daytona import (
     DaytonaSDKProvider,
     DaytonaWorkspaceManager,
     PreviewServerRequest,
+    daytona_workspace_path,
     should_exclude,
     sync_tree,
 )
+from wemob_agent.daytona_backend import DaytonaWorkspaceBackend
 
 
 def make_context(root: Path) -> WemobContext:
@@ -34,7 +36,11 @@ def make_context(root: Path) -> WemobContext:
 class FakeSandbox:
     sandbox_id = "sandbox-1"
 
+    def __init__(self) -> None:
+        self.executions: list[tuple[str, str, int]] = []
+
     def execute(self, command: str, cwd: str, timeout_seconds: int) -> dict[str, Any]:
+        self.executions.append((command, cwd, timeout_seconds))
         return {"exit_code": 0, "command": command, "cwd": cwd, "timeout_seconds": timeout_seconds}
 
     def preview_url(self, port: int, ttl_seconds: int) -> dict[str, str]:
@@ -44,12 +50,17 @@ class FakeSandbox:
 class FakeFilesystem:
     def __init__(self) -> None:
         self.uploads: list[tuple[bytes, str]] = []
+        self.files: dict[str, bytes] = {}
 
     def upload_file(self, src: bytes | str, dst: str, timeout: int = 1800) -> None:
         del timeout
         if isinstance(src, str):
             raise AssertionError("upload_file source should be bytes, not a local path")
         self.uploads.append((src, dst))
+        self.files[dst] = src
+
+    def read_file(self, path: str) -> bytes:
+        return self.files[path]
 
 
 class FakeDaytonaSandbox:
@@ -92,9 +103,27 @@ class DaytonaTests(unittest.TestCase):
 
             sandbox = FakeDaytonaSandbox()
             provider = DaytonaSDKProvider(sandbox, "sandbox-1")
-            provider.upload_tree(source, "/workspace")
+            provider.upload_tree(source, "workspace")
 
-            self.assertEqual(sandbox.fs.uploads, [(b"app\n", "/workspace/src/App.tsx")])
+            self.assertEqual(sandbox.fs.uploads, [(b"app\n", "workspace/src/App.tsx")])
+
+    def test_daytona_workspace_path_maps_deepagents_path_to_daytona_path(self) -> None:
+        self.assertEqual(daytona_workspace_path("/workspace"), "workspace")
+        self.assertEqual(daytona_workspace_path("/workspace/src/App.tsx"), "workspace/src/App.tsx")
+        self.assertEqual(daytona_workspace_path("/src/App.tsx"), "workspace/src/App.tsx")
+        self.assertEqual(daytona_workspace_path("/tmp/edit-buffer"), "/tmp/edit-buffer")
+
+    def test_daytona_workspace_backend_maps_routed_paths_for_uploads_and_downloads(self) -> None:
+        sandbox = FakeDaytonaSandbox()
+        provider = DaytonaSDKProvider(sandbox, "sandbox-1")
+        backend = DaytonaWorkspaceBackend(provider)
+
+        upload = backend.upload_files([("/src/App.tsx", b"app\n")])
+        download = backend.download_files(["/src/App.tsx"])
+
+        self.assertIsNone(upload[0].error)
+        self.assertEqual(sandbox.fs.uploads, [(b"app\n", "workspace/src/App.tsx")])
+        self.assertEqual(download[0].content, b"app\n")
 
     def test_start_preview_server_returns_public_url_without_provider_token(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -106,7 +135,8 @@ class DaytonaTests(unittest.TestCase):
                 daytona_idle_ttl_seconds=3600,
                 daytona_preview_ttl_seconds=600,
             )
-            manager = DaytonaWorkspaceManager(context, sandbox=FakeSandbox(), config=config)
+            sandbox = FakeSandbox()
+            manager = DaytonaWorkspaceManager(context, sandbox=sandbox, config=config)
             result = manager.start_preview_server(
                 PreviewServerRequest(
                     framework="vite",
@@ -119,6 +149,7 @@ class DaytonaTests(unittest.TestCase):
             self.assertEqual(result.provider_preview_url, "https://daytona.example/5173")
             self.assertEqual(result.provider_preview_token, "token-600")
             self.assertNotIn("token-600", result.public_preview_url)
+            self.assertEqual(sandbox.executions[0][1], "workspace")
 
 
 if __name__ == "__main__":
