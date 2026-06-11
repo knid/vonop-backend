@@ -24,9 +24,6 @@ type S3Storage struct {
 }
 
 func NewS3Storage(region, bucket, accessKey, secretKey string) (*S3Storage, error) {
-	if region == "" || bucket == "" || accessKey == "" || secretKey == "" {
-		return nil, fmt.Errorf("s3 storage: region, bucket, access key, and secret key are required")
-	}
 	cfg := aws.Config{
 		Region:      region,
 		Credentials: aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
