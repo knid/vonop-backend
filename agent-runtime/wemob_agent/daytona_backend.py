@@ -28,6 +28,7 @@ class DaytonaWorkspaceBackend(BaseSandbox):
     def __init__(self, provider: DaytonaSDKProvider, daytona_root: str = "workspace") -> None:
         self.provider = provider
         self.daytona_root = normalize_daytona_workspace_root(daytona_root)
+        self._helper_command_depth = 0
 
     @property
     def id(self) -> str:
@@ -42,31 +43,51 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         )
 
     def ls(self, path: str) -> LsResult:
-        result = super().ls(self._remote(path))
+        self._helper_command_depth += 1
+        try:
+            result = super().ls(self._remote(path))
+        finally:
+            self._helper_command_depth -= 1
         if result.entries is not None:
             for entry in result.entries:
                 entry["path"] = self._logical(str(entry.get("path") or ""))
         return result
 
     def read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ReadResult:
-        return super().read(self._remote(file_path), offset=offset, limit=limit)
+        self._helper_command_depth += 1
+        try:
+            return super().read(self._remote(file_path), offset=offset, limit=limit)
+        finally:
+            self._helper_command_depth -= 1
 
     def grep(self, pattern: str, path: str | None = None, glob: str | None = None) -> GrepResult:
-        result = super().grep(pattern, self._remote(path or "/"), glob=glob)
+        self._helper_command_depth += 1
+        try:
+            result = super().grep(pattern, self._remote(path or "/"), glob=glob)
+        finally:
+            self._helper_command_depth -= 1
         if result.matches is not None:
             for match in result.matches:
                 match["path"] = self._logical(str(match.get("path") or ""))
         return result
 
     def glob(self, pattern: str, path: str | None = None) -> GlobResult:
-        result = super().glob(pattern, self._remote(path or "/"))
+        self._helper_command_depth += 1
+        try:
+            result = super().glob(pattern, self._remote(path or "/"))
+        finally:
+            self._helper_command_depth -= 1
         if result.matches is not None:
             for match in result.matches:
                 match["path"] = self._logical(str(match.get("path") or ""))
         return result
 
     def write(self, file_path: str, content: str) -> WriteResult:
-        result = super().write(self._remote(file_path), content)
+        self._helper_command_depth += 1
+        try:
+            result = super().write(self._remote(file_path), content)
+        finally:
+            self._helper_command_depth -= 1
         if result.path is not None:
             result.path = file_path
         return result
@@ -78,7 +99,11 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         new_string: str,
         replace_all: bool = False,
     ) -> EditResult:
-        result = super().edit(self._remote(file_path), old_string, new_string, replace_all)
+        self._helper_command_depth += 1
+        try:
+            result = super().edit(self._remote(file_path), old_string, new_string, replace_all)
+        finally:
+            self._helper_command_depth -= 1
         if result.path is not None:
             result.path = file_path
         return result
@@ -87,7 +112,10 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         responses: list[FileUploadResponse] = []
         for path, content in files:
             try:
-                remote_path = path if path.startswith("/tmp/") else self._remote(path)
+                if path.startswith("/tmp/") or self._is_remote(path):
+                    remote_path = path
+                else:
+                    remote_path = self._remote(path)
                 self.provider.upload_bytes(remote_path, content)
                 responses.append(FileUploadResponse(path=path, error=None))
             except Exception as exc:
@@ -98,7 +126,8 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         responses: list[FileDownloadResponse] = []
         for path in paths:
             try:
-                content = self.provider.read_bytes(self._remote(path))
+                remote_path = path if self._is_remote(path) else self._remote(path)
+                content = self.provider.read_bytes(remote_path)
                 responses.append(FileDownloadResponse(path=path, content=content, error=None))
             except Exception as exc:
                 responses.append(FileDownloadResponse(path=path, content=None, error=str(exc)))
@@ -120,4 +149,11 @@ class DaytonaWorkspaceBackend(BaseSandbox):
         return path if path.startswith("/") else f"/{path}"
 
     def _command_cwd(self) -> str:
-        return "/" if self.daytona_root.startswith("/") else "."
+        if self._helper_command_depth > 0:
+            return "/" if self.daytona_root.startswith("/") else "."
+        return self.daytona_root
+
+    def _is_remote(self, path: str) -> bool:
+        root = self.daytona_root.rstrip("/")
+        normalized = path.rstrip("/")
+        return normalized == root or normalized.startswith(root + "/")
