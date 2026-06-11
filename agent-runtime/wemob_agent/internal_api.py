@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import asyncio
+import base64
+import json
 import os
 import time
 import uuid
@@ -17,8 +20,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from starlette.responses import StreamingResponse
 
 from wemob_agent.config import load_config
 from wemob_agent.context import WemobContext
@@ -139,6 +143,23 @@ class LangGraphRuntimeAdapter:
         self._runs[record.run_id] = record
         return record
 
+    async def monitor_and_finalize(self, run_id: str, runtime_run_id: str) -> None:
+        terminal_success = {"success", "succeeded", "completed"}
+        terminal_failure = {"error", "failed", "cancelled", "canceled", "timeout", "interrupted"}
+        while True:
+            await asyncio.sleep(float(os.getenv("WEMOB_AGENT_RUN_POLL_SECONDS", "5")))
+            try:
+                record = await self.get_run(run_id)
+            except KeyError:
+                return
+            status_value = record.status.lower()
+            if status_value in terminal_success:
+                await _notify_backend_finalizer(runtime_run_id, successful=True, summary="Deep Agents run completed")
+                return
+            if status_value in terminal_failure:
+                await _notify_backend_finalizer(runtime_run_id, successful=False, summary=f"Deep Agents run ended with status {record.status}")
+                return
+
     async def _ensure_thread(self, thread_id: str) -> None:
         try:
             await self._request("POST", "/threads", json={"thread_id": thread_id})
@@ -210,6 +231,30 @@ def _verify_signature(body: bytes, timestamp: str | None, signature: str | None)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid signature")
 
 
+def _verify_runtime_access_token(token: str, request_path: str) -> dict[str, Any]:
+    secret = os.getenv("AGENT_RUNTIME_ACCESS_TOKEN_SECRET") or os.getenv("AGENT_RUNTIME_INTERNAL_TOKEN", "")
+    if not secret:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="runtime access secret is not configured")
+    parts = token.split(".")
+    if len(parts) != 2:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token")
+    try:
+        payload_bytes = base64.urlsafe_b64decode(parts[0] + "=" * (-len(parts[0]) % 4))
+        signature = base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4))
+        payload = json.loads(payload_bytes)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token") from exc
+    expected = hmac.new(secret.encode(), parts[0].encode(), hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid runtime token")
+    if int(payload.get("exp", 0)) < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="runtime token expired")
+    thread_id = str(payload.get("thread_id") or "")
+    if request_path.startswith("threads/") and thread_id and not request_path.startswith(f"threads/{thread_id}/"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="runtime token thread mismatch")
+    return payload
+
+
 async def authorize_internal_request(
     request: Request,
     authorization: str | None = Header(default=None),
@@ -232,8 +277,10 @@ runtime_adapter: LangGraphRuntimeAdapter = LangGraphRuntimeAdapter()
     response_model=RuntimeRunResponse,
     dependencies=[Depends(authorize_internal_request)],
 )
-async def start_run(req: StartRunRequest) -> RuntimeRunResponse:
-    return _runtime_response(await runtime_adapter.start_run(req))
+async def start_run(req: StartRunRequest, background_tasks: BackgroundTasks) -> RuntimeRunResponse:
+    record = await runtime_adapter.start_run(req)
+    background_tasks.add_task(runtime_adapter.monitor_and_finalize, record.run_id, req.agent_runtime_run_id)
+    return _runtime_response(record)
 
 
 @app.get(
@@ -270,3 +317,62 @@ async def resume_run(run_id: str, req: ResumeRunRequest) -> RuntimeRunResponse:
         return _runtime_response(await runtime_adapter.resume_run(run_id, req))
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="run not found") from exc
+
+
+@app.api_route(
+    "/lg/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+)
+async def proxy_langgraph(path: str, request: Request, authorization: str | None = Header(default=None)) -> StreamingResponse:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing runtime token")
+    _verify_runtime_access_token(authorization.removeprefix("Bearer ").strip(), path)
+
+    body = await request.body()
+    headers = {
+        key: value
+        for key, value in request.headers.items()
+        if key.lower() not in {"host", "content-length", "authorization"}
+    }
+    client = httpx.AsyncClient(base_url=runtime_adapter.runtime_api_url, timeout=None)
+    upstream_request = client.build_request(
+        request.method,
+        "/" + path,
+        params=request.query_params,
+        headers=headers,
+        content=body,
+    )
+    upstream = await client.send(upstream_request, stream=True)
+    response_headers = {
+        key: value
+        for key, value in upstream.headers.items()
+        if key.lower() not in {"content-encoding", "content-length", "transfer-encoding", "connection"}
+    }
+
+    async def iter_upstream():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        iter_upstream(),
+        status_code=upstream.status_code,
+        headers=response_headers,
+        media_type=upstream.headers.get("content-type"),
+    )
+
+
+async def _notify_backend_finalizer(runtime_run_id: str, successful: bool, summary: str) -> None:
+    backend_url = os.getenv("WEMOB_BACKEND_INTERNAL_URL", "").rstrip("/")
+    token = os.getenv("AGENT_RUNTIME_INTERNAL_TOKEN", "")
+    if not backend_url or not token:
+        return
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        await client.post(
+            f"{backend_url}/internal/deepagents/runs/{runtime_run_id}/finalize",
+            headers={"X-Internal-Token": token},
+            json={"successful": successful, "summary": summary},
+        )

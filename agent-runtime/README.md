@@ -25,8 +25,10 @@ The container exposes two HTTP surfaces:
   LangGraph API. It does not consume or transform stream events.
 
 Backend configuration should point `AGENT_RUNTIME_URL` at the internal control
-API, for example `http://agent-runtime:2025`. Set `AGENT_RUNTIME_API_URL` to
-the frontend-reachable LangGraph API, for example `https://agents.example.com`.
+API, for example `http://agent-runtime:2025`. Set `AGENT_RUNTIME_STREAM_URL` to
+the frontend-reachable authenticated proxy path, for example
+`https://agents.example.com/lg`. If omitted, the Go client returns
+`AGENT_RUNTIME_URL + /lg`.
 
 ## Local Development
 

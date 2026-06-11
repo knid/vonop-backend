@@ -16,79 +16,98 @@ from wemob_agent.daytona import DaytonaWorkspaceManager, PreviewServerRequest
 
 
 def build_product_tools(context: WemobContext | None = None) -> list[Any]:
-    backend = build_backend(context)
+    def active_context() -> WemobContext | None:
+        if context is not None:
+            return context
+        try:
+            from langgraph.config import get_runtime
+        except Exception:
+            return None
+        try:
+            runtime = get_runtime()
+        except Exception:
+            return None
+        raw = getattr(runtime, "context", None)
+        if isinstance(raw, WemobContext):
+            return raw
+        if isinstance(raw, dict):
+            try:
+                return WemobContext(**raw)
+            except TypeError:
+                return None
+        return raw if isinstance(raw, WemobContext) else None
+
+    def active_backend():
+        return build_backend(active_context())
 
     def read_workspace_file(path: str) -> str:
         """Read a UTF-8 text file from the current project workspace."""
 
-        return backend.workspace.read_text(path)
+        return active_backend().workspace.read_text(path)
 
     def write_workspace_file(path: str, content: str) -> str:
         """Write a UTF-8 text file inside the current project workspace."""
 
-        return backend.workspace.write_text(path, content)
+        return active_backend().workspace.write_text(path, content)
 
     def list_workspace_files() -> list[str]:
         """List files in the current project workspace."""
 
-        return backend.workspace.list_files()
+        return active_backend().workspace.list_files()
 
     def update_project_memory(key: str, content: str) -> str:
         """Write persistent project memory under /memories/project."""
 
-        return backend.store.update_project_memory(key, content)
+        return active_backend().store.update_project_memory(key, content)
 
     def get_project_context() -> dict[str, Any]:
         """Return scoped Wemob project context for this run."""
 
-        if context is None:
+        ctx = active_context()
+        if ctx is None:
             raise ValueError("get_project_context requires WemobContext")
         return {
-            "user_id": context.user_id,
-            "org_id": context.org_id,
-            "project_id": context.project_id,
-            "job_id": context.job_id,
-            "thread_id": context.thread_id,
-            "mode": context.mode,
-            "project_type": context.project_type,
-            "frontend_runtime": context.frontend_runtime,
-            "base_commit": context.base_commit,
-            "plan_name": context.plan_name,
-            "workspace_root": context.workspace_root,
-            "memory_root": context.memory_root,
-            "artifacts_root": context.artifacts_root,
+            "user_id": ctx.user_id,
+            "org_id": ctx.org_id,
+            "project_id": ctx.project_id,
+            "job_id": ctx.job_id,
+            "thread_id": ctx.thread_id,
+            "mode": ctx.mode,
+            "project_type": ctx.project_type,
+            "frontend_runtime": ctx.frontend_runtime,
+            "base_commit": ctx.base_commit,
+            "plan_name": ctx.plan_name,
+            "workspace_root": ctx.workspace_root,
+            "memory_root": ctx.memory_root,
+            "artifacts_root": ctx.artifacts_root,
         }
 
     def list_project_assets() -> dict[str, Any]:
         """List product assets available to this project."""
 
-        if context is None:
+        ctx = active_context()
+        if ctx is None:
             raise ValueError("list_project_assets requires WemobContext")
-        return {
-            "assets": [],
-            "project_id": context.project_id,
-            "integration_required": "backend asset listing endpoint",
-        }
+        raise RuntimeError(
+            "list_project_assets is not wired to a Wemob product API yet; "
+            f"project_id={ctx.project_id}"
+        )
 
     def generate_image(prompt: str, width: int = 1024, height: int = 1024, style: str = "") -> dict[str, Any]:
         """Request image generation for the current project."""
 
-        if context is None:
+        ctx = active_context()
+        if ctx is None:
             raise ValueError("generate_image requires WemobContext")
-        return {
-            "status": "needs_backend_endpoint",
-            "project_id": context.project_id,
-            "prompt": prompt,
-            "width": width,
-            "height": height,
-            "style": style,
-            "integration_required": "backend image generation endpoint",
-        }
+        raise RuntimeError(
+            "generate_image is not wired to a Wemob product API yet; "
+            f"project_id={ctx.project_id}, size={width}x{height}, style={style}, prompt={prompt[:80]}"
+        )
 
     def create_artifact(name: str, content: str, content_type: str = "text/plain") -> dict[str, str]:
         """Create a text artifact outside model context under /artifacts."""
 
-        return backend.artifacts.create_text_artifact(name, content, content_type)
+        return active_backend().artifacts.create_text_artifact(name, content, content_type)
 
     def start_preview_server(
         framework: str,
@@ -99,9 +118,10 @@ def build_product_tools(context: WemobContext | None = None) -> list[Any]:
     ) -> dict[str, Any]:
         """Start a project preview server and return the Wemob public preview URL."""
 
-        if context is None:
+        ctx = active_context()
+        if ctx is None:
             raise ValueError("start_preview_server requires WemobContext")
-        manager = DaytonaWorkspaceManager(context)
+        manager = DaytonaWorkspaceManager(ctx)
         result = manager.start_preview_server(
             PreviewServerRequest(
                 framework=framework,

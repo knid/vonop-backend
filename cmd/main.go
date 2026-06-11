@@ -1532,6 +1532,11 @@ func main() {
 			r.Get("/deploy-pipeline", httpViews.HandleDeployPipelineHealth)
 		})
 
+		r.Route("/internal/deepagents", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(sm.GetSecret("AGENT_RUNTIME_INTERNAL_TOKEN")))
+			r.Post("/runs/{runId}/finalize", httpViews.FinalizeDeepAgentsRunCallback)
+		})
+
 		r.Get("/health", httpViews.Health)
 		r.Get("/sdk/wemob-bridge.js", httpViews.ServeBridgeSDK)
 	})

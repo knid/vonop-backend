@@ -88,6 +88,11 @@ func (c *Controller) FinalizeDeepAgentsRun(
 		if err := c.DB.UpdateProjectGitRepositoryCurrentCommit(ctx, run.AppProjectID, result.FinalCommit, result.RunRef); err != nil {
 			return result, err
 		}
+		if project.Status == "draft" {
+			if err := c.DB.UpdateAppProjectStatus(run.AppProjectID.String(), "ready"); err != nil {
+				return result, err
+			}
+		}
 	}
 	jobStatus := "completed"
 	jobError := ""

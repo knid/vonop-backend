@@ -108,6 +108,8 @@ class DaytonaWorkspaceManager:
     def execute(self, command: str, cwd: str = "/workspace", timeout_seconds: int = 120) -> dict[str, Any]:
         if self.sandbox is not None:
             return self.sandbox.execute(command, cwd, timeout_seconds)
+        if os.getenv("WEMOB_ALLOW_LOCAL_AGENT_EXECUTION", "").lower() not in {"1", "true", "yes"}:
+            raise DaytonaUnavailable("Daytona sandbox is required for agent execution")
         return _local_execute(command, cwd, timeout_seconds)
 
     def start_preview_server(self, request: PreviewServerRequest) -> PreviewServerResult:

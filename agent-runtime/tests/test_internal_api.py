@@ -39,6 +39,9 @@ class InternalAPITests(unittest.TestCase):
             async def resume_run(self, run_id, req):
                 raise KeyError(run_id)
 
+            async def monitor_and_finalize(self, run_id, runtime_run_id):
+                return None
+
         original = internal_api.runtime_adapter
         fake = FakeAdapter()
         internal_api.runtime_adapter = fake

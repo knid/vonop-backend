@@ -164,7 +164,7 @@ func (db *Database) BackfillProjectStatusReady() (int, error) {
 		Model((*models.AppProject)(nil)).
 		Set("status = ?", "ready").
 		Where("status = ?", "draft").
-		Where("id IN (SELECT app_project_id FROM app_agent_runs WHERE status = ?)", "completed").
+		Where("(id IN (SELECT app_project_id FROM app_agent_runs WHERE status = ?) OR id IN (SELECT app_project_id FROM agent_runtime_runs WHERE status = ? AND finalized_to_project = true))", "completed", models.AgentRuntimeRunStatusCompleted).
 		Exec(context.Background())
 	if err != nil {
 		return 0, err

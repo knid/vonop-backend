@@ -447,6 +447,10 @@ func (v *HttpViews) StreamJob(w http.ResponseWriter, r *http.Request) {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
 		return
 	}
+	if job.Type == "generate_app" || job.Type == "app_chat" {
+		utils.JSONError(w, "native_runtime_stream_required", "agent jobs stream through the Deep Agents runtime", http.StatusGone, nil)
+		return
+	}
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {

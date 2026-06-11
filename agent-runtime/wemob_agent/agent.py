@@ -30,6 +30,44 @@ def _context_from_config(config: Any) -> WemobContext | None:
     return None
 
 
+def _ctx_value(context: Any, key: str, default: str) -> str:
+    if context is None:
+        return default
+    if isinstance(context, dict):
+        value = context.get(key)
+    else:
+        value = getattr(context, key, None)
+    return str(value or default)
+
+
+def _build_deepagents_backend() -> Any:
+    """Build the Deep Agents filesystem backend from per-run runtime context."""
+
+    from deepagents.backends import CompositeBackend, FilesystemBackend, StateBackend
+
+    def backend_factory(runtime: Any) -> Any:
+        context = getattr(runtime, "context", None)
+        return CompositeBackend(
+            default=StateBackend(),
+            routes={
+                "/workspace/": FilesystemBackend(
+                    root_dir=_ctx_value(context, "workspace_root", "/workspace"),
+                    virtual_mode=True,
+                ),
+                "/memories/": FilesystemBackend(
+                    root_dir=_ctx_value(context, "memory_root", "/memories"),
+                    virtual_mode=True,
+                ),
+                "/artifacts/": FilesystemBackend(
+                    root_dir=_ctx_value(context, "artifacts_root", "/artifacts"),
+                    virtual_mode=True,
+                ),
+            },
+        )
+
+    return backend_factory
+
+
 def create_agent(config: Any = None) -> Any:
     """Create the Wemob Deep Agent graph.
 
@@ -47,5 +85,6 @@ def create_agent(config: Any = None) -> Any:
         system_prompt=_load_supervisor_prompt(),
         tools=build_product_tools(context),
         subagents=build_subagents(context),
+        backend=_build_deepagents_backend(),
         context_schema=WemobContext,
     )
