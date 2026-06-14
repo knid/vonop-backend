@@ -15,10 +15,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/utils"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // TurnAttachments carries per-turn attachment context into the agent.
@@ -258,6 +261,48 @@ func Run(
 	tracker.TrackContent = true
 	tracker.TraceInput = message
 	ctx = utils.WithTokenTracker(ctx, tracker)
+	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
+	traceAction := "app_chat"
+	if isFirstGen {
+		traceAction = "generate_app"
+	}
+	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput{
+		Name:           traceAction,
+		Action:         traceAction,
+		AppType:        project.ProjectType,
+		Provider:       provider.Name,
+		Model:          model,
+		Reference:      project.ID.String(),
+		UserID:         user.ID.String(),
+		OrgID:          project.OrganizationID.String(),
+		ProjectID:      project.ID.String(),
+		TraceID:        tracker.TraceID,
+		RunID:          tracker.RunID,
+		Input:          tracker.TraceInput,
+		RequiredSkills: requiredSkillIDs,
+		LoadedSkills:   loadedSkillIDs,
+		Environment:    deps.SecretManager.GetEnv(),
+		Tags:           []string{"wemob", "agent", traceAction},
+	})
+	defer func() {
+		if tracker.TraceOutput != "" {
+			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
+		}
+		if tracker.TraceErrorCode != "" || runErr != nil {
+			msg := tracker.TraceErrorMessage
+			if msg == "" && runErr != nil {
+				msg = runErr.Error()
+			}
+			langfuseTrace.SetStatus(codes.Error, msg)
+			langfuseTrace.SetAttributes(
+				attribute.String("langfuse.observation.level", "ERROR"),
+				attribute.String("langfuse.observation.status_message", msg),
+				attribute.String("langfuse.trace.metadata.error_code", tracker.TraceErrorCode),
+				attribute.String("langfuse.trace.metadata.error_message", msg),
+			)
+		}
+		langfuseTrace.End()
+	}()
 
 	// emitCreditsUpdate fires a credits_update event with the running
 	// cumulative billed credits so the frontend can render a live meter
@@ -464,6 +509,19 @@ func Run(
 		if isErr || execErr != nil {
 			status = "error"
 		}
+		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
+		observability.RecordTool(ctx, name, argsJSON, isErr || execErr != nil, durationMs, toolStart,
+			observability.TraceAttributes(observability.TraceAttributeInput{
+				UserID:         tracker.UserID,
+				OrgID:          tracker.OrganizationID,
+				ProjectID:      tracker.ProjectID,
+				TraceID:        tracker.TraceID,
+				RunID:          tracker.RunID,
+				Input:          tracker.TraceInput,
+				RequiredSkills: requiredSkillIDs,
+				LoadedSkills:   loadedSkillIDs,
+				Tags:           []string{"wemob", "tool"},
+			})...)
 		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
 			RunID:      runID,
 			ToolCallID: toolCallID,

@@ -12,6 +12,7 @@ import (
 	"github.com/hibiken/asynq"
 	"github.com/knid/wemob/internal/bootstrap"
 	"github.com/knid/wemob/internal/middleware"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/tasks"
 )
 
@@ -23,6 +24,11 @@ func main() {
 	}
 
 	controller, redisOpts := bootstrap.BootstrapController()
+	shutdownLangfuse, err := observability.InitLangfuse(context.Background())
+	if err != nil {
+		slog.Error("failed to initialize Langfuse OpenTelemetry exporter", "error", err)
+		os.Exit(1)
+	}
 
 	// Concurrency caps total in-flight tasks across queues. 4 leaves
 	// headroom for parallel web/cron tasks (which are IO-bound). The
@@ -160,6 +166,11 @@ func main() {
 		<-sig
 		slog.Info("shutdown signal received, draining workers...")
 		srv.Shutdown()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := shutdownLangfuse(ctx); err != nil {
+			slog.Error("Langfuse OpenTelemetry shutdown error", "error", err)
+		}
 	}()
 
 	if err := srv.Run(mux); err != nil {

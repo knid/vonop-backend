@@ -21,6 +21,7 @@ import (
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/mcpserver"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -442,7 +443,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 
 }
 
-
 // isSensitiveLogPath returns true if a request URL path is known to carry
 // secrets, credentials, or signed third-party payloads that must never land
 // in BetterStack. Used by httplog LogExtraAttrs to skip body capture on
@@ -470,6 +470,11 @@ func isSensitiveLogPath(path string) bool {
 
 func main() {
 	controller, _ := bootstrap.BootstrapController()
+	shutdownLangfuse, err := observability.InitLangfuse(context.Background())
+	if err != nil {
+		slog.Error("failed to initialize Langfuse OpenTelemetry exporter", "error", err)
+		os.Exit(1)
+	}
 
 	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
 	// Failure-soft — log+continue so a missing IAM permission doesn't block startup.
@@ -517,9 +522,7 @@ func main() {
 		slog.Error("seed build annotations failed", "err", err)
 	}
 
-
 	sm := controller.SecretManager
-
 
 	seedPlans(db, sm)
 
@@ -1570,6 +1573,10 @@ func main() {
 		// the queue contains every event from the drain window.
 		if controller.PostHog != nil {
 			controller.PostHog.Close()
+		}
+
+		if err := shutdownLangfuse(ctx); err != nil {
+			slog.Error("Langfuse OpenTelemetry shutdown error", "error", err)
 		}
 
 		// Close database connection pool
