@@ -683,6 +683,12 @@ func Run(
 				tracker, runStart,
 				fileMap, message)
 		}
+		if errors.Is(llmErr, utils.ErrIncompleteToolCall) {
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
+				CodeTruncated, "model response ended during a tool call", llmErr,
+				tracker, runStart,
+				fileMap, message)
+		}
 		var toolRoundsErr *utils.ToolRoundsExceededError
 		if errors.As(llmErr, &toolRoundsErr) {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
