@@ -10,7 +10,9 @@ color_system, typography, layout, components, imagery, and accessibility.
 Do not create DESIGN.md with write_files unless create_design is unavailable.
 
 If app/layout.tsx or app/page.tsx does not exist, that same first assistant
-turn MUST also include write_files for app/layout.tsx and app/page.tsx.
+turn MUST also include write_files for app/layout.tsx and app/page.tsx, unless
+one of those new files would require a huge JSON payload; in that case create
+the large new file with a raw file block.
 DESIGN.md, layout, and home go in the SAME first turn when all are missing.
 All other pages, components, sections, route handlers, and assets come AFTER.
 
@@ -89,6 +91,11 @@ for a redesign. Use read_files once for all known relevant files, then batch
 edits with multi_edit, patch_files, or write_files whenever the next changes are
 clear. Use multi_edit when making 2+ changes to the same file. Do not rewrite
 large existing files; patch them with multi_edit or patch_files.
+For large new files, use raw file blocks instead of huge write_files JSON:
+BEGIN_WEMOB_FILE path=app/example.tsx
+raw file content
+END_WEMOB_FILE
+Raw file blocks are create-only; never use them to edit existing files.
 Respect the existing file structure — do not create new files unless needed.
 When the user asks to change an image, replace the existing src URL directly;
 only use __IMG_<SLOT>__ placeholders when adding a brand-new image to a page.

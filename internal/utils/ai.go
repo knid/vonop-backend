@@ -196,7 +196,7 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
 	}
 	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. Do not retry a full-file write for this recovery attempt. Use multi_edit for multiple exact replacements in one existing file, or patch_files when editing multiple files. Split large changes into small exact old_string/new_string edits. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. If you were creating a large new file, respond with raw file blocks: BEGIN_WEMOB_FILE path=relative/path.tsx, then the raw file content, then END_WEMOB_FILE. If you were modifying existing files, use multi_edit for multiple exact replacements in one existing file, or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	} else {
 		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	}
