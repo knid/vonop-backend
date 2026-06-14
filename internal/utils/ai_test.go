@@ -1,7 +1,11 @@
 package utils
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -79,6 +83,52 @@ func TestStreamDeltaGetReasoningFallsBackToReasoning(t *testing.T) {
 	d := StreamDelta{Reasoning: "openrouter"}
 	if got := d.GetReasoning(); got != "openrouter" {
 		t.Fatalf("GetReasoning() = %q, want openrouter", got)
+	}
+}
+
+func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Now I'll rewrite the page."}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_files","arguments":"{\"files\": "}}]}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	executed := false
+	got, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		[]Message{{Role: "user", Content: "rewrite the page"}},
+		[]Tool{{Type: "function", Function: ToolFunction{Name: "write_files"}}},
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		func(name, arguments string) (string, error) {
+			executed = true
+			return "unexpected", nil
+		},
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{MaxRounds: 1},
+	)
+
+	if err == nil {
+		t.Fatalf("StreamWithTools returned nil error with incomplete tool call; got response %q", got)
+	}
+	if !errors.Is(err, ErrIncompleteToolCall) {
+		t.Fatalf("error = %v, want ErrIncompleteToolCall", err)
+	}
+	if executed {
+		t.Fatal("executor should not run for incomplete tool call arguments")
 	}
 }
 

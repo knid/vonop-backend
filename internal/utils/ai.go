@@ -37,6 +37,10 @@ const maxBase64ImageBytes = 8 * 1024 * 1024 // 8 MiB raw (base64 will be ~33% la
 // error to decide whether recovery (e.g. continuation) is needed.
 var ErrResponseTruncated = errors.New("LLM response truncated (output token limit reached)")
 
+// ErrIncompleteToolCall is returned when a streaming response starts emitting
+// tool calls but ends before the provider marks them as complete.
+var ErrIncompleteToolCall = errors.New("LLM response ended with incomplete tool call")
+
 type ToolRoundsExceededError struct {
 	MaxRounds int
 }
@@ -2262,6 +2266,9 @@ func StreamWithTools(
 
 		if lastFinishReason == "length" {
 			slog.Warn("LLM response truncated (finish_reason=length), no rounds left", "response_length", fullText.Len(), "round", round)
+		}
+		if len(toolCallsMap) > 0 {
+			return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
 		}
 
 		return fullText.String(), nil
