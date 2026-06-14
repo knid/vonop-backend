@@ -104,6 +104,30 @@ func TestWriteFilesTool_AllowsIntentionalRewriteOfExistingFile(t *testing.T) {
 	}
 }
 
+func TestWriteFilesTool_RejectsLargeExistingFileRewriteEvenWithOverwrite(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	original := strings.Repeat("a", 31*1024)
+	rc.FileMap.Set("app/panel/linkler/page.tsx", original)
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/panel/linkler/page.tsx","content":"new content","overwrite":true,"reason":"add campaign types"}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected isError=true for large existing-file rewrite; out=%s", out)
+	}
+	if !strings.Contains(out, "existing file is too large for full rewrite") {
+		t.Fatalf("expected large-file rewrite guidance; got: %s", out)
+	}
+	if !strings.Contains(out, "multi_edit") || !strings.Contains(out, "patch_files") {
+		t.Fatalf("expected edit-tool guidance; got: %s", out)
+	}
+	if got, _ := rc.FileMap.Get("app/panel/linkler/page.tsx"); got != original {
+		t.Fatal("large existing file was mutated despite rewrite rejection")
+	}
+}
+
 func TestWriteFilesTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 

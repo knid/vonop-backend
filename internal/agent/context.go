@@ -20,11 +20,12 @@ already known:
   If grep already identified all relevant files, read them together before
   deciding edits.
 - create_design for DESIGN.md before broad first-generation UI work.
-- write_files for one or more full-file writes in ONE call. Use it only when a
-  full rewrite is actually needed.
+- write_files for one or more new files or small full-file writes in ONE call.
+  Do not use it to rewrite large existing files; patch them instead.
 - patch_files for exact-string edits across 2+ existing files in ONE call.
 - multi_edit for 2+ changes to the SAME file. When the needed changes are clear,
-  batch them instead of editing one occurrence per round.
+  batch them instead of editing one occurrence per round. Prefer this for large
+  existing files.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier
