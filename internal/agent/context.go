@@ -22,12 +22,8 @@ already known:
 - create_design for DESIGN.md before broad first-generation UI work.
 - write_files for one or more new files or small full-file writes in ONE call.
   Do not use it to rewrite large existing files; patch them instead.
-- Raw file blocks for creating large new files when write_files would require
-  a very large JSON payload:
-  BEGIN_WEMOB_FILE path=app/example.tsx
-  raw file content
-  END_WEMOB_FILE
-  Use raw blocks only for new files, not existing-file edits.
+- For large new files, use smaller structured write_files calls instead of one
+  very large JSON payload.
 - patch_files for exact-string edits across 2+ existing files in ONE call.
 - multi_edit for 2+ changes to the SAME file. When the needed changes are clear,
   batch them instead of editing one occurrence per round. Prefer this for large

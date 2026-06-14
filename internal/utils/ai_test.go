@@ -215,6 +215,9 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
 		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
 	}
+	if strings.Contains(recoveryRequestBody, "BEGIN_WEMOB_FILE") || strings.Contains(recoveryRequestBody, "END_WEMOB_FILE") {
+		t.Fatalf("recovery request referenced removed raw file block protocol: %s", recoveryRequestBody)
+	}
 	if !strings.Contains(recoveryRequestBody, "multi_edit") || !strings.Contains(recoveryRequestBody, "patch_files") {
 		t.Fatalf("recovery request did not steer toward edit tools: %s", recoveryRequestBody)
 	}
@@ -223,6 +226,65 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	}
 	if !strings.Contains(executedArgs, "app/page.tsx") {
 		t.Fatalf("executor args = %s, want recovered edit payload", executedArgs)
+	}
+}
+
+func TestStreamWithToolsCompactsBeforeMaxMessageTrim(t *testing.T) {
+	var compactSawMessages int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Done."}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	messages := []Message{
+		{Role: "system", Content: "base"},
+		{Role: "user", Content: "old user 1"},
+		{Role: "assistant", Content: "old assistant 1"},
+		{Role: "user", Content: "old user 2"},
+		{Role: "assistant", Content: "old assistant 2"},
+		{Role: "user", Content: "CURRENT RUN CONTEXT\n===================\n\nfiles\n\nUSER REQUEST\n============\n\nfinish"},
+	}
+
+	_, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		messages,
+		nil,
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{
+			MaxRounds:   1,
+			MaxMessages: 3,
+			CompactHistory: func(messages []Message) ([]Message, bool) {
+				compactSawMessages = len(messages)
+				return []Message{
+					messages[0],
+					{Role: "user", Content: "COMPACT MEMORY"},
+					messages[len(messages)-1],
+				}, true
+			},
+		},
+	)
+
+	if err != nil {
+		t.Fatalf("StreamWithTools returned error: %v", err)
+	}
+	if compactSawMessages != len(messages) {
+		t.Fatalf("CompactHistory saw %d messages, want untrimmed %d", compactSawMessages, len(messages))
 	}
 }
 
