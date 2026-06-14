@@ -377,7 +377,8 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 // ---------- shared full-file writes ----------
 
 const (
-	maxWriteBytes = 200 * 1024 // 200 KB
+	maxWriteBytes                 = 200 * 1024 // 200 KB
+	largeExistingFileRewriteBytes = 30 * 1024
 )
 
 type fileWritePlan struct {
@@ -410,13 +411,15 @@ func planFileWrite(rc *RunContext, rawPath, content string, overwrite bool, reas
 	}
 
 	op := "update"
-	_, exists := rc.FileMap.Get(path)
+	existing, exists := rc.FileMap.Get(path)
 	if !exists {
 		op = "create"
 	} else if !overwrite {
 		return nil, fmt.Sprintf("file already exists: %s — use edit_file/multi_edit for targeted changes, or call write_files again with overwrite=true and a reason if a full rewrite is intentional", path)
 	} else if strings.TrimSpace(reason) == "" {
 		return nil, fmt.Sprintf("overwrite reason is required for existing file: %s", path)
+	} else if len(existing) > largeExistingFileRewriteBytes {
+		return nil, fmt.Sprintf("existing file is too large for full rewrite: %s is %d bytes (limit %d). Use multi_edit for multiple exact replacements in this file, or patch_files when editing multiple files", path, len(existing), largeExistingFileRewriteBytes)
 	}
 
 	return &fileWritePlan{
@@ -476,7 +479,7 @@ type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason."
+	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for multiple exact replacements in one large file, or patch_files across files."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -491,8 +494,8 @@ func (WriteFilesTool) Schema() map[string]any {
 						"path":        map[string]any{"type": "string"},
 						"content":     map[string]any{"type": "string"},
 						"description": map[string]any{"type": "string"},
-						"overwrite":   map[string]any{"type": "boolean"},
-						"reason":      map[string]any{"type": "string"},
+						"overwrite":   map[string]any{"type": "boolean", "description": "Required to replace an existing small file. Large existing files cannot be overwritten with write_files."},
+						"reason":      map[string]any{"type": "string", "description": "Required when overwrite=true. For existing files larger than 30KB, use multi_edit or patch_files instead."},
 					},
 					"required": []string{"path", "content"},
 				},

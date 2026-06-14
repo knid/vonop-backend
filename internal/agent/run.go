@@ -552,7 +552,7 @@ func Run(
 	toolSchemas := registryToUtilsTools(registry)
 
 	toolRoundCount := 0
-	_, llmErr := utils.StreamWithTools(
+	llmText, llmErr := utils.StreamWithTools(
 		ctx,
 		model,
 		llmMessages,
@@ -724,6 +724,18 @@ func Run(
 			fileMap, message)
 	}
 
+	rawFileBlockWrites := 0
+	if !contextPacket.ReadOnly {
+		var rawErr error
+		rawFileBlockWrites, rawErr = applyRawFileBlocks(rc, llmText)
+		if rawErr != nil {
+			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "raw_file_blocks",
+				CodeValidationFailed, rawErr.Error(), rawErr,
+				tracker, runStart,
+				fileMap, message)
+		}
+	}
+
 	if !contextPacket.ReadOnly {
 		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
 			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
@@ -743,6 +755,13 @@ func Run(
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
 	partsMu.Lock()
+	if rawFileBlockWrites > 0 {
+		for i := range parts {
+			if parts[i].Type == "text" {
+				parts[i].Text = stripRawFileBlocksFromText(parts[i].Text, rawFileBlockWrites)
+			}
+		}
+	}
 	finalParts := append([]models.ChatMessagePart(nil), parts...)
 	finalToolCalls := totalToolCalls
 	partsMu.Unlock()

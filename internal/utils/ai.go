@@ -195,8 +195,35 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 		}
 		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
 	}
-	sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
+		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. If you were creating a large new file, respond with raw file blocks: BEGIN_WEMOB_FILE path=relative/path.tsx, then the raw file content, then END_WEMOB_FILE. If you were modifying existing files, use multi_edit for multiple exact replacements in one existing file, or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+	} else {
+		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+	}
 	return sb.String()
+}
+
+func incompleteToolCallsInclude(toolCallsMap map[int]*ToolCall, toolName string) bool {
+	for _, tc := range toolCallsMap {
+		if tc != nil && tc.Function != nil && tc.Function.Name == toolName {
+			return true
+		}
+	}
+	return false
+}
+
+func filterToolsByDeniedNames(tools []Tool, denied map[string]bool) []Tool {
+	if len(denied) == 0 {
+		return tools
+	}
+	filtered := make([]Tool, 0, len(tools))
+	for _, t := range tools {
+		if denied[t.Function.Name] {
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	return filtered
 }
 
 // truncateBody truncates a string to maxLen characters for safe logging.
@@ -1438,6 +1465,7 @@ func StreamWithTools(
 	var toolRoundHistory []toolRoundTrimState
 	continuationCount := 0
 	incompleteToolCallRetries := 0
+	var recoveryToolDenylist map[string]bool
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
 
 	for round := 0; round < maxRounds; round++ {
@@ -1466,6 +1494,9 @@ func StreamWithTools(
 		roundTools := tools
 		if len(opts) > 0 && opts[0].FilterTools != nil {
 			roundTools = opts[0].FilterTools(roundTools)
+		}
+		if len(recoveryToolDenylist) > 0 {
+			roundTools = filterToolsByDeniedNames(roundTools, recoveryToolDenylist)
 		}
 		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
 			if !stripped {
@@ -1710,6 +1741,7 @@ func StreamWithTools(
 		}
 		rateLimitRetries = 0 // reset after successful request
 		transientRetries = 0
+		recoveryToolDenylist = nil
 
 		fullText.Reset()
 		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
@@ -2270,6 +2302,9 @@ func StreamWithTools(
 		if len(toolCallsMap) > 0 {
 			if incompleteToolCallRetries < incompleteToolCallRecoveryRetries {
 				incompleteToolCallRetries++
+				if incompleteToolCallsInclude(toolCallsMap, "write_files") {
+					recoveryToolDenylist = map[string]bool{"write_files": true}
+				}
 				if text := strings.TrimSpace(fullText.String()); text != "" {
 					currentMessages = append(currentMessages, Message{
 						Role:    "assistant",

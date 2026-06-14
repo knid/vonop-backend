@@ -137,11 +137,15 @@ func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	var requests int
 	var sawRecoveryPrompt bool
+	var recoveryRequestBody string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		body, _ := io.ReadAll(r.Body)
 		if strings.Contains(string(body), "previous response started a tool call") {
 			sawRecoveryPrompt = true
+			if recoveryRequestBody == "" {
+				recoveryRequestBody = string(body)
+			}
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -153,7 +157,7 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 			return
 		}
 		if requests == 2 {
-			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"write_files","arguments":"{\"files\":[{\"path\":\"app/page.tsx\",\"content\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"multi_edit","arguments":"{\"path\":\"app/page.tsx\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
 			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
 			fmt.Fprintln(w, "data: [DONE]")
 			return
@@ -175,13 +179,20 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 		context.Background(),
 		"test-model",
 		[]Message{{Role: "user", Content: "rewrite the page"}},
-		[]Tool{{Type: "function", Function: ToolFunction{Name: "write_files"}}},
+		[]Tool{
+			{Type: "function", Function: ToolFunction{Name: "write_files"}},
+			{Type: "function", Function: ToolFunction{Name: "multi_edit"}},
+			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
+		},
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
 		func(name, arguments string) (string, error) {
+			if name != "multi_edit" {
+				t.Fatalf("executor tool = %s, want multi_edit after write_files recovery", name)
+			}
 			executedArgs = arguments
-			return "wrote app/page.tsx", nil
+			return "edited app/page.tsx", nil
 		},
 		nil,
 		nil,
@@ -201,11 +212,17 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	if !sawRecoveryPrompt {
 		t.Fatal("second request did not include recovery prompt")
 	}
+	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
+		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
+	}
+	if !strings.Contains(recoveryRequestBody, "multi_edit") || !strings.Contains(recoveryRequestBody, "patch_files") {
+		t.Fatalf("recovery request did not steer toward edit tools: %s", recoveryRequestBody)
+	}
 	if !json.Valid([]byte(executedArgs)) {
 		t.Fatalf("executor received invalid JSON args: %s", executedArgs)
 	}
 	if !strings.Contains(executedArgs, "app/page.tsx") {
-		t.Fatalf("executor args = %s, want recovered write_files payload", executedArgs)
+		t.Fatalf("executor args = %s, want recovered edit payload", executedArgs)
 	}
 }
 
