@@ -16,6 +16,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/knid/wemob/internal/observability"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // toolExecTimeout is the maximum time a single tool execution may take.
@@ -553,6 +556,80 @@ func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 		return usage.Cost, "upstream"
 	}
 	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens), "catalog_estimate"
+}
+
+func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, toolNames []string) {
+	cost, costSource := resolveCostUSD(model, usage)
+	_, span := observability.StartGeneration(ctx, spanName, observability.GenerationAttributeInput{
+		Model:                    model,
+		PromptTokens:             usage.PromptTokens,
+		CompletionTokens:         usage.CompletionTokens,
+		TotalTokens:              usage.TotalTokens,
+		CacheCreationInputTokens: usage.CacheCreationInputTokens,
+		CacheReadInputTokens:     usage.CacheReadInputTokens,
+		LatencyMs:                latencyMs,
+		IsStreaming:              streaming,
+		SpanName:                 spanName,
+		CostUSD:                  cost,
+		CostSource:               costSource,
+		InputMessages:            messageSnapshots(inputMessages),
+		OutputText:               outputText,
+		ToolNames:                toolNames,
+	}, round, startedAt)
+	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+		required, loaded := tracker.AgentSkills()
+		span.SetAttributes(observability.TraceAttributes(observability.TraceAttributeInput{
+			UserID:         tracker.UserID,
+			OrgID:          tracker.OrganizationID,
+			ProjectID:      tracker.ProjectID,
+			TraceID:        tracker.TraceID,
+			RunID:          tracker.RunID,
+			Input:          tracker.TraceInput,
+			Output:         tracker.TraceOutput,
+			RequiredSkills: required,
+			LoadedSkills:   loaded,
+			Tags:           []string{"wemob", "llm"},
+		})...)
+	}
+	endOpts := []trace.SpanEndOption{}
+	if !startedAt.IsZero() {
+		endOpts = append(endOpts, trace.WithTimestamp(startedAt.Add(time.Duration(latencyMs)*time.Millisecond)))
+	}
+	span.End(endOpts...)
+}
+
+func messageSnapshots(messages []Message) []observability.MessageSnapshot {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]observability.MessageSnapshot, 0, len(messages))
+	for _, m := range messages {
+		out = append(out, observability.MessageSnapshot{
+			Role:    m.Role,
+			Content: m.Content,
+			Images:  append([]string(nil), m.Images...),
+		})
+	}
+	return out
+}
+
+func toolCallNamesFromMap(toolCallsMap map[int]*ToolCall) []string {
+	if len(toolCallsMap) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(toolCallsMap))
+	for idx := range toolCallsMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	names := make([]string, 0, len(indices))
+	for _, idx := range indices {
+		tc := toolCallsMap[idx]
+		if tc != nil && tc.Function != nil && tc.Function.Name != "" {
+			names = append(names, tc.Function.Name)
+		}
+	}
+	return names
 }
 
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
@@ -1187,14 +1264,15 @@ func getJSONFromLLMOnce(ctx context.Context, model, system, message string, prov
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs}, trackerAttrs(ctx)...)...)
+		msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
 				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_json")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
 		}
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_json", 1, start, msgs, content, nil)
 	}
 
 	return content, nil
@@ -1299,14 +1377,15 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 
 	if parsed.Usage.TotalTokens > 0 {
 		slog.Info("LLM usage", append([]any{"from", "llm_utils_text", "model", model, "prompt_tokens", parsed.Usage.PromptTokens, "completion_tokens", parsed.Usage.CompletionTokens, "total_tokens", parsed.Usage.TotalTokens, "latency_ms", latencyMs, "finish_reason", finishReason}, trackerAttrs(ctx)...)...)
+		msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
 		if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 			if tracker.TrackContent {
-				msgs := []Message{{Role: "system", Content: system}, {Role: "user", Content: message}}
 				tracker.RecordWithContent(model, parsed.Usage, latencyMs, false, msgs, content, "get_text")
 			} else {
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
 			}
 		}
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_text", 1, start, msgs, content, nil)
 	}
 
 	// Detect truncated responses — the model hit max_tokens before finishing.
@@ -1967,22 +2046,23 @@ func StreamWithTools(
 				"tool_calls", len(toolCallsMap),
 				"history_msgs", len(currentMessages),
 			}, trackerAttrs(ctx)...)...)
+			outputForTracking := fullText.String()
+			if outputForTracking == "" && len(toolCallsMap) > 0 {
+				var toolSummary []string
+				for _, tc := range toolCallsMap {
+					name := ""
+					if tc.Function != nil {
+						name = tc.Function.Name
+					}
+					toolSummary = append(toolSummary, fmt.Sprintf("[tool_call: %s]", name))
+				}
+				outputForTracking = strings.Join(toolSummary, " ")
+			}
+			toolNames := toolCallNamesFromMap(toolCallsMap)
 			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 				if tracker.TrackContent {
 					// When the round produced tool calls instead of text, record a
 					// summary of the tool calls so PostHog $ai_output_choices is not null.
-					outputForTracking := fullText.String()
-					if outputForTracking == "" && len(toolCallsMap) > 0 {
-						var toolSummary []string
-						for _, tc := range toolCallsMap {
-							name := ""
-							if tc.Function != nil {
-								name = tc.Function.Name
-							}
-							toolSummary = append(toolSummary, fmt.Sprintf("[tool_call: %s]", name))
-						}
-						outputForTracking = strings.Join(toolSummary, " ")
-					}
 					tracker.RecordWithContent(model, roundUsage, time.Since(roundStart).Milliseconds(), true, currentMessages, outputForTracking, "stream_with_tools")
 					if len(toolCallsMap) > 0 {
 						indices := make([]int, 0, len(toolCallsMap))
@@ -2012,6 +2092,7 @@ func StreamWithTools(
 					}
 				}
 			}
+			recordLangfuseGeneration(ctx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, toolNames)
 		}
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
