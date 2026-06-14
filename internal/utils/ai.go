@@ -26,6 +26,10 @@ const toolExecTimeout = 2 * time.Minute
 // growth from pathologically large LLM responses.
 const maxResponseBufferSize = 2 * 1024 * 1024 // 2 MB
 
+// incompleteToolCallRecoveryRetries bounds in-run recovery when a provider
+// ends a stream after starting, but not completing, a tool call.
+const incompleteToolCallRecoveryRetries = 1
+
 // maxBase64ImageBytes is the maximum raw image size we will convert to base64
 // before sending to LLM providers (OpenRouter, Moonshot, etc.). Larger images
 // are left as URLs to avoid excessive prompt bloat and request size limits.
@@ -161,6 +165,38 @@ func trimToolRoundsOlderThan(
 		}
 	}
 	return toolRoundHistory[cutoff:]
+}
+
+func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int]*ToolCall, attempt, maxAttempts int) string {
+	indices := make([]int, 0, len(toolCallsMap))
+	for idx := range toolCallsMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	var sb strings.Builder
+	sb.WriteString("The previous response started a tool call but ended before the tool call contained complete valid JSON")
+	if finishReason != "" {
+		fmt.Fprintf(&sb, " (finish_reason=%q)", finishReason)
+	}
+	sb.WriteString(".\n")
+	fmt.Fprintf(&sb, "Recovery attempt %d of %d.\n\n", attempt, maxAttempts)
+	sb.WriteString("Incomplete tool call(s):\n")
+	for _, idx := range indices {
+		tc := toolCallsMap[idx]
+		name := ""
+		args := ""
+		if tc != nil && tc.Function != nil {
+			name = tc.Function.Name
+			args = tc.Function.Arguments
+		}
+		if name == "" {
+			name = "(unknown)"
+		}
+		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
+	}
+	sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+	return sb.String()
 }
 
 // truncateBody truncates a string to maxLen characters for safe logging.
@@ -1401,6 +1437,7 @@ func StreamWithTools(
 	fallbackAttempted := false
 	var toolRoundHistory []toolRoundTrimState
 	continuationCount := 0
+	incompleteToolCallRetries := 0
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
 
 	for round := 0; round < maxRounds; round++ {
@@ -2230,6 +2267,36 @@ func StreamWithTools(
 			consecutiveEmptyResponses = 0
 		}
 
+		if len(toolCallsMap) > 0 {
+			if incompleteToolCallRetries < incompleteToolCallRecoveryRetries {
+				incompleteToolCallRetries++
+				if text := strings.TrimSpace(fullText.String()); text != "" {
+					currentMessages = append(currentMessages, Message{
+						Role:    "assistant",
+						Content: text,
+					})
+				}
+				currentMessages = append(currentMessages, Message{
+					Role: "user",
+					Content: incompleteToolCallRecoveryMessage(
+						lastFinishReason,
+						toolCallsMap,
+						incompleteToolCallRetries,
+						incompleteToolCallRecoveryRetries,
+					),
+				})
+				slog.Warn("LLM response ended during tool call; retrying with recovery prompt",
+					"round", round,
+					"finish_reason", lastFinishReason,
+					"tool_calls", len(toolCallsMap),
+					"retry", incompleteToolCallRetries,
+					"max_retries", incompleteToolCallRecoveryRetries)
+				round-- // retry the same logical round with recovery context
+				continue
+			}
+			return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
+		}
+
 		// Chunks were already streamed in real-time via onChunk above.
 		// No tool calls — return final response
 		if lastFinishReason == "length" && round < maxRounds-1 {
@@ -2266,9 +2333,6 @@ func StreamWithTools(
 
 		if lastFinishReason == "length" {
 			slog.Warn("LLM response truncated (finish_reason=length), no rounds left", "response_length", fullText.Len(), "round", round)
-		}
-		if len(toolCallsMap) > 0 {
-			return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
 		}
 
 		return fullText.String(), nil

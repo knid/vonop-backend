@@ -2,8 +2,10 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -129,6 +131,81 @@ func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 	}
 	if executed {
 		t.Fatal("executor should not run for incomplete tool call arguments")
+	}
+}
+
+func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
+	var requests int
+	var sawRecoveryPrompt bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "previous response started a tool call") {
+			sawRecoveryPrompt = true
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Now I'll rewrite the page."}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_files","arguments":"{\"files\": "}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"error","delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
+		if requests == 2 {
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"write_files","arguments":"{\"files\":[{\"path\":\"app/page.tsx\",\"content\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Done."}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	var executedArgs string
+	got, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		[]Message{{Role: "user", Content: "rewrite the page"}},
+		[]Tool{{Type: "function", Function: ToolFunction{Name: "write_files"}}},
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		func(name, arguments string) (string, error) {
+			executedArgs = arguments
+			return "wrote app/page.tsx", nil
+		},
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{MaxRounds: 2},
+	)
+
+	if err != nil {
+		t.Fatalf("StreamWithTools returned error after recoverable incomplete tool call: %v", err)
+	}
+	if got != "Done." {
+		t.Fatalf("response = %q, want Done.", got)
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
+	}
+	if !sawRecoveryPrompt {
+		t.Fatal("second request did not include recovery prompt")
+	}
+	if !json.Valid([]byte(executedArgs)) {
+		t.Fatalf("executor received invalid JSON args: %s", executedArgs)
+	}
+	if !strings.Contains(executedArgs, "app/page.tsx") {
+		t.Fatalf("executor args = %s, want recovered write_files payload", executedArgs)
 	}
 }
 
