@@ -21,6 +21,23 @@ func TestBuildRegistryFor_ExposesWriteFilesButNotWriteFile(t *testing.T) {
 	}
 }
 
+func TestBuildRegistryFor_ExposesOnlyUnifiedFileEditTool(t *testing.T) {
+	registry := BuildRegistryFor(&models.AppProject{ProjectType: models.ProjectTypeApp}, nil, "")
+
+	names := map[string]bool{}
+	for _, name := range registry.Names() {
+		names[name] = true
+	}
+	if !names["edit_files"] {
+		t.Fatal("expected edit_files to be exposed")
+	}
+	for _, oldName := range []string{"edit_file", "multi_edit", "patch_files"} {
+		if names[oldName] {
+			t.Fatalf("%s must not be exposed; use edit_files for existing-file edits", oldName)
+		}
+	}
+}
+
 func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 	registry := BuildRegistryFor(&models.AppProject{ProjectType: models.ProjectTypeApp}, &RunDependencies{}, "")
 

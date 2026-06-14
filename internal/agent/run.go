@@ -896,7 +896,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 
 // stripToolInputForPreview drops bulky fields from the tool input JSON
 // before stamping it into ToolCallStartEvent.InputPreview. Without this,
-// every write_file/edit_file call shipped the full file body THREE times
+// every write_file/edit_file/edit_files call shipped the full file body THREE times
 // over SSE: once in input_preview, once in file_written.content, and once
 // in the persisted milestone. The dashboard reads file_written.content for
 // optimistic file-tree updates, so input_preview is redundant — and the
@@ -905,7 +905,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 // For non-file tools the original args pass through unchanged.
 func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	switch name {
-	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+	case "write_file", "write_files", "edit_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 			return json.RawMessage("{}")
@@ -1361,7 +1361,7 @@ func countFileOps(calls []models.ChatMessageToolCall) int {
 			continue
 		}
 		switch c.Name {
-		case "write_file", "edit_file", "multi_edit", "delete_file":
+		case "write_file", "write_files", "edit_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 			n++
 		}
 	}

@@ -40,24 +40,25 @@ This rule does NOT apply when:
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until
-every write_files and edit_file for the requested work is complete. Image
+every write_files and edit_files for the requested work is complete. Image
 generation is the final phase of every run, never the first.
 
 When a file needs imagery, write it first using a distinctive placeholder
 token as the image src: "__IMG_<SLOT>__". Each placeholder must appear exactly
-once in the project so a later edit_file can swap it unambiguously.
+once in the project so a later edit_files call can swap it unambiguously.
 
 Once every file is written, enter the image phase:
 1. Call generate_image for each placeholder, passing a detailed prompt,
    width, height, and style.
-2. Immediately follow with edit_file, old_string = the placeholder token
-   (e.g. "__IMG_HERO__"), new_string = the returned URL.
+2. Immediately follow with edit_files using one file entry whose old_string is
+   the placeholder token (e.g. "__IMG_HERO__") and whose new_string is the
+   returned URL.
 3. Repeat for every placeholder.
 
 Never leave a placeholder token in the final code. Never call generate_image
 before the file that will use it has been written. For chat edits that only
-change an existing image, the order is still: edit_file to insert a new
-placeholder, then generate_image, then edit_file to swap in the URL.
+change an existing image, the order is still: edit_files to insert a new
+placeholder, then generate_image, then edit_files to swap in the URL.
 
 When you are finished, simply stop calling tools and output a brief wrap-up
 sentence. Do not say "done", your final narration is the signal.
@@ -87,10 +88,12 @@ const BasePromptWebChat = `# EDITING DISCIPLINE
 You are editing an existing project. Make minimal, targeted changes that
 address the user's request. Preserve existing functionality, design patterns,
 and code style. Do not rewrite entire files unless the user explicitly asks
-for a redesign. Use read_files once for all known relevant files, then batch
-edits with multi_edit, patch_files, or write_files whenever the next changes are
-clear. Use multi_edit when making 2+ changes to the same file. Do not rewrite
-large existing files; patch them with multi_edit or patch_files.
+for a redesign. Use read_files once for all known relevant files, then use
+edit_files for existing files and write_files for new files whenever the next
+changes are clear. Put multiple replacements for the same file in one
+edit_files file entry. Do not rewrite large existing files; edit them with
+smaller exact replacements through edit_files.
+The only file content tools are read_files, write_files, and edit_files.
 For large new files, use raw file blocks instead of huge write_files JSON:
 BEGIN_WEMOB_FILE path=app/example.tsx
 raw file content

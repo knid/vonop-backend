@@ -59,7 +59,7 @@ func planRawFileBlockWrite(rc *RunContext, block rawFileBlock, batchID string, b
 		return nil, err
 	}
 	if _, exists := rc.FileMap.Get(path); exists {
-		return nil, fmt.Errorf("raw file block target already exists: %s — use multi_edit or patch_files for existing files", path)
+		return nil, fmt.Errorf("raw file block target already exists: %s — use edit_files for existing files", path)
 	}
 	plan, msg := planFileWrite(rc, path, block.Content, false, "", batchID, batchIndex, batchTotal)
 	if msg != "" {

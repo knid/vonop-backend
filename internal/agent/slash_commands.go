@@ -167,9 +167,9 @@ func SlashCommandSkillIDs(text string) []string {
 // Addendums shared by multiple read-only / planning commands. Kept as
 // constants so the exact wording stays in one place.
 const (
-	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call create_design, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with an explanation only."
-	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call create_design, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with a plan only."
-	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call create_design, write_files, edit_file, multi_edit, patch_files, or delete_file on this turn. Respond with an audit report only."
+	addendumReadOnly  = "CURRENT TURN IS READ-ONLY. You MUST NOT call create_design, write_files, edit_files, or delete_file on this turn. Respond with an explanation only."
+	addendumPlanOnly  = "CURRENT TURN IS PLANNING ONLY. You MUST NOT call create_design, write_files, edit_files, or delete_file on this turn. Respond with a plan only."
+	addendumAuditOnly = "CURRENT TURN IS READ-ONLY. You MUST NOT call create_design, write_files, edit_files, or delete_file on this turn. Respond with an audit report only."
 )
 
 func init() {

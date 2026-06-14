@@ -102,14 +102,14 @@ func TestWriteFilesTool_NonMobileProjectsCanWriteAnywhere(t *testing.T) {
 	}
 }
 
-func TestEditFileTool_AppliesPathScope(t *testing.T) {
-	// The EditFileTool requires the file to already exist — pre-seed via the FileMap.
+func TestEditFilesTool_AppliesPathScope(t *testing.T) {
+	// The EditFilesTool requires the file to already exist — pre-seed via the FileMap.
 	rc := newPathScopeTestRC(models.ProjectTypeMobileAppNative)
 	rc.FileMap.Set("package.json", `{"name":"x"}`)
 
-	tool := EditFileTool{}
+	tool := EditFilesTool{}
 	out, isError, err := tool.Execute(context.Background(), rc,
-		json.RawMessage(`{"path":"package.json","old_string":"x","new_string":"y"}`))
+		json.RawMessage(`{"files":[{"path":"package.json","edits":[{"old_string":"x","new_string":"y"}]}]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

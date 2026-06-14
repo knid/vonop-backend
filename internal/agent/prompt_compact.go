@@ -44,15 +44,16 @@ file paths or component names. Keep narration short and act with tools.
 ## Tool Protocol
 Work by calling tools. Read before editing. Use grep first to locate relevant
 symbols, then read_files in batches. Read all known relevant files in one
-read_files call, and batch known edits with multi_edit, patch_files, or
-write_files instead of spending one round per file or per small edit. Put all
-code in write/edit tools, except create large new files with raw file blocks
-when write_files would require a huge JSON payload:
+read_files call. Use edit_files for existing files and write_files for new
+files instead of spending one round per file or per small edit. Put all code in
+write/edit tools, except create large new files with raw file blocks when
+write_files would require a huge JSON payload:
 BEGIN_WEMOB_FILE path=app/example.tsx
 raw file content
 END_WEMOB_FILE
-Raw file blocks are create-only; edit existing files with multi_edit or
-patch_files. Use update_todos only for genuinely multi-step work.
+Raw file blocks are create-only; edit existing files with edit_files. Use
+update_todos only for genuinely multi-step work.
+The only file content tools are read_files, write_files, and edit_files.
 
 Do not mutate locked/template-managed files unless the active skill or tool
 result explicitly permits it. Do not touch lockfiles.

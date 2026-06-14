@@ -120,7 +120,7 @@ func TestWriteFilesTool_RejectsLargeExistingFileRewriteEvenWithOverwrite(t *test
 	if !strings.Contains(out, "existing file is too large for full rewrite") {
 		t.Fatalf("expected large-file rewrite guidance; got: %s", out)
 	}
-	if !strings.Contains(out, "multi_edit") || !strings.Contains(out, "patch_files") {
+	if !strings.Contains(out, "edit_files") {
 		t.Fatalf("expected edit-tool guidance; got: %s", out)
 	}
 	if got, _ := rc.FileMap.Get("app/panel/linkler/page.tsx"); got != original {
@@ -145,6 +145,74 @@ func TestWriteFilesTool_AllowsCreationOfNewFileAtAnySize(t *testing.T) {
 	}
 	if isError {
 		t.Error("expected isError=false: new file creation should succeed regardless of size")
+	}
+}
+
+func TestEditFilesTool_AppliesBatchedEditsAcrossFiles(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "export default function Page() { return <h1>Old</h1> }\n")
+	rc.FileMap.Set("app/layout.tsx", "export const metadata = { title: 'Old' }\n")
+
+	out, isError, err := EditFilesTool{}.Execute(context.Background(), rc, json.RawMessage(`{
+		"files": [
+			{
+				"path": "app/page.tsx",
+				"edits": [
+					{"old_string": "Old", "new_string": "New"},
+					{"old_string": "Page", "new_string": "HomePage"}
+				]
+			},
+			{
+				"path": "app/layout.tsx",
+				"edits": [
+					{"old_string": "'Old'", "new_string": "'New'"}
+				]
+			}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected edit_files success; out=%s", out)
+	}
+	page, _ := rc.FileMap.Get("app/page.tsx")
+	if !strings.Contains(page, "HomePage") || !strings.Contains(page, "New") {
+		t.Fatalf("page edits were not applied: %s", page)
+	}
+	layout, _ := rc.FileMap.Get("app/layout.tsx")
+	if !strings.Contains(layout, "'New'") {
+		t.Fatalf("layout edit was not applied: %s", layout)
+	}
+	if !strings.Contains(out, "edited 2 files") {
+		t.Fatalf("expected batch summary; got: %s", out)
+	}
+}
+
+func TestEditFilesTool_IsAtomicWhenAnyEntryFails(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "old page")
+	rc.FileMap.Set("app/layout.tsx", "old layout")
+
+	out, isError, err := EditFilesTool{}.Execute(context.Background(), rc, json.RawMessage(`{
+		"files": [
+			{"path": "app/page.tsx", "edits": [{"old_string": "old page", "new_string": "new page"}]},
+			{"path": "app/layout.tsx", "edits": [{"old_string": "missing", "new_string": "new layout"}]}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected edit_files failure; out=%s", out)
+	}
+	page, _ := rc.FileMap.Get("app/page.tsx")
+	layout, _ := rc.FileMap.Get("app/layout.tsx")
+	if page != "old page" || layout != "old layout" {
+		t.Fatalf("edit_files mutated files despite batch failure: page=%q layout=%q", page, layout)
+	}
+	if !strings.Contains(out, "failed before editing any files") {
+		t.Fatalf("expected atomic failure message; got: %s", out)
 	}
 }
 

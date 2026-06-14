@@ -90,7 +90,7 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 		return
 	}
 	switch name {
-	case "create_design", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+	case "create_design", "write_files", "edit_files", "edit_file", "multi_edit", "patch_files", "delete_file":
 		m.FilesChanged = appendUniqueLimited(m.FilesChanged, paths, 80)
 		if len(paths) > 0 {
 			m.Completed = appendLimited(m.Completed, fmt.Sprintf("%s: %s", name, strings.Join(paths, ", ")), 40)

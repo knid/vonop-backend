@@ -16,22 +16,23 @@ const planningDiscipline = `## Planning Discipline
 Before calling tools, batch independent work into the fewest calls possible. Do
 not spend one model round per file or per small edit when the next actions are
 already known:
+- The only file content tools are read_files, write_files, and edit_files.
 - read_files (plural) for every file you need to inspect — one call, all paths.
   If grep already identified all relevant files, read them together before
   deciding edits.
 - create_design for DESIGN.md before broad first-generation UI work.
 - write_files for one or more new files or small full-file writes in ONE call.
-  Do not use it to rewrite large existing files; patch them instead.
+  Do not use it to rewrite large existing files; edit them instead.
+- edit_files for one or more existing files in ONE call. Each file entry uses
+  exact old_string/new_string replacements. Put 2+ changes to the same file in
+  that file's edits array, and put multi-file changes in the same edit_files
+  call when the changes are known.
 - Raw file blocks for creating large new files when write_files would require
   a very large JSON payload:
   BEGIN_WEMOB_FILE path=app/example.tsx
   raw file content
   END_WEMOB_FILE
   Use raw blocks only for new files, not existing-file edits.
-- patch_files for exact-string edits across 2+ existing files in ONE call.
-- multi_edit for 2+ changes to the SAME file. When the needed changes are clear,
-  batch them instead of editing one occurrence per round. Prefer this for large
-  existing files.
 - execute_sql with multiple semicolon-separated SQL statements in ONE call for
   independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
   execute_sql calls when a later statement depends on the result of an earlier

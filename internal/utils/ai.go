@@ -199,7 +199,9 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
 	}
 	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. If you were creating a large new file, respond with raw file blocks: BEGIN_WEMOB_FILE path=relative/path.tsx, then the raw file content, then END_WEMOB_FILE. If you were modifying existing files, use multi_edit for multiple exact replacements in one existing file, or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. If you were creating a large new file, respond with raw file blocks: BEGIN_WEMOB_FILE path=relative/path.tsx, then the raw file content, then END_WEMOB_FILE. If you were modifying existing files, use edit_files with smaller exact replacements. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+	} else if incompleteToolCallsInclude(toolCallsMap, "edit_files") {
+		sb.WriteString("\nThe incomplete call was edit_files. Re-issue only edit_files with complete valid JSON. Prefer fewer, smaller exact replacements if the previous arguments were large. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	} else {
 		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	}
@@ -1579,7 +1581,7 @@ func StreamWithTools(
 		}
 		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
 			if !stripped {
-				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_file, edit_file, and other action tools to complete your task with the information you have already gathered."
+				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_files, edit_files, and other action tools to complete your task with the information you have already gathered."
 				if len(opts) > 0 && opts[0].StripMessage != "" {
 					stripContent = opts[0].StripMessage
 				}

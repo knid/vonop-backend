@@ -93,7 +93,7 @@ code depends on them. Extend with new nullable columns or new tables.
 Template-managed; import from them, do not overwrite. Read lib/schema/index.ts
 and components/ecommerce/* for the exact shapes you're working with.
 
-- app/layout.tsx, app/globals.css — root shell; edit_file only
+- app/layout.tsx, app/globals.css — root shell; edit_files only
 - lib/db.ts, lib/schema/index.ts — data layer
 - lib/wemob-store.ts (client SDK), lib/wemob-store-server.ts (server reads),
   lib/wemob-store-types.ts, lib/discounts.ts
