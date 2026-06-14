@@ -10,9 +10,9 @@ color_system, typography, layout, components, imagery, and accessibility.
 Do not create DESIGN.md with write_files unless create_design is unavailable.
 
 If app/layout.tsx or app/page.tsx does not exist, that same first assistant
-turn MUST also include write_files for app/layout.tsx and app/page.tsx, unless
-one of those new files would require a huge JSON payload; in that case create
-the large new file with a raw file block.
+turn MUST also include write_files for app/layout.tsx and app/page.tsx. Keep
+tool arguments valid JSON by writing smaller files or splitting large work
+across multiple structured tool calls.
 DESIGN.md, layout, and home go in the SAME first turn when all are missing.
 All other pages, components, sections, route handlers, and assets come AFTER.
 

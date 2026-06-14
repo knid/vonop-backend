@@ -82,7 +82,7 @@ func (t *TodoList) Render() string {
 	if len(open) == 0 && len(blocked) == 0 {
 		sb.WriteString("No open todos remain. Validate the result and finish instead of starting unrelated work.\n")
 	} else {
-		sb.WriteString("Use update_todos when starting, completing, blocking, splitting, or discovering multi-part work. Simple one-task requests should not have todos. Mark done only with concrete evidence.\n")
+		sb.WriteString("Use this snapshot only to avoid repeating completed work. Continue with the next unresolved item using the normal file and execution tools.\n")
 	}
 	return sb.String()
 }

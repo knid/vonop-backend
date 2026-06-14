@@ -168,7 +168,6 @@ func registerBaseBuilderTools(r *Registry, deps *RunDependencies) {
 	r.Register(ReadFilesTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})
-	r.Register(UpdateTodosTool{})
 	r.Register(CreateDesignTool{})
 	r.Register(WriteFilesTool{})
 	r.Register(EditFileTool{})

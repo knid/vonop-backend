@@ -19,6 +19,9 @@ func TestBuildRegistryFor_ExposesWriteFilesButNotWriteFile(t *testing.T) {
 	if !names["write_files"] {
 		t.Fatal("expected write_files to be exposed")
 	}
+	if names["update_todos"] {
+		t.Fatal("update_todos must not be exposed by default; failed todo calls waste agent rounds")
+	}
 }
 
 func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
