@@ -229,6 +229,87 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	}
 }
 
+func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
+	var requests int
+	var recoveryRequestBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		if recoveryRequestBody == "" && strings.Contains(string(body), "previous response started a tool call") {
+			recoveryRequestBody = string(body)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Starting with package config and CSS:"}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_files","arguments":"{\"files\": "}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":16274,"completion_tokens":2270,"total_tokens":18544}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
+		if requests == 2 {
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"patch_files","arguments":"{\"patches\":[{\"path\":\"frontend/src/App.tsx\",\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Updated the portfolio surface."}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":50,"completion_tokens":8,"total_tokens":58}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	var executed []string
+	got, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		[]Message{{Role: "user", Content: "build a portfolio"}},
+		[]Tool{
+			{Type: "function", Function: ToolFunction{Name: "write_files"}},
+			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
+		},
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		func(name, arguments string) (string, error) {
+			executed = append(executed, name)
+			if !json.Valid([]byte(arguments)) {
+				t.Fatalf("executor received invalid JSON args for %s: %s", name, arguments)
+			}
+			return "patched frontend/src/App.tsx", nil
+		},
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{MaxRounds: 3},
+	)
+
+	if err != nil {
+		t.Fatalf("StreamWithTools returned error after recovery: %v", err)
+	}
+	if got != "Updated the portfolio surface." {
+		t.Fatalf("response = %q, want recovered final text", got)
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
+	}
+	if recoveryRequestBody == "" {
+		t.Fatal("missing recovery prompt after invalid JSON tool call")
+	}
+	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
+		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
+	}
+	if len(executed) != 1 || executed[0] != "patch_files" {
+		t.Fatalf("executed tools = %#v, want only recovered patch_files", executed)
+	}
+}
+
 func TestStreamWithToolsCompactsBeforeMaxMessageTrim(t *testing.T) {
 	var compactSawMessages int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

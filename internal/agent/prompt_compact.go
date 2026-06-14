@@ -102,7 +102,7 @@ file paths or component names. Keep narration short and act with tools.
 ## Tool Protocol
 Work by calling tools. Read before editing. Use grep first to locate relevant
 symbols, then read_files in batches. Put all code in write/edit tools, never in
-narration. Use update_todos only for genuinely multi-step work.
+narration.
 
 Use mobile-specific tools for mobile config, build logs, local database, and
 build retries when available. Do not assume native capabilities are enabled

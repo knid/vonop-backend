@@ -21,6 +21,7 @@ func TestAgentPromptsDoNotAdvertiseRemovedRawFileBlockProtocol(t *testing.T) {
 			for _, forbidden := range []string{
 				"BEGIN_WEMOB_FILE",
 				"END_WEMOB_FILE",
+				"raw file block",
 				"raw file blocks",
 				"raw blocks",
 			} {

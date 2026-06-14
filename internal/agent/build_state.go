@@ -134,7 +134,7 @@ func (s *BuildState) Render(fileMap *SafeFileMap) string {
 		sort.Strings(allWritten)
 		writePathList(&sb, "Do not recreate; edit only if more changes are needed", allWritten)
 	}
-	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth for files. Use TODO STATE as the source of truth for task progress; do not restart completed work.\n")
+	sb.WriteString("\nUse this BUILD STATE plus the FILE TREE as the source of truth for files; do not restart completed work.\n")
 	return sb.String()
 }
 

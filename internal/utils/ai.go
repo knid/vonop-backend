@@ -1365,6 +1365,37 @@ func StreamWithTools(
 	incompleteToolCallRetries := 0
 	var recoveryToolDenylist map[string]bool
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
+	recoverIncompleteToolCall := func(round int, finishReason string, toolCallsMap map[int]*ToolCall) bool {
+		if len(toolCallsMap) == 0 || incompleteToolCallRetries >= incompleteToolCallRecoveryRetries {
+			return false
+		}
+		incompleteToolCallRetries++
+		if incompleteToolCallsInclude(toolCallsMap, "write_files") {
+			recoveryToolDenylist = map[string]bool{"write_files": true}
+		}
+		if text := strings.TrimSpace(fullText.String()); text != "" {
+			currentMessages = append(currentMessages, Message{
+				Role:    "assistant",
+				Content: text,
+			})
+		}
+		currentMessages = append(currentMessages, Message{
+			Role: "user",
+			Content: incompleteToolCallRecoveryMessage(
+				finishReason,
+				toolCallsMap,
+				incompleteToolCallRetries,
+				incompleteToolCallRecoveryRetries,
+			),
+		})
+		slog.Warn("LLM response ended during tool call; retrying with recovery prompt",
+			"round", round,
+			"finish_reason", finishReason,
+			"tool_calls", len(toolCallsMap),
+			"retry", incompleteToolCallRetries,
+			"max_retries", incompleteToolCallRecoveryRetries)
+		return true
+	}
 
 	for round := 0; round < maxRounds; round++ {
 		// Check caller abort signal before starting any round
@@ -1900,12 +1931,30 @@ func StreamWithTools(
 			sort.Ints(indices)
 
 			toolCalls := make([]ToolCall, 0, len(indices))
+			hasInvalidToolArgs := false
 			for _, idx := range indices {
 				if toolCallsMap[idx].ID == "" {
 					toolCallsMap[idx].ID = fmt.Sprintf("call_synth_%d_%d", round, idx)
 					slog.Warn("LLM streaming omitted tool_call id; using synthetic id", "round", round, "index", idx, "synthetic_id", toolCallsMap[idx].ID, "provider", provider.Name, "model", model)
 				}
+				if tc := toolCallsMap[idx]; tc != nil && tc.Function != nil {
+					args := tc.Function.Arguments
+					if args != "" && args != "{}" && !isValidJSON(args) {
+						hasInvalidToolArgs = true
+						slog.Warn("Tool call has invalid JSON arguments; recovering before execution",
+							"tool", tc.Function.Name,
+							"round", round,
+							"args_len", len(args))
+					}
+				}
 				toolCalls = append(toolCalls, *toolCallsMap[idx])
+			}
+			if hasInvalidToolArgs {
+				if recoverIncompleteToolCall(round, lastFinishReason, toolCallsMap) {
+					round-- // retry the same logical round with recovery context
+					continue
+				}
+				return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
 			}
 
 			// Append assistant message with tool calls. Older rounds are later
@@ -2134,32 +2183,7 @@ func StreamWithTools(
 		}
 
 		if len(toolCallsMap) > 0 {
-			if incompleteToolCallRetries < incompleteToolCallRecoveryRetries {
-				incompleteToolCallRetries++
-				if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-					recoveryToolDenylist = map[string]bool{"write_files": true}
-				}
-				if text := strings.TrimSpace(fullText.String()); text != "" {
-					currentMessages = append(currentMessages, Message{
-						Role:    "assistant",
-						Content: text,
-					})
-				}
-				currentMessages = append(currentMessages, Message{
-					Role: "user",
-					Content: incompleteToolCallRecoveryMessage(
-						lastFinishReason,
-						toolCallsMap,
-						incompleteToolCallRetries,
-						incompleteToolCallRecoveryRetries,
-					),
-				})
-				slog.Warn("LLM response ended during tool call; retrying with recovery prompt",
-					"round", round,
-					"finish_reason", lastFinishReason,
-					"tool_calls", len(toolCallsMap),
-					"retry", incompleteToolCallRetries,
-					"max_retries", incompleteToolCallRecoveryRetries)
+			if recoverIncompleteToolCall(round, lastFinishReason, toolCallsMap) {
 				round-- // retry the same logical round with recovery context
 				continue
 			}
