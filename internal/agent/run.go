@@ -324,32 +324,18 @@ func Run(
 		creditCheck = deps.CreditChecker(project.ID.String(), tracker)
 	}
 
-	// Resolve the tool-round budget and nudge/strip thresholds from remote
-	// config so they can be tuned without a redeploy. Draft (new project) uses
-	// the "generation" flags; chat edits use the "builder" flags.
+	// Resolve the tool-round budget from remote config so it can be tuned
+	// without a redeploy. Draft (new project) uses the "generation" flag;
+	// chat edits use the "builder" flag.
 	maxTurns := defaultMaxTurns
-	nudgeAfter := 3
-	stripAfter := 5
 	if deps.RemoteConfig != nil {
 		if project.Status == "draft" {
 			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationMaxRounds, remoteconfig.Global); rcTurns > 0 {
 				maxTurns = rcTurns
 			}
-			if rcNudge := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationNudgeAfter, remoteconfig.Global); rcNudge > 0 {
-				nudgeAfter = rcNudge
-			}
-			if rcStrip := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationStripAfter, remoteconfig.Global); rcStrip > 0 {
-				stripAfter = rcStrip
-			}
 		} else {
 			if rcTurns := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolMaxRounds, remoteconfig.Global); rcTurns > 0 {
 				maxTurns = rcTurns
-			}
-			if rcNudge := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolNudgeAfter, remoteconfig.Global); rcNudge > 0 {
-				nudgeAfter = rcNudge
-			}
-			if rcStrip := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderToolStripAfter, remoteconfig.Global); rcStrip > 0 {
-				stripAfter = rcStrip
 			}
 		}
 	}
@@ -609,7 +595,6 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 
-	toolRoundCount := 0
 	llmText, llmErr := utils.StreamWithTools(
 		ctx,
 		model,
@@ -628,9 +613,6 @@ func Run(
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
 			MaxTokens:            64000,
-			NudgeAfter:           nudgeAfter,
-			StripAfter:           stripAfter,
-			StripTools:           []string{"read_files", "list_files", "grep", "read_attachment", "web_search", "read_build_logs", "read_deploy_logs", "read_mobile_config", "list_skills", "search_skills", "load_skill"},
 			MaxMessages:          25,
 			KeepRecentToolRounds: keepRecentToolRounds,
 			RefreshPrefix:        refreshRunPrefix,
@@ -677,18 +659,6 @@ func Run(
 			// starts without terminal results leaves the chat UI with orphan
 			// running cards, so we intentionally suppress these callbacks.
 			OnToolCallStart: nil,
-			AfterToolRound: func(allIntercepted bool) string {
-				toolRoundCount++
-				remaining := maxTurns - toolRoundCount
-				if remaining <= 2 {
-					buildState.SetPhase(BuildPhaseValidation)
-					return fmt.Sprintf("URGENT: You have used %d tool rounds and have at most %d total rounds left. Finish the user request now; if TODO STATE has open items, close them with evidence. Do not research or recreate existing files.", toolRoundCount, remaining)
-				}
-				if toolRoundCount >= 3 {
-					return fmt.Sprintf("You have used %d tool rounds. Total budget is ~%d rounds. Avoid re-reading or recreating completed files. Use TODO STATE only if a checklist exists; otherwise continue the direct user request.", toolRoundCount, maxTurns)
-				}
-				return ""
-			},
 			ShouldContinue: func() bool {
 				if ctx.Err() != nil {
 					return false
@@ -782,17 +752,7 @@ func Run(
 			fileMap, message)
 	}
 
-	rawFileBlockWrites := 0
-	if !contextPacket.ReadOnly {
-		var rawErr error
-		rawFileBlockWrites, rawErr = applyRawFileBlocks(rc, llmText)
-		if rawErr != nil {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "raw_file_blocks",
-				CodeValidationFailed, rawErr.Error(), rawErr,
-				tracker, runStart,
-				fileMap, message)
-		}
-	}
+	_ = llmText
 
 	if !contextPacket.ReadOnly {
 		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
@@ -813,146 +773,12 @@ func Run(
 
 	// --- Step 13: success shutdown (continued in C2.20) ---
 	partsMu.Lock()
-	if rawFileBlockWrites > 0 {
-		for i := range parts {
-			if parts[i].Type == "text" {
-				parts[i].Text = stripRawFileBlocksFromText(parts[i].Text, rawFileBlockWrites)
-			}
-		}
-	}
 	finalParts := append([]models.ChatMessagePart(nil), parts...)
 	finalToolCalls := totalToolCalls
 	partsMu.Unlock()
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
 		finalParts, tracker, runStart,
 		finalToolCalls, turn, message, user, project)
-}
-
-// partsToContent flattens an ordered parts slice into the legacy plain-text
-// content string by concatenating every text part in order.
-func partsToContent(parts []models.ChatMessagePart) string {
-	var b strings.Builder
-	for _, p := range parts {
-		if p.Type == "text" {
-			b.WriteString(p.Text)
-		}
-	}
-	return b.String()
-}
-
-// partsToToolCalls projects the tool_call parts into the legacy
-// ChatMessageToolCall slice readers still expect (analytics, history rebuild).
-func partsToToolCalls(parts []models.ChatMessagePart) []models.ChatMessageToolCall {
-	out := make([]models.ChatMessageToolCall, 0, len(parts))
-	for _, p := range parts {
-		if p.Type != "tool_call" {
-			continue
-		}
-		out = append(out, models.ChatMessageToolCall{
-			ID:         p.ToolCallID,
-			Name:       p.Name,
-			Input:      p.Input,
-			Result:     p.Result,
-			IsError:    p.IsError,
-			DurationMs: p.DurationMs,
-		})
-	}
-	return out
-}
-
-// registryToUtilsTools maps the agent Registry to the []utils.Tool shape
-// StreamWithTools expects. Executor tools become OpenAI-style function wrappers;
-// server tools (Anthropic-native, e.g. web_search) are passed through as-is.
-func registryToUtilsTools(r *Registry) []utils.Tool {
-	out := make([]utils.Tool, 0, len(r.tools)+len(r.serverTools))
-	for _, name := range r.order {
-		if t, ok := r.tools[name]; ok {
-			out = append(out, utils.Tool{
-				Type: "function",
-				Function: utils.ToolFunction{
-					Name:        t.Name(),
-					Description: t.Description(),
-					Parameters:  t.Schema(),
-				},
-			})
-		}
-	}
-	for _, st := range r.serverTools {
-		if st.Tool != nil {
-			out = append(out, *st.Tool)
-		}
-	}
-	return out
-}
-
-// trackerDelta returns the current token usage from the tracker as a TokenUsage.
-func trackerDelta(t *utils.TokenTracker) TokenUsage {
-	p, c, _, _ := t.Totals()
-	cr, cw := t.CacheTotals()
-	return TokenUsage{Input: p, Output: c, CacheRead: cr, CacheWrite: cw}
-}
-
-// ---- helpers ----
-
-// stripToolInputForPreview drops bulky fields from the tool input JSON
-// before stamping it into ToolCallStartEvent.InputPreview. Without this,
-// every write_file/edit_file call shipped the full file body THREE times
-// over SSE: once in input_preview, once in file_written.content, and once
-// in the persisted milestone. The dashboard reads file_written.content for
-// optimistic file-tree updates, so input_preview is redundant — and the
-// largest single source of wasted SSE bandwidth in the chat protocol.
-//
-// For non-file tools the original args pass through unchanged.
-func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
-	switch name {
-	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
-		var m map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
-			return json.RawMessage("{}")
-		}
-		// Keep the path so the UI can show a meaningful "writing X" hint;
-		// drop content/old_string/new_string which can be hundreds of KB.
-		stripped := map[string]json.RawMessage{}
-		if p, ok := m["path"]; ok {
-			stripped["path"] = p
-		}
-		if d, ok := m["description"]; ok {
-			stripped["description"] = d
-		}
-		if files, ok := m["files"]; ok {
-			stripped["files"] = stripBatchFilePreview(files)
-		}
-		out, err := json.Marshal(stripped)
-		if err != nil {
-			return json.RawMessage("{}")
-		}
-		return out
-	default:
-		return json.RawMessage(argsJSON)
-	}
-}
-
-func stripBatchFilePreview(files json.RawMessage) json.RawMessage {
-	var arr []map[string]json.RawMessage
-	if err := json.Unmarshal(files, &arr); err != nil {
-		return json.RawMessage("[]")
-	}
-	out := make([]map[string]json.RawMessage, 0, len(arr))
-	for _, f := range arr {
-		item := map[string]json.RawMessage{}
-		if p, ok := f["path"]; ok {
-			item["path"] = p
-		}
-		if d, ok := f["description"]; ok {
-			item["description"] = d
-		}
-		out = append(out, item)
-	}
-	b, err := json.Marshal(out)
-	if err != nil {
-		return json.RawMessage("[]")
-	}
-	return b
 }
 
 // runAction returns the PostHog action label for this run — matches the
@@ -1008,132 +834,6 @@ func normaliseImages(images []string) []map[string]string {
 		out = append(out, map[string]string{"url": img})
 	}
 	return out
-}
-
-func convertHistory(history []models.AppChatMessage) []utils.Message {
-	// Basic history replay: keep full tool results. No separate file drawer.
-	var out []utils.Message
-	for _, m := range history {
-		if m.ErrorKind != "" {
-			// Instead of silently dropping failed assistant turns, inject a
-			// synthetic user message that tells the LLM what happened. This
-			// preserves resume context so that when the user types "continue"
-			// the model knows a previous run failed and can pick up where it
-			// left off rather than treating the request as brand-new.
-			reason := strings.TrimSpace(m.Content)
-			if reason == "" {
-				reason = humanizeErrorKind(m.ErrorKind)
-			}
-			summary := fmt.Sprintf(
-				"The previous assistant generation failed with: %s. Please continue from where it left off.",
-				reason,
-			)
-			out = append(out, utils.Message{Role: "user", Content: summary})
-			continue
-		}
-		content := m.Content
-		// Historical user messages are stored literally (e.g. "/plan a blog").
-		// Re-expand on every load so the LLM sees the same prompt body it saw
-		// on the original turn. We deliberately do NOT replay the SystemAddendum
-		// for historical turns — modal constraints like "do not write files"
-		// only apply to the turn they were typed on.
-		if m.Role == "user" {
-			content, _, _ = ExpandSlashCommand(content)
-			content = "<user_message>" + escapeUntrustedTag(content, "user_message") + "</user_message>"
-			out = append(out, utils.Message{Role: m.Role, Content: content})
-			continue
-		}
-
-		if m.Role == "assistant" {
-			var parts []models.ChatMessagePart
-			if len(m.Parts) > 0 && string(m.Parts) != "[]" {
-				_ = json.Unmarshal(m.Parts, &parts)
-			}
-
-			// Fallback for legacy rows without Parts
-			if len(parts) == 0 {
-				out = append(out, utils.Message{Role: "assistant", Content: content})
-				continue
-			}
-
-			var pendingText string
-			var pendingReasoning string
-			var pendingToolCalls []utils.ToolCall
-			var pendingToolResults []utils.Message
-
-			flush := func() {
-				if pendingText == "" && pendingReasoning == "" && len(pendingToolCalls) == 0 {
-					return
-				}
-				out = append(out, utils.Message{
-					Role:             "assistant",
-					Content:          pendingText,
-					ReasoningContent: pendingReasoning,
-					ToolCalls:        pendingToolCalls,
-				})
-				out = append(out, pendingToolResults...)
-				pendingText = ""
-				pendingReasoning = ""
-				pendingToolCalls = nil
-				pendingToolResults = nil
-			}
-
-			for _, p := range parts {
-				if p.Type == "reasoning" {
-					if len(pendingToolCalls) > 0 {
-						flush()
-					}
-					pendingReasoning += p.Text
-				} else if p.Type == "text" {
-					if pendingText != "" || len(pendingToolCalls) > 0 {
-						flush()
-					}
-					pendingText = p.Text
-				} else if p.Type == "tool_call" {
-					pendingToolCalls = append(pendingToolCalls, utils.ToolCall{
-						ID:   p.ToolCallID,
-						Type: "function",
-						Function: &utils.FunctionCall{
-							Name:      p.Name,
-							Arguments: string(p.Input),
-						},
-					})
-					pendingToolResults = append(pendingToolResults, utils.Message{
-						Role:       "tool",
-						ToolCallID: p.ToolCallID,
-						Name:       p.Name,
-						Content:    p.Result,
-					})
-				}
-			}
-			flush()
-			continue
-		}
-
-		out = append(out, utils.Message{Role: m.Role, Content: content})
-	}
-	return out
-}
-
-// lastAssistantTurn returns the most recent non-error assistant message in
-// history, or nil if there isn't one. (Kept for test compatibility during transition.)
-func lastAssistantTurn(history []models.AppChatMessage) *models.AppChatMessage {
-	for i := len(history) - 1; i >= 0; i-- {
-		m := history[i]
-		if m.Role == "assistant" && m.ErrorKind == "" {
-			return &m
-		}
-	}
-	return nil
-}
-
-// escapeUntrustedTag replaces literal closing-tag substrings inside untrusted
-// content so the user can't break out of the wrapping delimiters. The LLM sees
-// the escaped form (e.g. &lt;/user_message&gt;) as inert text.
-func escapeUntrustedTag(content, tag string) string {
-	closing := "</" + tag + ">"
-	escaped := "&lt;/" + tag + "&gt;"
-	return strings.ReplaceAll(content, closing, escaped)
 }
 
 func finaliseSuccess(

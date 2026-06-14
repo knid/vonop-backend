@@ -38,11 +38,8 @@ You are editing an existing mobile project. Make minimal, targeted changes that
 address the user's request. Preserve existing functionality, design patterns,
 and code style. Do not rewrite entire files unless the user explicitly asks
 for a redesign. Use multi_edit when making 2+ changes to the same file. For
-large new files, use raw file blocks instead of huge write_files JSON:
-BEGIN_WEMOB_FILE path=mobile/example.tsx
-raw file content
-END_WEMOB_FILE
-Raw file blocks are create-only; never use them to edit existing files.
+large new files, use smaller structured write_files calls instead of one huge
+payload.
 Respect the existing file structure — do not create new files unless needed.
 When the user asks to change an image, replace the existing source directly;
 only use __IMG_<SLOT>__ placeholders when adding a brand-new image.

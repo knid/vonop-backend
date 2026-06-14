@@ -56,177 +56,13 @@ func (e *ToolRoundsExceededError) Error() string {
 	return fmt.Sprintf("tool calling exceeded maximum rounds (%d)", e.MaxRounds)
 }
 
-// normalizeToolCacheKey produces a canonical cache key for tool dedup.
-// It normalizes JSON arguments so semantically identical calls (different key order) match.
-func normalizeToolCacheKey(name, args string) string {
-	var obj any
-	if json.Unmarshal([]byte(args), &obj) == nil {
-		if canonical, err := json.Marshal(obj); err == nil {
-			return name + ":" + string(canonical)
-		}
-	}
-	return name + ":" + args
-}
-
-// sanitizeToolError strips internal details from tool execution errors
-// so they don't leak into LLM context or user-visible responses.
-// The returned string is used as the tool result so the LLM knows the call failed.
-func sanitizeToolError(toolName string, err error) string {
-	msg := err.Error()
-	// Strip common internal prefixes/patterns
-	for _, sensitive := range []string{"sql:", "pq:", "s3:", "dial tcp", "connect:", "tls:", "x509:"} {
-		if strings.Contains(strings.ToLower(msg), sensitive) {
-			slog.Error("Tool execution error (sanitized)", "tool", toolName, "error", msg)
-			return fmt.Sprintf("Tool execution failed for %s: internal error, please try again", toolName)
-		}
-	}
-	return fmt.Sprintf("Tool execution failed for %s: %v", toolName, err)
-}
-
 // isValidJSON returns true if s is valid JSON.
 func isValidJSON(s string) bool {
 	return json.Valid([]byte(s))
 }
 
-// isParallelSafeTool returns true for tools that do not mutate shared project
-// state and can run concurrently without changing agent semantics.
-func isParallelSafeTool(name string) bool {
-	switch name {
-	case "read_files", "list_files", "grep", "read_attachment", "generate_image",
-		"read_build_logs", "read_deploy_logs", "read_mobile_config":
-		return true
-	default:
-		return false
-	}
-}
-
 func isPinnedCurrentRunMessage(m Message) bool {
 	return m.Role == "user" && strings.HasPrefix(m.Content, "CURRENT RUN CONTEXT\n")
-}
-
-type toolRoundTrimState struct {
-	toolCallIDs    []string
-	argsTrimmed    bool
-	resultsTrimmed bool
-}
-
-func trimToolRoundsOlderThan(
-	currentMessages []Message,
-	toolRoundHistory []toolRoundTrimState,
-	keepRecentToolRounds int,
-	trimArgs func(toolName, args string) string,
-	trimResults func(toolName, result string) string,
-) []toolRoundTrimState {
-	if keepRecentToolRounds < 0 {
-		keepRecentToolRounds = 0
-	}
-	cutoff := len(toolRoundHistory) - keepRecentToolRounds
-	if cutoff <= 0 {
-		return toolRoundHistory
-	}
-	for i := 0; i < cutoff; i++ {
-		rec := &toolRoundHistory[i]
-		ids := make(map[string]bool, len(rec.toolCallIDs))
-		for _, id := range rec.toolCallIDs {
-			if id != "" {
-				ids[id] = true
-			}
-		}
-		if len(ids) == 0 {
-			rec.argsTrimmed = true
-			rec.resultsTrimmed = true
-			continue
-		}
-		if trimArgs != nil && !rec.argsTrimmed {
-			for msgIdx := range currentMessages {
-				msg := &currentMessages[msgIdx]
-				matched := false
-				for tcIdx := range msg.ToolCalls {
-					tc := &msg.ToolCalls[tcIdx]
-					if !ids[tc.ID] {
-						continue
-					}
-					matched = true
-					if tc.Function != nil {
-						tc.Function.Arguments = trimArgs(tc.Function.Name, tc.Function.Arguments)
-					}
-				}
-				if matched {
-					msg.ReasoningContent = ""
-				}
-			}
-			rec.argsTrimmed = true
-		}
-		if trimResults != nil && !rec.resultsTrimmed {
-			for msgIdx := range currentMessages {
-				msg := &currentMessages[msgIdx]
-				if msg.Role == "tool" && ids[msg.ToolCallID] {
-					msg.Content = trimResults(msg.Name, msg.Content)
-				}
-			}
-			rec.resultsTrimmed = true
-		}
-	}
-	return toolRoundHistory[cutoff:]
-}
-
-func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int]*ToolCall, attempt, maxAttempts int) string {
-	indices := make([]int, 0, len(toolCallsMap))
-	for idx := range toolCallsMap {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-
-	var sb strings.Builder
-	sb.WriteString("The previous response started a tool call but ended before the tool call contained complete valid JSON")
-	if finishReason != "" {
-		fmt.Fprintf(&sb, " (finish_reason=%q)", finishReason)
-	}
-	sb.WriteString(".\n")
-	fmt.Fprintf(&sb, "Recovery attempt %d of %d.\n\n", attempt, maxAttempts)
-	sb.WriteString("Incomplete tool call(s):\n")
-	for _, idx := range indices {
-		tc := toolCallsMap[idx]
-		name := ""
-		args := ""
-		if tc != nil && tc.Function != nil {
-			name = tc.Function.Name
-			args = tc.Function.Arguments
-		}
-		if name == "" {
-			name = "(unknown)"
-		}
-		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
-	}
-	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. If you were creating a large new file, respond with raw file blocks: BEGIN_WEMOB_FILE path=relative/path.tsx, then the raw file content, then END_WEMOB_FILE. If you were modifying existing files, use multi_edit for multiple exact replacements in one existing file, or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
-	} else {
-		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
-	}
-	return sb.String()
-}
-
-func incompleteToolCallsInclude(toolCallsMap map[int]*ToolCall, toolName string) bool {
-	for _, tc := range toolCallsMap {
-		if tc != nil && tc.Function != nil && tc.Function.Name == toolName {
-			return true
-		}
-	}
-	return false
-}
-
-func filterToolsByDeniedNames(tools []Tool, denied map[string]bool) []Tool {
-	if len(denied) == 0 {
-		return tools
-	}
-	filtered := make([]Tool, 0, len(tools))
-	for _, t := range tools {
-		if denied[t.Function.Name] {
-			continue
-		}
-		filtered = append(filtered, t)
-	}
-	return filtered
 }
 
 // truncateBody truncates a string to maxLen characters for safe logging.
@@ -1440,15 +1276,10 @@ type ImageURLContent struct {
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
 	MaxRounds            int                                                        // Maximum tool-calling rounds (default 10)
-	NudgeAfter           int                                                        // Inject nudge after this many consecutive tool rounds (default 3)
-	StripAfter           int                                                        // Strip tools entirely after this many consecutive rounds (default 5)
 	MaxTokens            int                                                        // Max completion tokens per round (default 16384)
 	TrimArgs             func(toolName, args string) string                         // Trim tool call arguments in history to reduce token usage
 	TrimResults          func(toolName, result string) string                       // Trim tool result messages in history to reduce token usage
 	InterceptToolCall    func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
-	NudgeMessage         string                                                     // Custom nudge message (replaces default "stop researching" text)
-	StripMessage         string                                                     // Custom message when tools are stripped (replaces default "FINAL WARNING" text)
-	AfterToolRound       func(allIntercepted bool) string                           // Called after each tool round; allIntercepted=true when every call was intercepted; non-empty return is injected as a system message
 	FilterTools          func(tools []Tool) []Tool                                  // Called each round to filter/modify tools; return nil to strip all tools
 	OnToolCallStart      func(toolName string)                                      // Called when a tool call name is first detected during SSE streaming (before args are complete)
 	OnToolResult         func(toolName string, result string, isError bool)         // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
@@ -1458,7 +1289,6 @@ type ToolCallConfig struct {
 	PromptCacheKey       string                                                     // Moonshot K2.6 session-level prompt cache key (sent on every round)
 	MaxMessages          int                                                        // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
 	RefreshPrefix        func(msg *Message)                                         // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
-	StripTools           []string                                                   // Tool names to remove when stripping (e.g. read-only research tools). When empty, stripping removes all tools.
 	CompactHistory       func(messages []Message) ([]Message, bool)                 // Called before each round to replace old history with a compact LLM view. bool=true when changed.
 	KeepRecentToolRounds int                                                        // Number of latest completed tool rounds to leave untrimmed. Older rounds may have args/results trimmed. Default 1.
 }
@@ -1483,19 +1313,11 @@ func StreamWithTools(
 	}
 
 	maxRounds := 10
-	nudgeAfter := 3
-	stripAfter := 5
 	maxTokens := 16384
 	maxContinuations := 3
 	if len(opts) > 0 {
 		if opts[0].MaxRounds > 0 {
 			maxRounds = opts[0].MaxRounds
-		}
-		if opts[0].NudgeAfter > 0 {
-			nudgeAfter = opts[0].NudgeAfter
-		}
-		if opts[0].StripAfter != 0 { // 0 = use default; -1 = disable; positive = explicit limit
-			stripAfter = opts[0].StripAfter
 		}
 		if opts[0].MaxTokens > 0 {
 			maxTokens = opts[0].MaxTokens
@@ -1534,10 +1356,7 @@ func StreamWithTools(
 	// No mutex is needed because tools execute sequentially (each tool call
 	// blocks via select until completion before the next one starts).
 	toolCallHistory := make(map[string]string) // "tool:args" → result (dedup cache)
-	consecutiveToolRounds := 0
 	consecutiveEmptyResponses := 0
-	nudged := false
-	stripped := false
 	rateLimitRetries := 0
 	transientRetries := 0
 	fallbackAttempted := false
@@ -1566,10 +1385,6 @@ func StreamWithTools(
 				opts[0].TrimResults,
 			)
 		}
-		// Progressively nudge the AI to stop researching and produce a final response.
-		// Phase 1 (nudgeAfter): inject a nudge message but keep tools available.
-		// Phase 2 (stripAfter): strip research tools to stop infinite loops while
-		// keeping write/edit tools so the AI can still complete its task.
 		roundTools := tools
 		if len(opts) > 0 && opts[0].FilterTools != nil {
 			roundTools = opts[0].FilterTools(roundTools)
@@ -1577,46 +1392,27 @@ func StreamWithTools(
 		if len(recoveryToolDenylist) > 0 {
 			roundTools = filterToolsByDeniedNames(roundTools, recoveryToolDenylist)
 		}
-		if stripAfter >= 0 && consecutiveToolRounds >= stripAfter {
-			if !stripped {
-				stripContent := "FINAL WARNING: You MUST generate your complete response NOW. Research tools have been removed — use write_file, edit_file, and other action tools to complete your task with the information you have already gathered."
-				if len(opts) > 0 && opts[0].StripMessage != "" {
-					stripContent = opts[0].StripMessage
-				}
-				appendToLastUserMsg(stripContent)
-				stripped = true
-			}
-			if len(opts) > 0 && len(opts[0].StripTools) > 0 {
-				filtered := make([]Tool, 0, len(roundTools))
-				for _, t := range roundTools {
-					skip := false
-					for _, stripName := range opts[0].StripTools {
-						if t.Function.Name == stripName {
-							skip = true
-							break
-						}
-					}
-					if !skip {
-						filtered = append(filtered, t)
-					}
-				}
-				roundTools = filtered
-				slog.Warn("Stripping research tools", "round", round, "consecutive_tool_rounds", consecutiveToolRounds, "remaining_tools", len(roundTools))
-			} else {
-				roundTools = nil
-				slog.Warn("Stripping all tools to force final response", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
-			}
-		} else if consecutiveToolRounds >= nudgeAfter && !nudged {
-			nudgeContent := "You have already gathered sufficient context from tool calls. Please wrap up your research and generate your final complete response. You may make one or two more targeted tool calls if absolutely necessary, but prioritize producing your response."
-			if len(opts) > 0 && opts[0].NudgeMessage != "" {
-				nudgeContent = opts[0].NudgeMessage
-			}
-			appendToLastUserMsg(nudgeContent)
-			nudged = true
-			slog.Warn("Injecting stop-researching nudge (tools still available)", "round", round, "consecutive_tool_rounds", consecutiveToolRounds)
-		}
 		if ctx.Err() != nil {
 			return "", ctx.Err()
+		}
+
+		// Refresh the user-turn prefix before each round so the model sees
+		// current file contents (e.g. file tree) before old history is compacted
+		// or trimmed.
+		if len(opts) > 0 && opts[0].RefreshPrefix != nil && round > 0 {
+			for i := len(currentMessages) - 1; i >= 0; i-- {
+				if currentMessages[i].Role == "user" && !strings.HasPrefix(currentMessages[i].Content, "[System]") {
+					opts[0].RefreshPrefix(&currentMessages[i])
+					break
+				}
+			}
+		}
+
+		if len(opts) > 0 && opts[0].CompactHistory != nil {
+			if compacted, changed := opts[0].CompactHistory(currentMessages); changed {
+				currentMessages = compacted
+				slog.Warn("StreamWithTools compacted message history", "round", round, "remaining", len(currentMessages))
+			}
 		}
 
 		// Trim message history if it exceeds the max message cap.
@@ -1676,25 +1472,6 @@ func StreamWithTools(
 				trimmed = append(trimmed, currentMessages[keepFrom:]...)
 				currentMessages = trimmed
 				slog.Warn("StreamWithTools trimmed message history", "dropped", dropped, "remaining", len(currentMessages), "max", opts[0].MaxMessages)
-			}
-		}
-
-		// Refresh the user-turn prefix before each round so the model sees
-		// current file contents (e.g. file tree) even after old tool results
-		// are truncated by TrimResults.
-		if len(opts) > 0 && opts[0].RefreshPrefix != nil && round > 0 {
-			for i := len(currentMessages) - 1; i >= 0; i-- {
-				if currentMessages[i].Role == "user" && !strings.HasPrefix(currentMessages[i].Content, "[System]") {
-					opts[0].RefreshPrefix(&currentMessages[i])
-					break
-				}
-			}
-		}
-
-		if len(opts) > 0 && opts[0].CompactHistory != nil {
-			if compacted, changed := opts[0].CompactHistory(currentMessages); changed {
-				currentMessages = compacted
-				slog.Warn("StreamWithTools compacted message history", "round", round, "remaining", len(currentMessages))
 			}
 		}
 
@@ -2113,7 +1890,6 @@ func StreamWithTools(
 				appendToLastUserMsg("Your previous response was empty. Please generate your final response as plain text now.")
 				continue
 			}
-			consecutiveToolRounds++
 			roundChunks = nil // discard intermediate reasoning chunks
 
 			// Build sorted tool calls list
@@ -2336,22 +2112,9 @@ func StreamWithTools(
 				}
 			}
 
-			// Accelerate toward nudge/strip only when the LLM repeats calls it already
-			// made (deduped). Intercepted calls are NOT wasted — they serve fresh data
-			// from an in-memory source (e.g. fileMap) that the LLM needs for edits.
-			// Require at least one dedup to trigger; pure-intercept rounds provide new
-			// data and should proceed normally.
 			if dedupCount > 0 && dedupCount+interceptCount == len(toolCalls) {
-				bump := nudgeAfter / 5
-				if bump < 2 {
-					bump = 2
-				}
-				consecutiveToolRounds += bump
-				if consecutiveToolRounds > stripAfter {
-					consecutiveToolRounds = stripAfter
-				}
 				appendToLastUserMsg("All your tool calls in this round returned cached results — you already have this information. Stop making redundant tool calls and produce your final response.")
-				slog.Warn("All tool calls deduped, accelerating nudge", "round", round, "dedup_count", dedupCount, "intercept_count", interceptCount, "consecutive_tool_rounds", consecutiveToolRounds)
+				slog.Warn("All tool calls deduped; injected redundancy warning", "round", round, "dedup_count", dedupCount, "intercept_count", interceptCount)
 			}
 
 			if len(opts) > 0 && (opts[0].TrimArgs != nil || opts[0].TrimResults != nil) {
@@ -2364,19 +2127,9 @@ func StreamWithTools(
 				toolRoundHistory = append(toolRoundHistory, toolRoundTrimState{toolCallIDs: ids})
 			}
 
-			// Inject post-round system message (e.g. progress summary).
-			// Skip when tools have been stripped — avoid contradicting the "generate now" message.
-			allIntercepted := interceptCount > 0 && interceptCount == len(toolCalls)
-			if roundTools != nil && len(opts) > 0 && opts[0].AfterToolRound != nil {
-				if msg := opts[0].AfterToolRound(allIntercepted); msg != "" {
-					appendToLastUserMsg(msg)
-				}
-			}
-
 			// Continue the loop — re-call LLM with tool results
 			continue
 		} else {
-			consecutiveToolRounds = 0
 			consecutiveEmptyResponses = 0
 		}
 
