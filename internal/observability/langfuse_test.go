@@ -6,6 +6,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 )
 
+type fakeSecretProvider struct {
+	env     string
+	secrets map[string]string
+}
+
+func (f fakeSecretProvider) GetSecret(key string) string { return f.secrets[key] }
+func (f fakeSecretProvider) GetEnv() string              { return f.env }
+
 func TestLangfuseConfigFromEnvBuildsOTLPEndpointAndHeaders(t *testing.T) {
 	t.Setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-test")
 	t.Setenv("LANGFUSE_SECRET_KEY", "sk-lf-test")
@@ -27,6 +35,63 @@ func TestLangfuseConfigFromEnvBuildsOTLPEndpointAndHeaders(t *testing.T) {
 		t.Fatalf("ingestion header = %q", cfg.Headers["x-langfuse-ingestion-version"])
 	}
 	if cfg.Environment != "test" {
+		t.Fatalf("environment = %q", cfg.Environment)
+	}
+}
+
+func TestLangfuseConfigFromSecretsWhenEnvKeysAreMissing(t *testing.T) {
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "")
+	t.Setenv("LANGFUSE_SECRET_KEY", "")
+	t.Setenv("LANGFUSE_BASE_URL", "")
+	t.Setenv("LANGFUSE_OTEL_TRACES_ENDPOINT", "")
+	t.Setenv("ENVIRONMENT", "")
+	t.Setenv("APP_ENV", "")
+
+	cfg := LangfuseConfigFromEnvAndSecrets(fakeSecretProvider{
+		env: "prod",
+		secrets: map[string]string{
+			"LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
+			"LANGFUSE_SECRET_KEY": "sk-lf-secret",
+			"LANGFUSE_BASE_URL":   "https://us.cloud.langfuse.com",
+		},
+	})
+
+	if !cfg.Enabled {
+		t.Fatal("expected Langfuse config to be enabled from secrets")
+	}
+	if cfg.Endpoint != "https://us.cloud.langfuse.com/api/public/otel/v1/traces" {
+		t.Fatalf("endpoint = %q", cfg.Endpoint)
+	}
+	if cfg.Headers["Authorization"] != "Basic cGstbGYtc2VjcmV0OnNrLWxmLXNlY3JldA==" {
+		t.Fatalf("authorization header = %q", cfg.Headers["Authorization"])
+	}
+	if cfg.Environment != "prod" {
+		t.Fatalf("environment = %q", cfg.Environment)
+	}
+}
+
+func TestLangfuseConfigEnvOverridesSecrets(t *testing.T) {
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "pk-lf-env")
+	t.Setenv("LANGFUSE_SECRET_KEY", "sk-lf-env")
+	t.Setenv("LANGFUSE_BASE_URL", "https://cloud.langfuse.com")
+	t.Setenv("ENVIRONMENT", "env-prod")
+
+	cfg := LangfuseConfigFromEnvAndSecrets(fakeSecretProvider{
+		env: "secret-prod",
+		secrets: map[string]string{
+			"LANGFUSE_PUBLIC_KEY": "pk-lf-secret",
+			"LANGFUSE_SECRET_KEY": "sk-lf-secret",
+			"LANGFUSE_BASE_URL":   "https://us.cloud.langfuse.com",
+		},
+	})
+
+	if cfg.Endpoint != "https://cloud.langfuse.com/api/public/otel/v1/traces" {
+		t.Fatalf("endpoint = %q", cfg.Endpoint)
+	}
+	if cfg.Headers["Authorization"] != "Basic cGstbGYtZW52OnNrLWxmLWVudg==" {
+		t.Fatalf("authorization header = %q", cfg.Headers["Authorization"])
+	}
+	if cfg.Environment != "env-prod" {
 		t.Fatalf("environment = %q", cfg.Environment)
 	}
 }

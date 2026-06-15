@@ -21,6 +21,11 @@ type LangfuseConfig struct {
 	Environment string
 }
 
+type SecretProvider interface {
+	GetSecret(key string) string
+	GetEnv() string
+}
+
 type TraceAttributeInput struct {
 	Name           string
 	Action         string
@@ -65,15 +70,19 @@ type GenerationAttributeInput struct {
 }
 
 func LangfuseConfigFromEnv() LangfuseConfig {
-	publicKey := strings.TrimSpace(os.Getenv("LANGFUSE_PUBLIC_KEY"))
-	secretKey := strings.TrimSpace(os.Getenv("LANGFUSE_SECRET_KEY"))
+	return LangfuseConfigFromEnvAndSecrets(nil)
+}
+
+func LangfuseConfigFromEnvAndSecrets(secrets SecretProvider) LangfuseConfig {
+	publicKey := envOrSecret("LANGFUSE_PUBLIC_KEY", secrets)
+	secretKey := envOrSecret("LANGFUSE_SECRET_KEY", secrets)
 	if publicKey == "" || secretKey == "" {
 		return LangfuseConfig{Enabled: false}
 	}
 
-	endpoint := strings.TrimSpace(os.Getenv("LANGFUSE_OTEL_TRACES_ENDPOINT"))
+	endpoint := envOrSecret("LANGFUSE_OTEL_TRACES_ENDPOINT", secrets)
 	if endpoint == "" {
-		baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("LANGFUSE_BASE_URL")), "/")
+		baseURL := strings.TrimRight(envOrSecret("LANGFUSE_BASE_URL", secrets), "/")
 		if baseURL == "" {
 			baseURL = defaultLangfuseBaseURL
 		}
@@ -84,6 +93,9 @@ func LangfuseConfigFromEnv() LangfuseConfig {
 	env := strings.TrimSpace(os.Getenv("ENVIRONMENT"))
 	if env == "" {
 		env = strings.TrimSpace(os.Getenv("APP_ENV"))
+	}
+	if env == "" && secrets != nil {
+		env = strings.TrimSpace(secrets.GetEnv())
 	}
 	if env == "" {
 		env = "default"
@@ -98,6 +110,16 @@ func LangfuseConfigFromEnv() LangfuseConfig {
 		},
 		Environment: env,
 	}
+}
+
+func envOrSecret(key string, secrets SecretProvider) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	if secrets == nil {
+		return ""
+	}
+	return strings.TrimSpace(secrets.GetSecret(key))
 }
 
 func TraceAttributes(in TraceAttributeInput) []attribute.KeyValue {

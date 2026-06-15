@@ -17,10 +17,19 @@ import (
 const tracerName = "github.com/knid/wemob"
 
 func InitLangfuse(ctx context.Context) (func(context.Context) error, error) {
-	cfg := LangfuseConfigFromEnv()
+	return InitLangfuseWithSecrets(ctx, nil)
+}
+
+func InitLangfuseWithSecrets(ctx context.Context, secrets SecretProvider) (func(context.Context) error, error) {
+	cfg := LangfuseConfigFromEnvAndSecrets(secrets)
 	if !cfg.Enabled {
+		slog.Warn("Langfuse OpenTelemetry exporter disabled; LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is not configured")
 		return func(context.Context) error { return nil }, nil
 	}
+
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
+		slog.Error("Langfuse OpenTelemetry exporter error", "error", err)
+	}))
 
 	exporter, err := otlptracehttp.New(ctx,
 		otlptracehttp.WithEndpointURL(cfg.Endpoint),
