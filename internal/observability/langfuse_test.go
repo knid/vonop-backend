@@ -144,6 +144,37 @@ func TestTraceAttributesUseFilterableLangfuseKeys(t *testing.T) {
 	assertStringSliceAttr(t, attrs, "wemob.agent.loaded_skills", []string{"shared/api-design"})
 }
 
+func TestTraceAttributesUseConversationSessionWhenProvided(t *testing.T) {
+	attrs := attrsByKey(TraceAttributes(TraceAttributeInput{
+		Name:        "app_chat",
+		UserID:      "user-1",
+		SessionID:   "conversation-1",
+		TraceID:     "run-1",
+		RunID:       "run-1",
+		Environment: "prod",
+		Release:     "2026.06.15",
+		Version:     "48cbd705",
+		Tags:        []string{"wemob", "agent", "app_chat"},
+	}))
+
+	assertStringAttr(t, attrs, "langfuse.trace.name", "app_chat")
+	assertStringAttr(t, attrs, "langfuse.user.id", "user-1")
+	assertStringAttr(t, attrs, "langfuse.session.id", "conversation-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.run_id", "run-1")
+	assertStringAttr(t, attrs, "langfuse.environment", "prod")
+	assertStringAttr(t, attrs, "langfuse.release", "2026.06.15")
+	assertStringAttr(t, attrs, "langfuse.version", "48cbd705")
+	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "app_chat"})
+}
+
+func TestTraceAttributesFallbackSessionUsesRunIDThenTraceID(t *testing.T) {
+	runAttrs := attrsByKey(TraceAttributes(TraceAttributeInput{RunID: "run-1", TraceID: "trace-1"}))
+	assertStringAttr(t, runAttrs, "langfuse.session.id", "run-1")
+
+	traceAttrs := attrsByKey(TraceAttributes(TraceAttributeInput{TraceID: "trace-1"}))
+	assertStringAttr(t, traceAttrs, "langfuse.session.id", "trace-1")
+}
+
 func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 	entry := GenerationAttributeInput{
 		Model:                    "claude-sonnet-4-6",

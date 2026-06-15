@@ -38,11 +38,14 @@ type TraceAttributeInput struct {
 	ProjectID      string
 	TraceID        string
 	RunID          string
+	SessionID      string
 	Input          string
 	Output         string
 	RequiredSkills []string
 	LoadedSkills   []string
 	Environment    string
+	Release        string
+	Version        string
 	Tags           []string
 }
 
@@ -137,12 +140,21 @@ func TraceAttributes(in TraceAttributeInput) []attribute.KeyValue {
 	if in.UserID != "" {
 		attrs = append(attrs, attribute.String("langfuse.user.id", in.UserID))
 	}
-	sessionID := in.RunID
+	sessionID := in.SessionID
+	if sessionID == "" {
+		sessionID = in.RunID
+	}
 	if sessionID == "" {
 		sessionID = in.TraceID
 	}
 	if sessionID != "" {
 		attrs = append(attrs, attribute.String("langfuse.session.id", sessionID))
+	}
+	if in.Release != "" {
+		attrs = append(attrs, attribute.String("langfuse.release", in.Release))
+	}
+	if in.Version != "" {
+		attrs = append(attrs, attribute.String("langfuse.version", in.Version))
 	}
 	if in.Input != "" {
 		attrs = append(attrs, attribute.String("langfuse.trace.input", in.Input))
