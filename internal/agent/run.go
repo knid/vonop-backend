@@ -261,6 +261,7 @@ func Run(
 	// trace input with the user's prompt for the grouping $ai_trace event.
 	tracker.TrackContent = true
 	tracker.TraceInput = message
+	tracker.Prompt = observability.PromptLink{Name: observability.PromptAgentBase}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
 	traceAction := "app_chat"
@@ -278,7 +279,7 @@ func Run(
 		conversation = nil
 	}
 	langfuseSession := langfuseSessionID(conversation, project.ID, runID)
-	tracker.Langfuse = observability.TraceContext{
+	langfuseContext := observability.TraceContext{
 		Name:           traceAction,
 		Action:         traceAction,
 		AppType:        project.ProjectType,
@@ -297,7 +298,8 @@ func Run(
 		Environment:    deps.SecretManager.GetEnv(),
 		Tags:           []string{"wemob", "agent", traceAction},
 	}
-	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(tracker.Langfuse))
+	tracker.SetLangfuseContext(langfuseContext)
+	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(langfuseContext))
 	defer func() {
 		if tracker.TraceOutput != "" {
 			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
@@ -510,10 +512,11 @@ func Run(
 			status = "error"
 		}
 		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
-		tracker.Langfuse.RequiredSkills = requiredSkillIDs
-		tracker.Langfuse.LoadedSkills = loadedSkillIDs
+		langfuseContext := tracker.LangfuseContext()
+		langfuseContext.RequiredSkills = requiredSkillIDs
+		langfuseContext.LoadedSkills = loadedSkillIDs
 		observability.RecordTool(ctx, name, argsJSON, isErr || execErr != nil, durationMs, toolStart,
-			tracker.Langfuse.Attributes("tool")...)
+			langfuseContext.Attributes("tool")...)
 		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
 			RunID:      runID,
 			ToolCallID: toolCallID,

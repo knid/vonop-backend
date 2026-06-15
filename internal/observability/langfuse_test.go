@@ -237,6 +237,17 @@ func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.latency_ms", 1234)
 }
 
+func TestGenerationAttributesLinkPrompt(t *testing.T) {
+	attrs := attrsByKey(GenerationAttributes(GenerationAttributeInput{
+		Model:         "claude-sonnet-4-6",
+		PromptName:    PromptAgentBase,
+		PromptVersion: 3,
+	}, 1))
+
+	assertStringAttr(t, attrs, "langfuse.observation.prompt.name", PromptAgentBase)
+	assertIntAttr(t, attrs, "langfuse.observation.prompt.version", 3)
+}
+
 func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	attrs := attrsByKey(ToolAttributes("write_files", `{"path":"app/page.tsx"}`, true, 250))
 

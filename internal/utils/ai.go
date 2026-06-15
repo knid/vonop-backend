@@ -396,6 +396,10 @@ func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 
 func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, toolNames []string) {
 	cost, costSource := resolveCostUSD(model, usage)
+	var prompt observability.PromptLink
+	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+		prompt = tracker.Prompt
+	}
 	_, span := observability.StartGeneration(ctx, spanName, observability.GenerationAttributeInput{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -411,13 +415,16 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		InputMessages:            messageSnapshots(inputMessages),
 		OutputText:               outputText,
 		ToolNames:                toolNames,
+		PromptName:               prompt.Name,
+		PromptVersion:            prompt.Version,
 	}, round, startedAt)
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 		required, loaded := tracker.AgentSkills()
-		tracker.Langfuse.Output = tracker.TraceOutput
-		tracker.Langfuse.RequiredSkills = required
-		tracker.Langfuse.LoadedSkills = loaded
-		span.SetAttributes(tracker.Langfuse.Attributes("llm")...)
+		langfuseContext := tracker.LangfuseContext()
+		langfuseContext.Output = outputText
+		langfuseContext.RequiredSkills = required
+		langfuseContext.LoadedSkills = loaded
+		span.SetAttributes(langfuseContext.Attributes("llm")...)
 	}
 	endOpts := []trace.SpanEndOption{}
 	if !startedAt.IsZero() {
@@ -488,6 +495,7 @@ type TokenTracker struct {
 	RequiredSkillIDs  []string
 	LoadedSkillIDs    []string
 	Langfuse          observability.TraceContext
+	Prompt            observability.PromptLink
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.
@@ -528,6 +536,25 @@ func (t *TokenTracker) AgentSkills() (required, loaded []string) {
 	required = append([]string(nil), t.RequiredSkillIDs...)
 	loaded = append([]string(nil), t.LoadedSkillIDs...)
 	return required, loaded
+}
+
+func (t *TokenTracker) SetLangfuseContext(ctx observability.TraceContext) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Langfuse = cloneLangfuseContext(ctx)
+}
+
+func (t *TokenTracker) LangfuseContext() observability.TraceContext {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return cloneLangfuseContext(t.Langfuse)
+}
+
+func cloneLangfuseContext(ctx observability.TraceContext) observability.TraceContext {
+	ctx.RequiredSkills = append([]string(nil), ctx.RequiredSkills...)
+	ctx.LoadedSkills = append([]string(nil), ctx.LoadedSkills...)
+	ctx.Tags = append([]string(nil), ctx.Tags...)
+	return ctx
 }
 
 func dedupeStrings(values []string) []string {

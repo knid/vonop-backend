@@ -10,7 +10,49 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/knid/wemob/internal/observability"
 )
+
+func TestTokenTrackerLangfuseContextSnapshotsSlices(t *testing.T) {
+	tracker := NewTokenTracker()
+	base := observability.TraceContext{
+		RequiredSkills: []string{"web/frontend-patterns"},
+		LoadedSkills:   []string{"shared/api-design"},
+		Tags:           []string{"wemob", "agent"},
+	}
+
+	tracker.SetLangfuseContext(base)
+	base.RequiredSkills[0] = "mutated"
+	base.LoadedSkills[0] = "mutated"
+	base.Tags[0] = "mutated"
+
+	first := tracker.LangfuseContext()
+	if first.RequiredSkills[0] != "web/frontend-patterns" {
+		t.Fatalf("required skill leaked from caller mutation: %q", first.RequiredSkills[0])
+	}
+	if first.LoadedSkills[0] != "shared/api-design" {
+		t.Fatalf("loaded skill leaked from caller mutation: %q", first.LoadedSkills[0])
+	}
+	if first.Tags[0] != "wemob" {
+		t.Fatalf("tag leaked from caller mutation: %q", first.Tags[0])
+	}
+
+	first.RequiredSkills[0] = "child-mutated"
+	first.LoadedSkills[0] = "child-mutated"
+	first.Tags[0] = "child-mutated"
+
+	second := tracker.LangfuseContext()
+	if second.RequiredSkills[0] != "web/frontend-patterns" {
+		t.Fatalf("required skill leaked from snapshot mutation: %q", second.RequiredSkills[0])
+	}
+	if second.LoadedSkills[0] != "shared/api-design" {
+		t.Fatalf("loaded skill leaked from snapshot mutation: %q", second.LoadedSkills[0])
+	}
+	if second.Tags[0] != "wemob" {
+		t.Fatalf("tag leaked from snapshot mutation: %q", second.Tags[0])
+	}
+}
 
 func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	messages := make([]Message, 0, 12)

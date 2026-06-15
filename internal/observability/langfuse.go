@@ -120,6 +120,8 @@ type GenerationAttributeInput struct {
 	InputMessages            []MessageSnapshot
 	OutputText               string
 	ToolNames                []string
+	PromptName               string
+	PromptVersion            int
 }
 
 func LangfuseConfigFromEnv() LangfuseConfig {
@@ -267,6 +269,12 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	}
 	if entry.CostSource != "" {
 		attrs = append(attrs, attribute.String("langfuse.observation.metadata.cost_source", entry.CostSource))
+	}
+	if entry.PromptName != "" {
+		attrs = append(attrs, attribute.String("langfuse.observation.prompt.name", entry.PromptName))
+	}
+	if entry.PromptVersion > 0 {
+		attrs = append(attrs, attribute.Int("langfuse.observation.prompt.version", entry.PromptVersion))
 	}
 	if entry.CacheCreationInputTokens > 0 {
 		attrs = append(attrs, attribute.Int("langfuse.observation.metadata.cache_creation_input_tokens", entry.CacheCreationInputTokens))
