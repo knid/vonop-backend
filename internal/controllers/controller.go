@@ -254,6 +254,7 @@ func (c *Controller) attachOpenRouterFallback(primary *utils.LLMProvider, fastMo
 		Name:              "openrouter",
 		BaseURL:           "https://openrouter.ai/api/v1",
 		APIKey:            openRouterKey,
+		DefaultReasoning:  c.reasoningConfig(),
 		FastModelOverride: fastModel,
 	}
 	primary.FallbackModel = fallbackModel

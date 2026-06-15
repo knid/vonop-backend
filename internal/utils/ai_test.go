@@ -88,6 +88,38 @@ func TestStreamDeltaGetReasoningFallsBackToReasoning(t *testing.T) {
 	}
 }
 
+func TestBuildLLMRequestBodyAppliesOpenRouterDefaultReasoning(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "z-ai/glm-5.1-20260406",
+		Stream:   true,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, &LLMProvider{
+		Name:             "openrouter",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		APIKey:           "test-key",
+		DefaultReasoning: &ReasoningConfig{Effort: "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody returned error: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	reasoning, ok := got["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing reasoning object: %s", body)
+	}
+	if reasoning["effort"] != "none" {
+		t.Fatalf("reasoning.effort = %#v, want none; body=%s", reasoning["effort"], body)
+	}
+	usage, ok := got["usage"].(map[string]any)
+	if !ok || usage["include"] != true {
+		t.Fatalf("request body missing usage.include=true: %s", body)
+	}
+}
+
 func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
