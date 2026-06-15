@@ -78,6 +78,19 @@ func TestLangfusePromptNameUsesAgentProfile(t *testing.T) {
 	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(&AgentProfile{ID: "custom"}))
 }
 
+func TestRunExecutionHasRunID(t *testing.T) {
+	runID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	exec := &RunExecution{RunID: runID}
+
+	assert.Equal(t, runID.String(), exec.RunIDString())
+}
+
+func TestRunExecutionHasEmptyRunIDStringWhenUnset(t *testing.T) {
+	exec := &RunExecution{}
+
+	assert.Equal(t, "", exec.RunIDString())
+}
+
 func TestCountToolErrors(t *testing.T) {
 	got := countToolErrors([]models.ChatMessagePart{
 		{Type: "text", Text: "hello"},
