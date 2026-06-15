@@ -10,6 +10,7 @@ import (
 	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/fal"
 	"github.com/knid/wemob/internal/utils"
@@ -22,6 +23,7 @@ import (
 func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDependencies {
 	provider := c.llmProviderForUser(user)
 	_, planName, _ := c.GetUserLimitsWithPlan(user)
+	langfuseScores := observability.ScoreClientFromEnvAndSecrets(c.SecretManager)
 
 	return &agent.RunDependencies{
 		DB:            c.DB,
@@ -127,6 +129,9 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		},
 		RecordLLMError: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string, latencyMs int64, errCode, errMsg string) {
 			c.RecordLLMError(user, tracker, action, model, provider, reference, appType, latencyMs, errCode, errMsg)
+		},
+		RecordLangfuseScore: func(ctx context.Context, score observability.ScoreRequest) error {
+			return langfuseScores.CreateScore(ctx, score)
 		},
 		JobID:                 jobID,
 		ListMCPTools:          c.AgentMCPTools,

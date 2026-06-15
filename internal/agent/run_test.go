@@ -77,6 +77,17 @@ func TestLangfusePromptNameUsesAgentProfile(t *testing.T) {
 	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(&AgentProfile{ID: "custom"}))
 }
 
+func TestCountToolErrors(t *testing.T) {
+	got := countToolErrors([]models.ChatMessagePart{
+		{Type: "text", Text: "hello"},
+		{Type: "tool_call", Name: "read_files"},
+		{Type: "tool_call", Name: "write_file", IsError: true},
+		{Type: "tool_call", Name: "edit_file", IsError: true},
+	})
+
+	assert.Equal(t, 2, got)
+}
+
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {
 	history := []models.AppChatMessage{
 		{Role: "assistant", Content: "legacy text", Parts: []byte("[]"), ToolCalls: []byte("[]")},

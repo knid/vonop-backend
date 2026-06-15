@@ -1005,6 +1005,22 @@ func finaliseSuccess(
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
 		slog.Warn("failed to finalise agent run row", "error", err, "run_id", run.ID)
 	}
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: tracker.TraceID,
+		Name:    observability.ScoreAgentRunSuccess,
+		Value:   1,
+		Comment: "agent run completed",
+	})
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: tracker.TraceID,
+		Name:    observability.ScoreAgentRunTurns,
+		Value:   turns,
+	})
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: tracker.TraceID,
+		Name:    observability.ScoreAgentToolErrors,
+		Value:   countToolErrors(parts),
+	})
 
 	// 4. Deduct credits.
 	if deps.DeductCredits != nil && credits > 0 {
@@ -1153,6 +1169,25 @@ func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker, projectID
 	return total
 }
 
+func recordLangfuseScore(ctx context.Context, deps *RunDependencies, score observability.ScoreRequest) {
+	if deps == nil || deps.RecordLangfuseScore == nil {
+		return
+	}
+	if err := deps.RecordLangfuseScore(ctx, score); err != nil {
+		slog.Warn("failed to record Langfuse score", "error", err, "score", score.Name, "trace_id", score.TraceID)
+	}
+}
+
+func countToolErrors(parts []models.ChatMessagePart) int {
+	count := 0
+	for _, part := range parts {
+		if part.Type == "tool_call" && part.IsError {
+			count++
+		}
+	}
+	return count
+}
+
 // estimateCost wraps utils.EstimateInputOutputCostUSD.
 func estimateCost(model string, input, output int) float64 {
 	in, out := utils.EstimateInputOutputCostUSD(model, input, output, 0, 0)
@@ -1263,6 +1298,14 @@ func finaliseFailureV2(
 	run.CompletedAt = time.Now()
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
 		slog.Warn("failed to finalise failed agent run row", "error", err, "run_id", run.ID)
+	}
+	if tracker != nil {
+		recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+			TraceID: tracker.TraceID,
+			Name:    observability.ScoreAgentRunSuccess,
+			Value:   0,
+			Comment: fmt.Sprintf("%s: %s", code, failureMessage),
+		})
 	}
 
 	// 3b. Deduct credits for consumed tokens. Uses the same action label as

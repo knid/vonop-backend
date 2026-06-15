@@ -7,6 +7,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -151,6 +152,8 @@ type LLMErrorRecorder func(
 	errCode, errMsg string,
 )
 
+type LangfuseScoreRecorder func(ctx context.Context, score observability.ScoreRequest) error
+
 type MCPRuntimeTool struct {
 	ConnectionID string
 	ToolID       string
@@ -257,6 +260,7 @@ type RunDependencies struct {
 	SetPreviewURL        PreviewURLSetter
 	RecordLLMUsage       LLMUsageRecorder
 	RecordLLMError       LLMErrorRecorder
+	RecordLangfuseScore  LangfuseScoreRecorder
 
 	JobID                 string
 	ListMCPTools          MCPRuntimeToolLister
