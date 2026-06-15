@@ -91,6 +91,58 @@ func TestRunExecutionHasEmptyRunIDStringWhenUnset(t *testing.T) {
 	assert.Equal(t, "", exec.RunIDString())
 }
 
+func TestNewAgentRunWorkflowUsesDefaultLoop(t *testing.T) {
+	workflow := NewAgentRunWorkflow(nil)
+
+	_, ok := workflow.AgentLoop.(DefaultAgentLoop)
+	assert.True(t, ok)
+}
+
+type fakeAgentLoop struct{}
+
+func (fakeAgentLoop) Execute(ctx context.Context, input AgentLoopInput) (AgentLoopResult, error) {
+	return AgentLoopResult{Text: "ok"}, nil
+}
+
+func TestNewAgentRunWorkflowKeepsProvidedLoop(t *testing.T) {
+	custom := fakeAgentLoop{}
+	workflow := NewAgentRunWorkflow(custom)
+
+	assert.Equal(t, custom, workflow.AgentLoop)
+}
+
+type recordingAgentLoop struct {
+	input AgentLoopInput
+}
+
+func (l *recordingAgentLoop) Execute(ctx context.Context, input AgentLoopInput) (AgentLoopResult, error) {
+	l.input = input
+	return AgentLoopResult{Text: "loop text"}, nil
+}
+
+func TestAgentRunWorkflowExecuteLoopDelegatesToAgentLoop(t *testing.T) {
+	loop := &recordingAgentLoop{}
+	workflow := NewAgentRunWorkflow(loop)
+	input := AgentLoopInput{
+		Model:    "model-1",
+		Messages: []utils.Message{{Role: "user", Content: "hello"}},
+	}
+
+	result, err := workflow.ExecuteAgentLoop(t.Context(), input)
+
+	require.NoError(t, err)
+	assert.Equal(t, "loop text", result.Text)
+	assert.Equal(t, "model-1", loop.input.Model)
+	assert.Equal(t, "hello", loop.input.Messages[0].Content)
+}
+
+func TestRunFinalizerStoresDependencies(t *testing.T) {
+	deps := &RunDependencies{}
+	finalizer := NewRunFinalizer(deps)
+
+	assert.Same(t, deps, finalizer.Deps)
+}
+
 func TestCountToolErrors(t *testing.T) {
 	got := countToolErrors([]models.ChatMessagePart{
 		{Type: "text", Text: "hello"},

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -20,4 +21,15 @@ func TestRuntimePhaseSpanNames(t *testing.T) {
 func TestRuntimePhaseStringFallsBackToRawValue(t *testing.T) {
 	phase := RuntimePhase("custom-phase")
 	assert.Equal(t, "custom-phase", phase.SpanName())
+}
+
+func TestWithRuntimePhaseReturnsFunctionResult(t *testing.T) {
+	called := false
+	err := withRuntimePhase(t.Context(), RuntimePhaseLoadProjectState, func(ctx context.Context) error {
+		called = true
+		return nil
+	})
+
+	assert.NoError(t, err)
+	assert.True(t, called)
 }

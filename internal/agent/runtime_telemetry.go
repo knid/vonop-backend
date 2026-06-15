@@ -33,3 +33,9 @@ func startRuntimePhase(ctx context.Context, phase RuntimePhase, attrs ...attribu
 	baseAttrs = append(baseAttrs, attrs...)
 	return observability.Tracer().Start(ctx, phase.SpanName(), trace.WithAttributes(baseAttrs...))
 }
+
+func withRuntimePhase(ctx context.Context, phase RuntimePhase, fn func(context.Context) error) error {
+	phaseCtx, span := startRuntimePhase(ctx, phase)
+	defer span.End()
+	return fn(phaseCtx)
+}

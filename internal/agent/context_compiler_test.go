@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -51,5 +52,24 @@ func TestCompileAgentContext_ReadOnlyCommand(t *testing.T) {
 
 	if !packet.ReadOnly {
 		t.Fatal("/review should compile as read-only")
+	}
+}
+
+func TestRuntimeContextCompilerReturnsContextPacket(t *testing.T) {
+	project := &models.AppProject{ProjectType: models.ProjectTypeApp, Status: "ready"}
+	compiler := RuntimeContextCompiler{}
+
+	packet := compiler.Compile(AgentContextInput{
+		Context:    context.Background(),
+		Project:    project,
+		Message:    "make it nicer",
+		IsFirstGen: false,
+	})
+
+	if packet.Profile == nil {
+		t.Fatal("expected context packet profile")
+	}
+	if len(packet.SystemMessages) == 0 {
+		t.Fatal("expected at least one system message")
 	}
 }
