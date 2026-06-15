@@ -396,6 +396,10 @@ func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 
 func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, toolNames []string) {
 	cost, costSource := resolveCostUSD(model, usage)
+	var prompt observability.PromptLink
+	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+		prompt = tracker.Prompt
+	}
 	_, span := observability.StartGeneration(ctx, spanName, observability.GenerationAttributeInput{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
@@ -411,21 +415,16 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		InputMessages:            messageSnapshots(inputMessages),
 		OutputText:               outputText,
 		ToolNames:                toolNames,
+		PromptName:               prompt.Name,
+		PromptVersion:            prompt.Version,
 	}, round, startedAt)
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 		required, loaded := tracker.AgentSkills()
-		span.SetAttributes(observability.TraceAttributes(observability.TraceAttributeInput{
-			UserID:         tracker.UserID,
-			OrgID:          tracker.OrganizationID,
-			ProjectID:      tracker.ProjectID,
-			TraceID:        tracker.TraceID,
-			RunID:          tracker.RunID,
-			Input:          tracker.TraceInput,
-			Output:         tracker.TraceOutput,
-			RequiredSkills: required,
-			LoadedSkills:   loaded,
-			Tags:           []string{"wemob", "llm"},
-		})...)
+		langfuseContext := tracker.LangfuseContext()
+		langfuseContext.Output = ""
+		langfuseContext.RequiredSkills = required
+		langfuseContext.LoadedSkills = loaded
+		span.SetAttributes(langfuseContext.Attributes("llm")...)
 	}
 	endOpts := []trace.SpanEndOption{}
 	if !startedAt.IsZero() {
@@ -495,6 +494,9 @@ type TokenTracker struct {
 	StartedAt         time.Time // wall-clock start of the generation (for accurate $ai_latency)
 	RequiredSkillIDs  []string
 	LoadedSkillIDs    []string
+	Langfuse          observability.TraceContext
+	LangfuseTraceID   string
+	Prompt            observability.PromptLink
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.
@@ -535,6 +537,26 @@ func (t *TokenTracker) AgentSkills() (required, loaded []string) {
 	required = append([]string(nil), t.RequiredSkillIDs...)
 	loaded = append([]string(nil), t.LoadedSkillIDs...)
 	return required, loaded
+}
+
+func (t *TokenTracker) SetLangfuseContext(ctx observability.TraceContext) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.Langfuse = cloneLangfuseContext(ctx)
+}
+
+func (t *TokenTracker) LangfuseContext() observability.TraceContext {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return cloneLangfuseContext(t.Langfuse)
+}
+
+func cloneLangfuseContext(ctx observability.TraceContext) observability.TraceContext {
+	ctx.RequiredSkills = append([]string(nil), ctx.RequiredSkills...)
+	ctx.LoadedSkills = append([]string(nil), ctx.LoadedSkills...)
+	ctx.PromptParts = append([]observability.PromptLink(nil), ctx.PromptParts...)
+	ctx.Tags = append([]string(nil), ctx.Tags...)
+	return ctx
 }
 
 func dedupeStrings(values []string) []string {

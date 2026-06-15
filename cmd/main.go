@@ -470,10 +470,14 @@ func isSensitiveLogPath(path string) bool {
 
 func main() {
 	controller, _ := bootstrap.BootstrapController()
-	shutdownLangfuse, err := observability.InitLangfuseWithSecrets(context.Background(), controller.SecretManager)
+	langfuseHandle, err := observability.InitLangfuseWithSecrets(context.Background(), controller.SecretManager)
 	if err != nil {
 		slog.Error("failed to initialize Langfuse OpenTelemetry exporter", "error", err)
 		os.Exit(1)
+	}
+	observability.EmitStartupCanary(context.Background(), "api")
+	if err := langfuseHandle.ForceFlush(context.Background()); err != nil {
+		slog.Warn("Langfuse startup canary flush failed", "error", err)
 	}
 
 	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
@@ -1575,7 +1579,7 @@ func main() {
 			controller.PostHog.Close()
 		}
 
-		if err := shutdownLangfuse(ctx); err != nil {
+		if err := langfuseHandle.Shutdown(ctx); err != nil {
 			slog.Error("Langfuse OpenTelemetry shutdown error", "error", err)
 		}
 

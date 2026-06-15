@@ -1,13 +1,17 @@
 package agent
 
 import (
+	"context"
+
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 )
 
 type AgentContextPacket struct {
 	Profile           *AgentProfile
 	SystemMessages    []utils.Message
+	PromptParts       []observability.PromptLink
 	Skills            []SkillFile
 	RequiredSkills    []SkillFile
 	SuggestedSkills   []SkillFile
@@ -19,6 +23,7 @@ type AgentContextPacket struct {
 }
 
 type AgentContextInput struct {
+	Context         context.Context
 	Project         *models.AppProject
 	Deps            *RunDependencies
 	AttachmentsPool []models.AppAsset
@@ -28,7 +33,11 @@ type AgentContextInput struct {
 
 func CompileAgentContext(input AgentContextInput) AgentContextPacket {
 	profile := ResolveAgentProfile(input.Project)
-	msgs := BuildSystemMessagesForProfile(profile, input.Project, input.Deps, input.AttachmentsPool, input.IsFirstGen)
+	ctx := input.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	msgs, promptParts := BuildSystemMessagesForProfileWithLangfuse(ctx, profile, input.Project, input.Deps, input.AttachmentsPool, input.IsFirstGen)
 
 	if addendum := SlashCommandSystemAddendum(input.Message); addendum != "" {
 		msgs = append(msgs, utils.Message{
@@ -48,6 +57,7 @@ func CompileAgentContext(input AgentContextInput) AgentContextPacket {
 	return AgentContextPacket{
 		Profile:           profile,
 		SystemMessages:    msgs,
+		PromptParts:       promptParts,
 		Skills:            skills,
 		RequiredSkills:    skills,
 		SuggestedSkills:   suggestedSkills,

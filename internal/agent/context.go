@@ -1,13 +1,29 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 )
+
+func contextWithoutLangfuse() context.Context {
+	return context.Background()
+}
+
+func depsWithoutLangfuse(deps *RunDependencies) *RunDependencies {
+	if deps == nil {
+		return nil
+	}
+	copyDeps := *deps
+	copyDeps.ResolveLangfusePrompt = nil
+	return &copyDeps
+}
 
 // planningDiscipline is injected as a final system message to reduce tool-round
 // churn. The compact base prompt covers basic tool protocol; this block keeps
@@ -89,27 +105,40 @@ func BuildSystemMessages(project *models.AppProject, deps *RunDependencies, atta
 }
 
 func BuildSystemMessagesForProfile(profile *AgentProfile, project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) []utils.Message {
+	msgs, _ := BuildSystemMessagesForProfileWithLangfuse(contextWithoutLangfuse(), profile, project, depsWithoutLangfuse(deps), attachmentsPool, isFirstGen)
+	return msgs
+}
+
+func BuildSystemMessagesForProfileWithLangfuse(ctx context.Context, profile *AgentProfile, project *models.AppProject, deps *RunDependencies, attachmentsPool []models.AppAsset, isFirstGen bool) ([]utils.Message, []observability.PromptLink) {
 	if profile == nil {
 		profile = ResolveAgentProfile(project)
 	}
-	base := profile.BasePrompt
-	modeAddendum := profile.ModePrompt(isFirstGen)
-	addendum := buildAddendum(project, deps)
-	boundary := buildProjectTypeBoundary(project)
+	base, baseLink := resolveLangfusePrompt(ctx, deps, langfuseBasePromptName(profile), profile.BasePrompt, nil)
+	modeName := langfuseModePromptName(profile, isFirstGen)
+	modeAddendum, modeLink := resolveLangfusePrompt(ctx, deps, modeName, profile.ModePrompt(isFirstGen), nil)
+	addendum, addendumLinks := buildAddendumWithLangfuse(ctx, project, deps)
+	boundary, boundaryLink := buildProjectTypeBoundaryWithLangfuse(ctx, deps, project)
 
 	msgs := []utils.Message{{Role: "system", Content: base}}
+	promptParts := []observability.PromptLink{baseLink}
 	msgs = append(msgs, utils.Message{Role: "system", Content: modeAddendum})
+	promptParts = append(promptParts, modeLink)
 	if boundary != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: boundary})
+		promptParts = append(promptParts, boundaryLink)
 	}
 	if addendum != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: addendum})
+		promptParts = append(promptParts, addendumLinks...)
 	}
-	if manifest := AttachmentsAddendum(attachmentsPool); manifest != "" {
+	if manifest, link := AttachmentsAddendumWithLangfuse(ctx, deps, attachmentsPool); manifest != "" {
 		msgs = append(msgs, utils.Message{Role: "system", Content: manifest})
+		promptParts = append(promptParts, link)
 	}
-	msgs = append(msgs, utils.Message{Role: "system", Content: planningDiscipline})
-	return msgs
+	planning, planningLink := resolveLangfusePrompt(ctx, deps, observability.PromptAgentPlanningDiscipline, planningDiscipline, nil)
+	msgs = append(msgs, utils.Message{Role: "system", Content: planning})
+	promptParts = append(promptParts, planningLink)
+	return msgs, promptParts
 }
 
 func buildProjectTypeBoundary(project *models.AppProject) string {
@@ -130,6 +159,75 @@ func buildProjectTypeBoundary(project *models.AppProject) string {
 	default:
 		return fmt.Sprintf(projectTypeBoundary, projectType, "unknown app type", "this app type", "supported")
 	}
+}
+
+func buildProjectTypeBoundaryWithLangfuse(ctx context.Context, deps *RunDependencies, project *models.AppProject) (string, observability.PromptLink) {
+	fallback := buildProjectTypeBoundary(project)
+	if fallback == "" {
+		return "", observability.PromptLink{}
+	}
+	projectType, label, article, targets := projectTypeBoundaryVars(project)
+	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentProjectTypeBoundary, fallback, map[string]string{
+		"project_type":         projectType,
+		"project_type_label":   label,
+		"project_article":      article,
+		"target_project_types": targets,
+	})
+}
+
+func projectTypeBoundaryVars(project *models.AppProject) (string, string, string, string) {
+	projectType := models.ProjectTypeApp
+	if project != nil && project.ProjectType != "" {
+		projectType = project.ProjectType
+	}
+	switch projectType {
+	case models.ProjectTypeApp:
+		return projectType, "web app", "a web app", "ecommerce or mobile_app_native"
+	case models.ProjectTypeEcommerce:
+		return projectType, "ecommerce web store", "an ecommerce app", "app or mobile_app_native"
+	case models.ProjectTypeMobileAppNative:
+		return projectType, "native mobile app", "a native mobile app", "app or ecommerce"
+	default:
+		return projectType, "unknown app type", "this app type", "supported"
+	}
+}
+
+func langfuseBasePromptName(profile *AgentProfile) string {
+	if profile != nil && profile.ID == AgentIDMobileBuilder {
+		return observability.PromptAgentMobileBase
+	}
+	return observability.PromptAgentWebBase
+}
+
+func langfuseModePromptName(profile *AgentProfile, isFirstGen bool) string {
+	if profile != nil && profile.ID == AgentIDMobileBuilder {
+		if isFirstGen {
+			return observability.PromptAgentMobileFirstGen
+		}
+		return observability.PromptAgentMobileChat
+	}
+	if isFirstGen {
+		return observability.PromptAgentWebFirstGen
+	}
+	return observability.PromptAgentWebChat
+}
+
+func resolveLangfusePrompt(ctx context.Context, deps *RunDependencies, name, fallback string, vars map[string]string) (string, observability.PromptLink) {
+	link := observability.PromptLink{Name: name}
+	if deps == nil || deps.ResolveLangfusePrompt == nil || name == "" {
+		return fallback, link
+	}
+	compiled, err := deps.ResolveLangfusePrompt(ctx, name, fallback, vars)
+	if err != nil || strings.TrimSpace(compiled.Text) == "" {
+		if err != nil {
+			slog.Warn("failed to resolve Langfuse prompt, using local fallback", "error", err, "prompt", name)
+		}
+		return fallback, link
+	}
+	if compiled.Name == "" {
+		compiled.Name = name
+	}
+	return compiled.Text, observability.PromptLink{Name: compiled.Name, Version: compiled.Version}
 }
 
 // BuildFileTreeUserPrefix returns the file-tree context block that should be
@@ -188,8 +286,17 @@ func BuildDesignBriefUserPrefix(fileMap *SafeFileMap) string {
 // currently-enabled native features so the agent doesn't need to call
 // read_mobile_config every turn.
 func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
+	text, _ := buildAddendumWithLangfuse(contextWithoutLangfuse(), project, depsWithoutLangfuse(deps))
+	return text
+}
+
+func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, deps *RunDependencies) (string, []observability.PromptLink) {
+	if project == nil {
+		return "", nil
+	}
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
 		var parts []string
+		var links []observability.PromptLink
 		var fetcher mobileConfigGetter
 		if deps != nil {
 			if deps.mobileConfigFetcher != nil {
@@ -201,57 +308,82 @@ func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 		if fetcher != nil {
 			cfg, err := fetcher.GetMobileAppConfig(project.ID.String())
 			if err == nil && cfg != nil {
-				if a := mobileNativeAddendum(cfg); a != "" {
+				if a, link := mobileNativeAddendumWithLangfuse(ctx, deps, cfg); a != "" {
 					parts = append(parts, a)
+					links = append(links, link)
 				}
 			}
 		}
 		if projectHasDatabase(project) {
-			parts = append(parts, DatabaseAddendumNative)
+			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseNativeAddendum, DatabaseAddendumNative, nil)
+			parts = append(parts, a)
+			links = append(links, link)
 		}
 		if projectHasLocalDatabase(project) {
-			parts = append(parts, LocalDatabaseAddendum)
+			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentLocalDatabaseAddendum, LocalDatabaseAddendum, nil)
+			parts = append(parts, a)
+			links = append(links, link)
 		}
 		if len(parts) == 0 {
-			return ""
+			return "", nil
 		}
-		return strings.Join(parts, "\n\n")
+		return strings.Join(parts, "\n\n"), links
 	}
 
 	var parts []string
+	var links []observability.PromptLink
 	isEcommerce := project.ProjectType == "ecommerce"
 	isBackendOnly := project.FrontendRuntime == models.FrontendRuntimeNone
 	if isBackendOnly {
-		parts = append(parts, BackendOnlyAddendum)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentBackendOnlyAddendum, BackendOnlyAddendum, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	} else if project.UsesSplitWebRuntime() {
-		parts = append(parts, SplitWebAddendum)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentSplitWebAddendum, SplitWebAddendum, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	}
 	if isEcommerce {
-		parts = append(parts, EcommerceAddendum)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentEcommerceAddendum, EcommerceAddendum, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	}
 	if projectHasAuth(project) {
-		parts = append(parts, AuthAddendum)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentAuthAddendum, AuthAddendum, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	}
 	if (project.UsesSplitWebRuntime() || isBackendOnly) && projectHasDatabase(project) {
-		parts = append(parts, DatabaseAddendumSplitWeb)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseSplitAddendum, DatabaseAddendumSplitWeb, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	} else if !isEcommerce && projectHasDatabase(project) {
-		parts = append(parts, DatabaseAddendum)
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseAddendum, DatabaseAddendum, nil)
+		parts = append(parts, a)
+		links = append(links, link)
 	}
 	if projectHasAI(project) {
-		parts = append(parts, buildAIAddendum(deps, project))
+		a, link := buildAIAddendumWithLangfuse(ctx, deps, project)
+		parts = append(parts, a)
+		links = append(links, link)
 	}
 	if len(parts) == 0 {
-		return ""
+		return "", nil
 	}
-	return strings.Join(parts, "\n\n")
+	return strings.Join(parts, "\n\n"), links
 }
 
 // mobileNativeAddendum formats the current MobileAppConfig as a system-message
 // addendum so the agent sees the project's enabled native features on every
 // turn without calling read_mobile_config first.
 func mobileNativeAddendum(cfg *models.MobileAppConfig) string {
+	text, _ := mobileNativeAddendumWithLangfuse(contextWithoutLangfuse(), nil, cfg)
+	return text
+}
+
+func mobileNativeAddendumWithLangfuse(ctx context.Context, deps *RunDependencies, cfg *models.MobileAppConfig) (string, observability.PromptLink) {
 	if cfg == nil {
-		return ""
+		return "", observability.PromptLink{}
 	}
 	methods := cfg.BridgeMethods
 	if methods == nil {
@@ -272,7 +404,17 @@ func mobileNativeAddendum(cfg *models.MobileAppConfig) string {
 	sb.WriteString(fmt.Sprintf("Offline enabled: %v\n", cfg.OfflineEnabled))
 	sb.WriteString(fmt.Sprintf("Permissions: [%s]\n", strings.Join(permissions, ", ")))
 	sb.WriteString("\nIf you need a feature not in the list, call configure_mobile_bridge first.")
-	return sb.String()
+	fallback := sb.String()
+	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentMobileConfigAddendum, fallback, map[string]string{
+		"bridge_methods":        strings.Join(methods, ", "),
+		"url_scheme":            cfg.URLScheme,
+		"universal_link_domain": cfg.UniversalLinkDomain,
+		"biometric_enabled":     fmt.Sprintf("%v", cfg.BiometricEnabled),
+		"push_enabled":          fmt.Sprintf("%v", cfg.PushEnabled),
+		"dark_mode_enabled":     fmt.Sprintf("%v", cfg.DarkModeEnabled),
+		"offline_enabled":       fmt.Sprintf("%v", cfg.OfflineEnabled),
+		"permissions":           strings.Join(permissions, ", "),
+	})
 }
 
 // projectHasAI returns true if the project has the Wemob AI Gateway wired up

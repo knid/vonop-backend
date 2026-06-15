@@ -16,15 +16,40 @@ import (
 
 const tracerName = "github.com/knid/wemob"
 
-func InitLangfuse(ctx context.Context) (func(context.Context) error, error) {
-	return InitLangfuseWithSecrets(ctx, nil)
+type LangfuseHandle struct {
+	Enabled     bool
+	Endpoint    string
+	Environment string
+	provider    *sdktrace.TracerProvider
 }
 
-func InitLangfuseWithSecrets(ctx context.Context, secrets SecretProvider) (func(context.Context) error, error) {
+func (h *LangfuseHandle) Shutdown(ctx context.Context) error {
+	if h == nil || h.provider == nil {
+		return nil
+	}
+	return h.provider.Shutdown(ctx)
+}
+
+func (h *LangfuseHandle) ForceFlush(ctx context.Context) error {
+	if h == nil || h.provider == nil {
+		return nil
+	}
+	return h.provider.ForceFlush(ctx)
+}
+
+func InitLangfuse(ctx context.Context) (func(context.Context) error, error) {
+	handle, err := InitLangfuseWithSecrets(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return handle.Shutdown, nil
+}
+
+func InitLangfuseWithSecrets(ctx context.Context, secrets SecretProvider) (*LangfuseHandle, error) {
 	cfg := LangfuseConfigFromEnvAndSecrets(secrets)
 	if !cfg.Enabled {
 		slog.Warn("Langfuse OpenTelemetry exporter disabled; LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY is not configured")
-		return func(context.Context) error { return nil }, nil
+		return &LangfuseHandle{Enabled: false}, nil
 	}
 
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) {
@@ -61,7 +86,12 @@ func InitLangfuseWithSecrets(ctx context.Context, secrets SecretProvider) (func(
 	otel.SetTracerProvider(provider)
 	slog.Info("Langfuse OpenTelemetry exporter enabled", "endpoint", cfg.Endpoint, "environment", cfg.Environment)
 
-	return provider.Shutdown, nil
+	return &LangfuseHandle{
+		Enabled:     true,
+		Endpoint:    cfg.Endpoint,
+		Environment: cfg.Environment,
+		provider:    provider,
+	}, nil
 }
 
 func Tracer() trace.Tracer {
@@ -105,4 +135,14 @@ func RecordTool(ctx context.Context, toolName, input string, isError bool, durat
 		endOpts = append(endOpts, trace.WithTimestamp(startedAt.Add(time.Duration(durationMs)*time.Millisecond)))
 	}
 	span.End(endOpts...)
+}
+
+func EmitStartupCanary(ctx context.Context, component string) {
+	_, span := Tracer().Start(ctx, "langfuse.startup_canary", trace.WithAttributes(
+		attribute.String("langfuse.trace.name", "startup_canary"),
+		attribute.String("langfuse.observation.type", "event"),
+		attribute.String("langfuse.observation.metadata.component", component),
+		attribute.StringSlice("langfuse.trace.tags", []string{"wemob", "startup"}),
+	))
+	span.End()
 }

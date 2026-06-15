@@ -24,10 +24,14 @@ func main() {
 	}
 
 	controller, redisOpts := bootstrap.BootstrapController()
-	shutdownLangfuse, err := observability.InitLangfuseWithSecrets(context.Background(), controller.SecretManager)
+	langfuseHandle, err := observability.InitLangfuseWithSecrets(context.Background(), controller.SecretManager)
 	if err != nil {
 		slog.Error("failed to initialize Langfuse OpenTelemetry exporter", "error", err)
 		os.Exit(1)
+	}
+	observability.EmitStartupCanary(context.Background(), "worker")
+	if err := langfuseHandle.ForceFlush(context.Background()); err != nil {
+		slog.Warn("Langfuse startup canary flush failed", "error", err)
 	}
 
 	// Concurrency caps total in-flight tasks across queues. 4 leaves
@@ -168,7 +172,7 @@ func main() {
 		srv.Shutdown()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := shutdownLangfuse(ctx); err != nil {
+		if err := langfuseHandle.Shutdown(ctx); err != nil {
 			slog.Error("Langfuse OpenTelemetry shutdown error", "error", err)
 		}
 	}()

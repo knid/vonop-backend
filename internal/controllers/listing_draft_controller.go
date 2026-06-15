@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/utils"
@@ -66,11 +67,13 @@ func (c *Controller) DraftListing(ctx context.Context, user *models.User, appID 
 		tracker.OrganizationID = project.OrganizationID.String()
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
+	systemPrompt := c.compileLangfuseTextPrompt(ctx, observability.PromptListingDraft, constants.LISTING_DRAFT_PROMPT, nil)
+	tracker.Prompt = observability.PromptLink{Name: systemPrompt.Name, Version: systemPrompt.Version}
 
 	raw, err := utils.GetJSONFromLLM(
 		ctx,
 		"claude-haiku-4-5",
-		constants.LISTING_DRAFT_PROMPT,
+		systemPrompt.Text,
 		string(userJSON),
 		c.AnthropicProvider(),
 	)

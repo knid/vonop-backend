@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -186,6 +187,7 @@ func Run(
 	// --- Step 9: build system messages + registry + tracker ---
 	buildState := NewBuildState(message, isFirstGen)
 	contextPacket := CompileAgentContext(AgentContextInput{
+		Context:         ctx,
 		Project:         project,
 		Deps:            deps,
 		AttachmentsPool: turnAttachments.Pool,
@@ -260,13 +262,28 @@ func Run(
 	// trace input with the user's prompt for the grouping $ai_trace event.
 	tracker.TrackContent = true
 	tracker.TraceInput = message
+	tracker.Prompt = observability.PromptLink{Name: langfusePromptName(profile)}
+	if len(contextPacket.PromptParts) > 0 && contextPacket.PromptParts[0].Name != "" {
+		tracker.Prompt = contextPacket.PromptParts[0]
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
 	traceAction := "app_chat"
 	if isFirstGen {
 		traceAction = "generate_app"
 	}
-	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput{
+	conversation, convErr := deps.DB.GetAppConversationByProjectID(project.ID.String())
+	if convErr != nil {
+		if !errors.Is(convErr, sql.ErrNoRows) {
+			slog.Warn("failed to resolve Langfuse conversation session, using project fallback",
+				"error", convErr,
+				"project_id", project.ID,
+				"run_id", runID)
+		}
+		conversation = nil
+	}
+	langfuseSession := langfuseSessionID(conversation, project.ID, runID)
+	langfuseContext := observability.TraceContext{
 		Name:           traceAction,
 		Action:         traceAction,
 		AppType:        project.ProjectType,
@@ -278,12 +295,18 @@ func Run(
 		ProjectID:      project.ID.String(),
 		TraceID:        tracker.TraceID,
 		RunID:          tracker.RunID,
+		SessionID:      langfuseSession,
 		Input:          tracker.TraceInput,
 		RequiredSkills: requiredSkillIDs,
 		LoadedSkills:   loadedSkillIDs,
 		Environment:    deps.SecretManager.GetEnv(),
+		PromptParts:    contextPacket.PromptParts,
 		Tags:           []string{"wemob", "agent", traceAction},
-	})
+	}
+	tracker.SetLangfuseContext(langfuseContext)
+	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(langfuseContext))
+	langfuseTraceID := langfuseTrace.SpanContext().TraceID().String()
+	tracker.LangfuseTraceID = langfuseTraceID
 	defer func() {
 		if tracker.TraceOutput != "" {
 			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
@@ -496,18 +519,11 @@ func Run(
 			status = "error"
 		}
 		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
+		langfuseContext := tracker.LangfuseContext()
+		langfuseContext.RequiredSkills = requiredSkillIDs
+		langfuseContext.LoadedSkills = loadedSkillIDs
 		observability.RecordTool(ctx, name, argsJSON, isErr || execErr != nil, durationMs, toolStart,
-			observability.TraceAttributes(observability.TraceAttributeInput{
-				UserID:         tracker.UserID,
-				OrgID:          tracker.OrganizationID,
-				ProjectID:      tracker.ProjectID,
-				TraceID:        tracker.TraceID,
-				RunID:          tracker.RunID,
-				Input:          tracker.TraceInput,
-				RequiredSkills: requiredSkillIDs,
-				LoadedSkills:   loadedSkillIDs,
-				Tags:           []string{"wemob", "tool"},
-			})...)
+			langfuseContext.Attributes("tool")...)
 		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
 			RunID:      runID,
 			ToolCallID: toolCallID,
@@ -778,7 +794,7 @@ func Run(
 	partsMu.Unlock()
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
 		finalParts, tracker, runStart,
-		finalToolCalls, turn, message, user, project)
+		finalToolCalls, turn, message, user, project, langfuseTraceID)
 }
 
 // runAction returns the PostHog action label for this run — matches the
@@ -789,6 +805,30 @@ func runAction(project *models.AppProject) string {
 		return "generate_app"
 	}
 	return "app_chat"
+}
+
+func langfuseSessionID(conv *models.AppConversation, projectID uuid.UUID, runID uuid.UUID) string {
+	if conv != nil && conv.ID != uuid.Nil {
+		return conv.ID.String()
+	}
+	if projectID != uuid.Nil {
+		return projectID.String()
+	}
+	return runID.String()
+}
+
+func langfusePromptName(profile *AgentProfile) string {
+	if profile == nil {
+		return observability.PromptAgentBase
+	}
+	switch profile.ID {
+	case AgentIDMobileBuilder:
+		return observability.PromptAgentMobile
+	case AgentIDWebBuilder:
+		return observability.PromptAgentWeb
+	default:
+		return observability.PromptAgentBase
+	}
 }
 
 // resolveModel picks the LLM model for this run based on project state and secrets.
@@ -851,6 +891,7 @@ func finaliseSuccess(
 	userMessage string,
 	user *models.User,
 	project *models.AppProject,
+	langfuseTraceID string,
 ) error {
 	// Derive the legacy fields from the canonical parts slice. New code reads
 	// Parts directly; everything else (LLM history rebuild, analytics, the
@@ -972,6 +1013,22 @@ func finaliseSuccess(
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
 		slog.Warn("failed to finalise agent run row", "error", err, "run_id", run.ID)
 	}
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: langfuseTraceID,
+		Name:    observability.ScoreAgentRunSuccess,
+		Value:   1,
+		Comment: "agent run completed",
+	})
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: langfuseTraceID,
+		Name:    observability.ScoreAgentRunTurns,
+		Value:   turns,
+	})
+	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+		TraceID: langfuseTraceID,
+		Name:    observability.ScoreAgentToolErrors,
+		Value:   countToolErrors(parts),
+	})
 
 	// 4. Deduct credits.
 	if deps.DeductCredits != nil && credits > 0 {
@@ -1120,6 +1177,31 @@ func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker, projectID
 	return total
 }
 
+func recordLangfuseScore(ctx context.Context, deps *RunDependencies, score observability.ScoreRequest) {
+	if deps == nil || deps.RecordLangfuseScore == nil {
+		return
+	}
+	scoreCtx := ctx
+	cancel := func() {}
+	if scoreCtx == nil || scoreCtx.Err() != nil {
+		scoreCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	}
+	defer cancel()
+	if err := deps.RecordLangfuseScore(scoreCtx, score); err != nil {
+		slog.Warn("failed to record Langfuse score", "error", err, "score", score.Name, "trace_id", score.TraceID)
+	}
+}
+
+func countToolErrors(parts []models.ChatMessagePart) int {
+	count := 0
+	for _, part := range parts {
+		if part.Type == "tool_call" && part.IsError {
+			count++
+		}
+	}
+	return count
+}
+
 // estimateCost wraps utils.EstimateInputOutputCostUSD.
 func estimateCost(model string, input, output int) float64 {
 	in, out := utils.EstimateInputOutputCostUSD(model, input, output, 0, 0)
@@ -1230,6 +1312,14 @@ func finaliseFailureV2(
 	run.CompletedAt = time.Now()
 	if err := deps.DB.UpdateAgentRun(run); err != nil {
 		slog.Warn("failed to finalise failed agent run row", "error", err, "run_id", run.ID)
+	}
+	if tracker != nil {
+		recordLangfuseScore(ctx, deps, observability.ScoreRequest{
+			TraceID: tracker.LangfuseTraceID,
+			Name:    observability.ScoreAgentRunSuccess,
+			Value:   0,
+			Comment: fmt.Sprintf("%s: %s", code, failureMessage),
+		})
 	}
 
 	// 3b. Deduct credits for consumed tokens. Uses the same action label as

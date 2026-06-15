@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -48,6 +51,62 @@ func TestToolRoundLimitClassificationTellsUserToContinue(t *testing.T) {
 	assert.Equal(t, models.AgentRunStatusBudgetExceeded, mapCodeToStatus(CodeToolRoundsExceeded))
 	assert.Equal(t, "tool_rounds_exceeded", classifyErrorKind(CodeToolRoundsExceeded, err))
 	assert.Contains(t, humanizeErrorKind("tool_rounds_exceeded"), "continue")
+}
+
+func TestLangfuseSessionIDUsesConversationID(t *testing.T) {
+	conversationID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	projectID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	got := langfuseSessionID(&models.AppConversation{ID: conversationID}, projectID, runID)
+
+	assert.Equal(t, conversationID.String(), got)
+}
+
+func TestLangfuseSessionIDFallsBackToProjectIDThenRunID(t *testing.T) {
+	projectID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	runID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	assert.Equal(t, projectID.String(), langfuseSessionID(nil, projectID, runID))
+	assert.Equal(t, runID.String(), langfuseSessionID(nil, uuid.Nil, runID))
+}
+
+func TestLangfusePromptNameUsesAgentProfile(t *testing.T) {
+	assert.Equal(t, observability.PromptAgentWeb, langfusePromptName(webBuilderProfile))
+	assert.Equal(t, observability.PromptAgentMobile, langfusePromptName(mobileBuilderProfile))
+	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(nil))
+	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(&AgentProfile{ID: "custom"}))
+}
+
+func TestCountToolErrors(t *testing.T) {
+	got := countToolErrors([]models.ChatMessagePart{
+		{Type: "text", Text: "hello"},
+		{Type: "tool_call", Name: "read_files"},
+		{Type: "tool_call", Name: "write_file", IsError: true},
+		{Type: "tool_call", Name: "edit_file", IsError: true},
+	})
+
+	assert.Equal(t, 2, got)
+}
+
+func TestRecordLangfuseScoreUsesFreshContextWhenCanceled(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	var sawCanceled bool
+	deps := &RunDependencies{
+		RecordLangfuseScore: func(ctx context.Context, score observability.ScoreRequest) error {
+			sawCanceled = ctx.Err() != nil
+			return nil
+		},
+	}
+
+	recordLangfuseScore(canceled, deps, observability.ScoreRequest{
+		TraceID: "trace-1",
+		Name:    observability.ScoreAgentRunSuccess,
+		Value:   0,
+	})
+
+	assert.False(t, sawCanceled)
 }
 
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {

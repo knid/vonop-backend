@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -124,7 +125,11 @@ func TestTraceAttributesUseFilterableLangfuseKeys(t *testing.T) {
 		RequiredSkills: []string{"web/frontend-patterns"},
 		LoadedSkills:   []string{"shared/api-design"},
 		Environment:    "production",
-		Tags:           []string{"wemob", "agent", "generate_app"},
+		PromptParts: []PromptLink{
+			{Name: PromptAgentWebBase, Version: 1},
+			{Name: PromptAgentWebFirstGen, Version: 2},
+		},
+		Tags: []string{"wemob", "agent", "generate_app"},
 	}))
 
 	assertStringAttr(t, attrs, "langfuse.trace.name", "generate_app")
@@ -142,6 +147,62 @@ func TestTraceAttributesUseFilterableLangfuseKeys(t *testing.T) {
 	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "generate_app"})
 	assertStringSliceAttr(t, attrs, "wemob.agent.required_skills", []string{"web/frontend-patterns"})
 	assertStringSliceAttr(t, attrs, "wemob.agent.loaded_skills", []string{"shared/api-design"})
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.prompt_parts", `[{"name":"wemob-agent-web-base","version":1},{"name":"wemob-agent-web-first-gen","version":2}]`)
+}
+
+func TestTraceAttributesUseConversationSessionWhenProvided(t *testing.T) {
+	attrs := attrsByKey(TraceAttributes(TraceAttributeInput{
+		Name:        "app_chat",
+		UserID:      "user-1",
+		SessionID:   "conversation-1",
+		TraceID:     "run-1",
+		RunID:       "run-1",
+		Environment: "prod",
+		Release:     "2026.06.15",
+		Version:     "48cbd705",
+		Tags:        []string{"wemob", "agent", "app_chat"},
+	}))
+
+	assertStringAttr(t, attrs, "langfuse.trace.name", "app_chat")
+	assertStringAttr(t, attrs, "langfuse.user.id", "user-1")
+	assertStringAttr(t, attrs, "langfuse.session.id", "conversation-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.run_id", "run-1")
+	assertStringAttr(t, attrs, "langfuse.environment", "prod")
+	assertStringAttr(t, attrs, "langfuse.release", "2026.06.15")
+	assertStringAttr(t, attrs, "langfuse.version", "48cbd705")
+	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "app_chat"})
+}
+
+func TestTraceAttributesFallbackSessionUsesRunIDThenTraceID(t *testing.T) {
+	runAttrs := attrsByKey(TraceAttributes(TraceAttributeInput{RunID: "run-1", TraceID: "trace-1"}))
+	assertStringAttr(t, runAttrs, "langfuse.session.id", "run-1")
+
+	traceAttrs := attrsByKey(TraceAttributes(TraceAttributeInput{TraceID: "trace-1"}))
+	assertStringAttr(t, traceAttrs, "langfuse.session.id", "trace-1")
+}
+
+func TestTraceContextAttributesPropagateToChildObservations(t *testing.T) {
+	attrs := attrsByKey(TraceContext{
+		Name:        "app_chat",
+		Action:      "app_chat",
+		UserID:      "user-1",
+		OrgID:       "org-1",
+		ProjectID:   "project-1",
+		TraceID:     "trace-1",
+		RunID:       "run-1",
+		SessionID:   "conversation-1",
+		Environment: "prod",
+		Tags:        []string{"wemob", "agent", "app_chat"},
+	}.Attributes("llm"))
+
+	assertStringAttr(t, attrs, "langfuse.trace.name", "app_chat")
+	assertStringAttr(t, attrs, "langfuse.user.id", "user-1")
+	assertStringAttr(t, attrs, "langfuse.session.id", "conversation-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.org_id", "org-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.project_id", "project-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.run_id", "run-1")
+	assertStringAttr(t, attrs, "langfuse.environment", "prod")
+	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "app_chat", "llm"})
 }
 
 func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
@@ -182,6 +243,17 @@ func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.latency_ms", 1234)
 }
 
+func TestGenerationAttributesLinkPrompt(t *testing.T) {
+	attrs := attrsByKey(GenerationAttributes(GenerationAttributeInput{
+		Model:         "claude-sonnet-4-6",
+		PromptName:    PromptAgentBase,
+		PromptVersion: 3,
+	}, 1))
+
+	assertStringAttr(t, attrs, "langfuse.observation.prompt.name", PromptAgentBase)
+	assertIntAttr(t, attrs, "langfuse.observation.prompt.version", 3)
+}
+
 func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	attrs := attrsByKey(ToolAttributes("write_files", `{"path":"app/page.tsx"}`, true, 250))
 
@@ -191,6 +263,29 @@ func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	assertStringAttr(t, attrs, "langfuse.observation.input", `{"path":"app/page.tsx"}`)
 	assertBoolAttr(t, attrs, "langfuse.observation.metadata.is_error", true)
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.duration_ms", 250)
+}
+
+func TestTruncateLangfusePayload(t *testing.T) {
+	got := truncateLangfusePayload("abcdefghijkl", 10)
+	if got != "abcdefghij...(truncated)" {
+		t.Fatalf("truncated = %q", got)
+	}
+	if same := truncateLangfusePayload("short", 10); same != "short" {
+		t.Fatalf("short payload changed: %q", same)
+	}
+}
+
+func TestToolAttributesCapInputPayload(t *testing.T) {
+	input := strings.Repeat("a", maxToolInputPayload+1)
+	attrs := attrsByKey(ToolAttributes("write_files", input, false, 1))
+
+	got := attrs["langfuse.observation.input"].AsString()
+	if len(got) <= maxToolInputPayload {
+		t.Fatalf("expected truncation marker, got len %d", len(got))
+	}
+	if !strings.HasSuffix(got, "...(truncated)") {
+		t.Fatalf("expected truncation marker, got suffix from %q", got[len(got)-20:])
+	}
 }
 
 func attrsByKey(attrs []attribute.KeyValue) map[string]attribute.Value {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -38,7 +39,7 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
-	system := `You are a project-type classifier. Read the user's description and reply with EXACTLY ONE category name from the list below. No explanations, no punctuation, no extra text — just the category word.
+	fallbackSystem := `You are a project-type classifier. Read the user's description and reply with EXACTLY ONE category name from the list below. No explanations, no punctuation, no extra text — just the category word.
 
 Categories:
 - ecommerce — The user wants to sell products or services online. This includes stores, shops, marketplaces, boutiques, or any site with products, catalog, cart, checkout, payments, orders, inventory, shipping. Even if the description is short, vague, or in another language, classify as ecommerce when the intent is clearly commercial selling.
@@ -65,8 +66,10 @@ Examples:
 - "e ticaret" → ecommerce
 - "online mağaza" → ecommerce
 - "ürünlerimi internetten satacağım" → ecommerce`
+	systemPrompt := c.compileLangfuseTextPrompt(ctx, observability.PromptProjectClassify, fallbackSystem, nil)
+	tracker.Prompt = observability.PromptLink{Name: systemPrompt.Name, Version: systemPrompt.Version}
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 256)
+	result, err := utils.GetTextFromLLM(ctx, model, systemPrompt.Text, prompt, provider, 256)
 	if user != nil {
 		c.RecordTokenUsage(user, "project_classify", model, provider.Name, "", "standard", tracker)
 	}

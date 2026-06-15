@@ -12,6 +12,8 @@ import (
 const (
 	defaultLangfuseBaseURL = "https://cloud.langfuse.com"
 	langfuseOTELPath       = "/api/public/otel/v1/traces"
+	maxObservationPayload  = 200_000
+	maxToolInputPayload    = 50_000
 )
 
 type LangfuseConfig struct {
@@ -38,12 +40,68 @@ type TraceAttributeInput struct {
 	ProjectID      string
 	TraceID        string
 	RunID          string
+	SessionID      string
 	Input          string
 	Output         string
 	RequiredSkills []string
 	LoadedSkills   []string
 	Environment    string
+	Release        string
+	Version        string
+	PromptParts    []PromptLink
 	Tags           []string
+}
+
+type TraceContext struct {
+	Name           string
+	Action         string
+	AppType        string
+	Provider       string
+	Model          string
+	Reference      string
+	UserID         string
+	OrgID          string
+	ProjectID      string
+	TraceID        string
+	RunID          string
+	SessionID      string
+	Input          string
+	Output         string
+	RequiredSkills []string
+	LoadedSkills   []string
+	Environment    string
+	Release        string
+	Version        string
+	PromptParts    []PromptLink
+	Tags           []string
+}
+
+func (tc TraceContext) Attributes(extraTags ...string) []attribute.KeyValue {
+	tags := append([]string(nil), tc.Tags...)
+	tags = append(tags, extraTags...)
+	return TraceAttributes(TraceAttributeInput{
+		Name:           tc.Name,
+		Action:         tc.Action,
+		AppType:        tc.AppType,
+		Provider:       tc.Provider,
+		Model:          tc.Model,
+		Reference:      tc.Reference,
+		UserID:         tc.UserID,
+		OrgID:          tc.OrgID,
+		ProjectID:      tc.ProjectID,
+		TraceID:        tc.TraceID,
+		RunID:          tc.RunID,
+		SessionID:      tc.SessionID,
+		Input:          tc.Input,
+		Output:         tc.Output,
+		RequiredSkills: tc.RequiredSkills,
+		LoadedSkills:   tc.LoadedSkills,
+		Environment:    tc.Environment,
+		Release:        tc.Release,
+		Version:        tc.Version,
+		PromptParts:    tc.PromptParts,
+		Tags:           tags,
+	})
 }
 
 type MessageSnapshot struct {
@@ -67,6 +125,8 @@ type GenerationAttributeInput struct {
 	InputMessages            []MessageSnapshot
 	OutputText               string
 	ToolNames                []string
+	PromptName               string
+	PromptVersion            int
 }
 
 func LangfuseConfigFromEnv() LangfuseConfig {
@@ -137,12 +197,21 @@ func TraceAttributes(in TraceAttributeInput) []attribute.KeyValue {
 	if in.UserID != "" {
 		attrs = append(attrs, attribute.String("langfuse.user.id", in.UserID))
 	}
-	sessionID := in.RunID
+	sessionID := in.SessionID
+	if sessionID == "" {
+		sessionID = in.RunID
+	}
 	if sessionID == "" {
 		sessionID = in.TraceID
 	}
 	if sessionID != "" {
 		attrs = append(attrs, attribute.String("langfuse.session.id", sessionID))
+	}
+	if in.Release != "" {
+		attrs = append(attrs, attribute.String("langfuse.release", in.Release))
+	}
+	if in.Version != "" {
+		attrs = append(attrs, attribute.String("langfuse.version", in.Version))
 	}
 	if in.Input != "" {
 		attrs = append(attrs, attribute.String("langfuse.trace.input", in.Input))
@@ -166,6 +235,11 @@ func TraceAttributes(in TraceAttributeInput) []attribute.KeyValue {
 	if len(in.LoadedSkills) > 0 {
 		attrs = append(attrs, attribute.StringSlice("wemob.agent.loaded_skills", in.LoadedSkills))
 		attrs = append(attrs, attribute.String("langfuse.trace.metadata.agent_loaded_skills", strings.Join(in.LoadedSkills, ",")))
+	}
+	if len(in.PromptParts) > 0 {
+		if promptParts, err := json.Marshal(in.PromptParts); err == nil {
+			attrs = append(attrs, attribute.String("langfuse.trace.metadata.prompt_parts", string(promptParts)))
+		}
 	}
 	if in.Action != "" {
 		attrs = append(attrs, attribute.String("langfuse.trace.metadata.action", in.Action))
@@ -206,6 +280,12 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	if entry.CostSource != "" {
 		attrs = append(attrs, attribute.String("langfuse.observation.metadata.cost_source", entry.CostSource))
 	}
+	if entry.PromptName != "" {
+		attrs = append(attrs, attribute.String("langfuse.observation.prompt.name", entry.PromptName))
+	}
+	if entry.PromptVersion > 0 {
+		attrs = append(attrs, attribute.Int("langfuse.observation.prompt.version", entry.PromptVersion))
+	}
 	if entry.CacheCreationInputTokens > 0 {
 		attrs = append(attrs, attribute.Int("langfuse.observation.metadata.cache_creation_input_tokens", entry.CacheCreationInputTokens))
 	}
@@ -214,11 +294,11 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	}
 	if len(entry.InputMessages) > 0 {
 		if raw := messagesJSON(entry.InputMessages); raw != "" {
-			attrs = append(attrs, attribute.String("langfuse.observation.input", raw))
+			attrs = append(attrs, attribute.String("langfuse.observation.input", truncateLangfusePayload(raw, maxObservationPayload)))
 		}
 	}
 	if entry.OutputText != "" {
-		attrs = append(attrs, attribute.String("langfuse.observation.output", entry.OutputText))
+		attrs = append(attrs, attribute.String("langfuse.observation.output", truncateLangfusePayload(entry.OutputText, maxObservationPayload)))
 	}
 	if len(entry.ToolNames) > 0 {
 		attrs = append(attrs, attribute.StringSlice("langfuse.observation.metadata.tools", dedupeOrdered(entry.ToolNames)))
@@ -235,10 +315,17 @@ func ToolAttributes(toolName, input string, isError bool, durationMs int) []attr
 		attribute.String("langfuse.observation.type", "span"),
 		attribute.String("langfuse.observation.level", level),
 		attribute.String("langfuse.observation.metadata.tool_name", toolName),
-		attribute.String("langfuse.observation.input", input),
+		attribute.String("langfuse.observation.input", truncateLangfusePayload(input, maxToolInputPayload)),
 		attribute.Bool("langfuse.observation.metadata.is_error", isError),
 		attribute.Int("langfuse.observation.metadata.duration_ms", durationMs),
 	}
+}
+
+func truncateLangfusePayload(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 func messagesJSON(messages []MessageSnapshot) string {

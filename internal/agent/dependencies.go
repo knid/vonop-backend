@@ -7,6 +7,7 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -151,6 +152,13 @@ type LLMErrorRecorder func(
 	errCode, errMsg string,
 )
 
+type LangfuseScoreRecorder func(ctx context.Context, score observability.ScoreRequest) error
+
+// LangfusePromptResolver fetches a prompt fragment by name, compiles simple
+// Langfuse variables, and returns rendered text plus version metadata. The
+// agent treats resolver failures as non-fatal and falls back to local prompts.
+type LangfusePromptResolver func(ctx context.Context, name, fallback string, vars map[string]string) (observability.CompiledPrompt, error)
+
 type MCPRuntimeTool struct {
 	ConnectionID string
 	ToolID       string
@@ -240,23 +248,25 @@ type RunDependencies struct {
 	PlanNameForProject func(projectID string) string
 
 	// Callbacks bound per-run by the view/controller layer.
-	CreditChecker        CreditCheckerFactory
-	DeductCredits        CreditDeductor
-	TrackUserEvent       EventTracker
-	SendResendEvent      ResendEventSender
-	GenerateImage        ImageGenerator
-	NeonConnString       NeonConnResolver
-	ProvisionDatabase    DatabaseProvisioner
-	EnableAI             AIEnabler
-	EnableLocalDatabase  LocalDatabaseEnabler
-	AutoDeployBackend    BackendAutoDeployer
-	GatewayAllowedModels GatewayAllowedModelsFn
-	TriggerMobileBuild   MobileBuildTrigger
-	TriggerWebDeploy     WebDeployTrigger
-	SandboxControl       SandboxControlFn
-	SetPreviewURL        PreviewURLSetter
-	RecordLLMUsage       LLMUsageRecorder
-	RecordLLMError       LLMErrorRecorder
+	CreditChecker         CreditCheckerFactory
+	DeductCredits         CreditDeductor
+	TrackUserEvent        EventTracker
+	SendResendEvent       ResendEventSender
+	GenerateImage         ImageGenerator
+	NeonConnString        NeonConnResolver
+	ProvisionDatabase     DatabaseProvisioner
+	EnableAI              AIEnabler
+	EnableLocalDatabase   LocalDatabaseEnabler
+	AutoDeployBackend     BackendAutoDeployer
+	GatewayAllowedModels  GatewayAllowedModelsFn
+	TriggerMobileBuild    MobileBuildTrigger
+	TriggerWebDeploy      WebDeployTrigger
+	SandboxControl        SandboxControlFn
+	SetPreviewURL         PreviewURLSetter
+	RecordLLMUsage        LLMUsageRecorder
+	RecordLLMError        LLMErrorRecorder
+	RecordLangfuseScore   LangfuseScoreRecorder
+	ResolveLangfusePrompt LangfusePromptResolver
 
 	JobID                 string
 	ListMCPTools          MCPRuntimeToolLister

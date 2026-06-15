@@ -11,6 +11,7 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/utils/external"
@@ -521,8 +522,10 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 		}
 	}
 	llmCtx := utils.WithTokenTracker(ctx, tracker)
+	systemPrompt := c.compileLangfuseTextPrompt(llmCtx, observability.PromptValidation, constants.NEXTJS_VALIDATE_PROMPT, nil)
+	tracker.Prompt = observability.PromptLink{Name: systemPrompt.Name, Version: systemPrompt.Version}
 
-	responseJSON, err := utils.GetJSONFromLLM(llmCtx, model, constants.NEXTJS_VALIDATE_PROMPT, fileContext.String(), provider)
+	responseJSON, err := utils.GetJSONFromLLM(llmCtx, model, systemPrompt.Text, fileContext.String(), provider)
 	if user != nil {
 		c.RecordTokenUsage(user, "validate_app_files", model, provider.Name, projectID, "validate", tracker)
 	}
