@@ -266,6 +266,18 @@ func Run(
 	if isFirstGen {
 		traceAction = "generate_app"
 	}
+	conversation, convErr := deps.DB.GetOrCreateAppConversation(&models.AppConversation{
+		AppProjectID: project.ID,
+		Messages:     []byte("[]"),
+	})
+	if convErr != nil {
+		slog.Warn("failed to resolve Langfuse conversation session, using project fallback",
+			"error", convErr,
+			"project_id", project.ID,
+			"run_id", runID)
+		conversation = nil
+	}
+	langfuseSession := langfuseSessionID(conversation, project.ID, runID)
 	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput{
 		Name:           traceAction,
 		Action:         traceAction,
@@ -278,6 +290,7 @@ func Run(
 		ProjectID:      project.ID.String(),
 		TraceID:        tracker.TraceID,
 		RunID:          tracker.RunID,
+		SessionID:      langfuseSession,
 		Input:          tracker.TraceInput,
 		RequiredSkills: requiredSkillIDs,
 		LoadedSkills:   loadedSkillIDs,
@@ -789,6 +802,16 @@ func runAction(project *models.AppProject) string {
 		return "generate_app"
 	}
 	return "app_chat"
+}
+
+func langfuseSessionID(conv *models.AppConversation, projectID uuid.UUID, runID uuid.UUID) string {
+	if conv != nil && conv.ID != uuid.Nil {
+		return conv.ID.String()
+	}
+	if projectID != uuid.Nil {
+		return projectID.String()
+	}
+	return runID.String()
 }
 
 // resolveModel picks the LLM model for this run based on project state and secrets.
