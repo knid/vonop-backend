@@ -175,6 +175,30 @@ func TestTraceAttributesFallbackSessionUsesRunIDThenTraceID(t *testing.T) {
 	assertStringAttr(t, traceAttrs, "langfuse.session.id", "trace-1")
 }
 
+func TestTraceContextAttributesPropagateToChildObservations(t *testing.T) {
+	attrs := attrsByKey(TraceContext{
+		Name:        "app_chat",
+		Action:      "app_chat",
+		UserID:      "user-1",
+		OrgID:       "org-1",
+		ProjectID:   "project-1",
+		TraceID:     "trace-1",
+		RunID:       "run-1",
+		SessionID:   "conversation-1",
+		Environment: "prod",
+		Tags:        []string{"wemob", "agent", "app_chat"},
+	}.Attributes("llm"))
+
+	assertStringAttr(t, attrs, "langfuse.trace.name", "app_chat")
+	assertStringAttr(t, attrs, "langfuse.user.id", "user-1")
+	assertStringAttr(t, attrs, "langfuse.session.id", "conversation-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.org_id", "org-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.project_id", "project-1")
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.run_id", "run-1")
+	assertStringAttr(t, attrs, "langfuse.environment", "prod")
+	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "app_chat", "llm"})
+}
+
 func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 	entry := GenerationAttributeInput{
 		Model:                    "claude-sonnet-4-6",

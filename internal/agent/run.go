@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -266,19 +267,18 @@ func Run(
 	if isFirstGen {
 		traceAction = "generate_app"
 	}
-	conversation, convErr := deps.DB.GetOrCreateAppConversation(&models.AppConversation{
-		AppProjectID: project.ID,
-		Messages:     []byte("[]"),
-	})
+	conversation, convErr := deps.DB.GetAppConversationByProjectID(project.ID.String())
 	if convErr != nil {
-		slog.Warn("failed to resolve Langfuse conversation session, using project fallback",
-			"error", convErr,
-			"project_id", project.ID,
-			"run_id", runID)
+		if !errors.Is(convErr, sql.ErrNoRows) {
+			slog.Warn("failed to resolve Langfuse conversation session, using project fallback",
+				"error", convErr,
+				"project_id", project.ID,
+				"run_id", runID)
+		}
 		conversation = nil
 	}
 	langfuseSession := langfuseSessionID(conversation, project.ID, runID)
-	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput{
+	tracker.Langfuse = observability.TraceContext{
 		Name:           traceAction,
 		Action:         traceAction,
 		AppType:        project.ProjectType,
@@ -296,7 +296,8 @@ func Run(
 		LoadedSkills:   loadedSkillIDs,
 		Environment:    deps.SecretManager.GetEnv(),
 		Tags:           []string{"wemob", "agent", traceAction},
-	})
+	}
+	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(tracker.Langfuse))
 	defer func() {
 		if tracker.TraceOutput != "" {
 			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
@@ -509,18 +510,10 @@ func Run(
 			status = "error"
 		}
 		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
+		tracker.Langfuse.RequiredSkills = requiredSkillIDs
+		tracker.Langfuse.LoadedSkills = loadedSkillIDs
 		observability.RecordTool(ctx, name, argsJSON, isErr || execErr != nil, durationMs, toolStart,
-			observability.TraceAttributes(observability.TraceAttributeInput{
-				UserID:         tracker.UserID,
-				OrgID:          tracker.OrganizationID,
-				ProjectID:      tracker.ProjectID,
-				TraceID:        tracker.TraceID,
-				RunID:          tracker.RunID,
-				Input:          tracker.TraceInput,
-				RequiredSkills: requiredSkillIDs,
-				LoadedSkills:   loadedSkillIDs,
-				Tags:           []string{"wemob", "tool"},
-			})...)
+			tracker.Langfuse.Attributes("tool")...)
 		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
 			RunID:      runID,
 			ToolCallID: toolCallID,

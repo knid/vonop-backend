@@ -414,18 +414,10 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 	}, round, startedAt)
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 		required, loaded := tracker.AgentSkills()
-		span.SetAttributes(observability.TraceAttributes(observability.TraceAttributeInput{
-			UserID:         tracker.UserID,
-			OrgID:          tracker.OrganizationID,
-			ProjectID:      tracker.ProjectID,
-			TraceID:        tracker.TraceID,
-			RunID:          tracker.RunID,
-			Input:          tracker.TraceInput,
-			Output:         tracker.TraceOutput,
-			RequiredSkills: required,
-			LoadedSkills:   loaded,
-			Tags:           []string{"wemob", "llm"},
-		})...)
+		tracker.Langfuse.Output = tracker.TraceOutput
+		tracker.Langfuse.RequiredSkills = required
+		tracker.Langfuse.LoadedSkills = loaded
+		span.SetAttributes(tracker.Langfuse.Attributes("llm")...)
 	}
 	endOpts := []trace.SpanEndOption{}
 	if !startedAt.IsZero() {
@@ -495,6 +487,7 @@ type TokenTracker struct {
 	StartedAt         time.Time // wall-clock start of the generation (for accurate $ai_latency)
 	RequiredSkillIDs  []string
 	LoadedSkillIDs    []string
+	Langfuse          observability.TraceContext
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.

@@ -49,6 +49,56 @@ type TraceAttributeInput struct {
 	Tags           []string
 }
 
+type TraceContext struct {
+	Name           string
+	Action         string
+	AppType        string
+	Provider       string
+	Model          string
+	Reference      string
+	UserID         string
+	OrgID          string
+	ProjectID      string
+	TraceID        string
+	RunID          string
+	SessionID      string
+	Input          string
+	Output         string
+	RequiredSkills []string
+	LoadedSkills   []string
+	Environment    string
+	Release        string
+	Version        string
+	Tags           []string
+}
+
+func (tc TraceContext) Attributes(extraTags ...string) []attribute.KeyValue {
+	tags := append([]string(nil), tc.Tags...)
+	tags = append(tags, extraTags...)
+	return TraceAttributes(TraceAttributeInput{
+		Name:           tc.Name,
+		Action:         tc.Action,
+		AppType:        tc.AppType,
+		Provider:       tc.Provider,
+		Model:          tc.Model,
+		Reference:      tc.Reference,
+		UserID:         tc.UserID,
+		OrgID:          tc.OrgID,
+		ProjectID:      tc.ProjectID,
+		TraceID:        tc.TraceID,
+		RunID:          tc.RunID,
+		SessionID:      tc.SessionID,
+		Input:          tc.Input,
+		Output:         tc.Output,
+		RequiredSkills: tc.RequiredSkills,
+		LoadedSkills:   tc.LoadedSkills,
+		Environment:    tc.Environment,
+		Release:        tc.Release,
+		Version:        tc.Version,
+		Tags:           tags,
+	})
+}
+
 type MessageSnapshot struct {
 	Role    string   `json:"role"`
 	Content string   `json:"content,omitempty"`
