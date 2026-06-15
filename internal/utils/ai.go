@@ -902,6 +902,7 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 	if err != nil {
 		return nil, err
 	}
+	logLLMRequestConfig(prepared, provider)
 	body, err := json.Marshal(prepared)
 	if err != nil {
 		return nil, err
@@ -918,6 +919,38 @@ func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error)
 		}
 	}
 	return body, nil
+}
+
+func logLLMRequestConfig(req ChatRequest, provider *LLMProvider) {
+	providerName := ""
+	if provider != nil {
+		providerName = provider.Name
+	}
+	reasoningEffort := ""
+	reasoningEnabled := ""
+	reasoningExclude := false
+	if req.Reasoning != nil {
+		reasoningEffort = req.Reasoning.Effort
+		reasoningExclude = req.Reasoning.Exclude
+		if req.Reasoning.Enabled != nil {
+			reasoningEnabled = strconv.FormatBool(*req.Reasoning.Enabled)
+		}
+	}
+	thinkingType := ""
+	if req.Thinking != nil {
+		thinkingType = req.Thinking.Type
+	}
+	slog.Info("LLM request config",
+		"provider", providerName,
+		"model", req.Model,
+		"stream", req.Stream,
+		"tools", len(req.Tools),
+		"max_tokens", req.MaxTokens,
+		"max_completion_tokens", req.MaxCompletionTokens,
+		"reasoning_effort", reasoningEffort,
+		"reasoning_enabled", reasoningEnabled,
+		"reasoning_exclude", reasoningExclude,
+		"thinking_type", thinkingType)
 }
 
 // parseLLMResponseBody unmarshals a non-streaming LLM response body.
