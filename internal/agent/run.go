@@ -261,7 +261,7 @@ func Run(
 	// trace input with the user's prompt for the grouping $ai_trace event.
 	tracker.TrackContent = true
 	tracker.TraceInput = message
-	tracker.Prompt = observability.PromptLink{Name: observability.PromptAgentBase}
+	tracker.Prompt = observability.PromptLink{Name: langfusePromptName(profile)}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
 	traceAction := "app_chat"
@@ -808,6 +808,20 @@ func langfuseSessionID(conv *models.AppConversation, projectID uuid.UUID, runID 
 		return projectID.String()
 	}
 	return runID.String()
+}
+
+func langfusePromptName(profile *AgentProfile) string {
+	if profile == nil {
+		return observability.PromptAgentBase
+	}
+	switch profile.ID {
+	case AgentIDMobileBuilder:
+		return observability.PromptAgentMobile
+	case AgentIDWebBuilder:
+		return observability.PromptAgentWeb
+	default:
+		return observability.PromptAgentBase
+	}
 }
 
 // resolveModel picks the LLM model for this run based on project state and secrets.

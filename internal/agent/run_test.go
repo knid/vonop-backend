@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -67,6 +68,13 @@ func TestLangfuseSessionIDFallsBackToProjectIDThenRunID(t *testing.T) {
 
 	assert.Equal(t, projectID.String(), langfuseSessionID(nil, projectID, runID))
 	assert.Equal(t, runID.String(), langfuseSessionID(nil, uuid.Nil, runID))
+}
+
+func TestLangfusePromptNameUsesAgentProfile(t *testing.T) {
+	assert.Equal(t, observability.PromptAgentWeb, langfusePromptName(webBuilderProfile))
+	assert.Equal(t, observability.PromptAgentMobile, langfusePromptName(mobileBuilderProfile))
+	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(nil))
+	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(&AgentProfile{ID: "custom"}))
 }
 
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {

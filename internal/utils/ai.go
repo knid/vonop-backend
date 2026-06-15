@@ -421,7 +421,7 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 		required, loaded := tracker.AgentSkills()
 		langfuseContext := tracker.LangfuseContext()
-		langfuseContext.Output = outputText
+		langfuseContext.Output = ""
 		langfuseContext.RequiredSkills = required
 		langfuseContext.LoadedSkills = loaded
 		span.SetAttributes(langfuseContext.Attributes("llm")...)
