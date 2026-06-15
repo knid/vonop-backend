@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -257,6 +258,29 @@ func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	assertStringAttr(t, attrs, "langfuse.observation.input", `{"path":"app/page.tsx"}`)
 	assertBoolAttr(t, attrs, "langfuse.observation.metadata.is_error", true)
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.duration_ms", 250)
+}
+
+func TestTruncateLangfusePayload(t *testing.T) {
+	got := truncateLangfusePayload("abcdefghijkl", 10)
+	if got != "abcdefghij...(truncated)" {
+		t.Fatalf("truncated = %q", got)
+	}
+	if same := truncateLangfusePayload("short", 10); same != "short" {
+		t.Fatalf("short payload changed: %q", same)
+	}
+}
+
+func TestToolAttributesCapInputPayload(t *testing.T) {
+	input := strings.Repeat("a", maxToolInputPayload+1)
+	attrs := attrsByKey(ToolAttributes("write_files", input, false, 1))
+
+	got := attrs["langfuse.observation.input"].AsString()
+	if len(got) <= maxToolInputPayload {
+		t.Fatalf("expected truncation marker, got len %d", len(got))
+	}
+	if !strings.HasSuffix(got, "...(truncated)") {
+		t.Fatalf("expected truncation marker, got suffix from %q", got[len(got)-20:])
+	}
 }
 
 func attrsByKey(attrs []attribute.KeyValue) map[string]attribute.Value {

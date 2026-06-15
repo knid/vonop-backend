@@ -12,6 +12,8 @@ import (
 const (
 	defaultLangfuseBaseURL = "https://cloud.langfuse.com"
 	langfuseOTELPath       = "/api/public/otel/v1/traces"
+	maxObservationPayload  = 200_000
+	maxToolInputPayload    = 50_000
 )
 
 type LangfuseConfig struct {
@@ -284,11 +286,11 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	}
 	if len(entry.InputMessages) > 0 {
 		if raw := messagesJSON(entry.InputMessages); raw != "" {
-			attrs = append(attrs, attribute.String("langfuse.observation.input", raw))
+			attrs = append(attrs, attribute.String("langfuse.observation.input", truncateLangfusePayload(raw, maxObservationPayload)))
 		}
 	}
 	if entry.OutputText != "" {
-		attrs = append(attrs, attribute.String("langfuse.observation.output", entry.OutputText))
+		attrs = append(attrs, attribute.String("langfuse.observation.output", truncateLangfusePayload(entry.OutputText, maxObservationPayload)))
 	}
 	if len(entry.ToolNames) > 0 {
 		attrs = append(attrs, attribute.StringSlice("langfuse.observation.metadata.tools", dedupeOrdered(entry.ToolNames)))
@@ -305,10 +307,17 @@ func ToolAttributes(toolName, input string, isError bool, durationMs int) []attr
 		attribute.String("langfuse.observation.type", "span"),
 		attribute.String("langfuse.observation.level", level),
 		attribute.String("langfuse.observation.metadata.tool_name", toolName),
-		attribute.String("langfuse.observation.input", input),
+		attribute.String("langfuse.observation.input", truncateLangfusePayload(input, maxToolInputPayload)),
 		attribute.Bool("langfuse.observation.metadata.is_error", isError),
 		attribute.Int("langfuse.observation.metadata.duration_ms", durationMs),
 	}
+}
+
+func truncateLangfusePayload(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	return s[:max] + "...(truncated)"
 }
 
 func messagesJSON(messages []MessageSnapshot) string {
