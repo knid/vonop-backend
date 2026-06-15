@@ -554,6 +554,7 @@ func (t *TokenTracker) LangfuseContext() observability.TraceContext {
 func cloneLangfuseContext(ctx observability.TraceContext) observability.TraceContext {
 	ctx.RequiredSkills = append([]string(nil), ctx.RequiredSkills...)
 	ctx.LoadedSkills = append([]string(nil), ctx.LoadedSkills...)
+	ctx.PromptParts = append([]observability.PromptLink(nil), ctx.PromptParts...)
 	ctx.Tags = append([]string(nil), ctx.Tags...)
 	return ctx
 }

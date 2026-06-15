@@ -48,6 +48,7 @@ type TraceAttributeInput struct {
 	Environment    string
 	Release        string
 	Version        string
+	PromptParts    []PromptLink
 	Tags           []string
 }
 
@@ -71,6 +72,7 @@ type TraceContext struct {
 	Environment    string
 	Release        string
 	Version        string
+	PromptParts    []PromptLink
 	Tags           []string
 }
 
@@ -97,6 +99,7 @@ func (tc TraceContext) Attributes(extraTags ...string) []attribute.KeyValue {
 		Environment:    tc.Environment,
 		Release:        tc.Release,
 		Version:        tc.Version,
+		PromptParts:    tc.PromptParts,
 		Tags:           tags,
 	})
 }
@@ -232,6 +235,11 @@ func TraceAttributes(in TraceAttributeInput) []attribute.KeyValue {
 	if len(in.LoadedSkills) > 0 {
 		attrs = append(attrs, attribute.StringSlice("wemob.agent.loaded_skills", in.LoadedSkills))
 		attrs = append(attrs, attribute.String("langfuse.trace.metadata.agent_loaded_skills", strings.Join(in.LoadedSkills, ",")))
+	}
+	if len(in.PromptParts) > 0 {
+		if promptParts, err := json.Marshal(in.PromptParts); err == nil {
+			attrs = append(attrs, attribute.String("langfuse.trace.metadata.prompt_parts", string(promptParts)))
+		}
 	}
 	if in.Action != "" {
 		attrs = append(attrs, attribute.String("langfuse.trace.metadata.action", in.Action))

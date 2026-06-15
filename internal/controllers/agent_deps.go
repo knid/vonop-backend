@@ -24,6 +24,7 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 	provider := c.llmProviderForUser(user)
 	_, planName, _ := c.GetUserLimitsWithPlan(user)
 	langfuseScores := observability.ScoreClientFromEnvAndSecrets(c.SecretManager)
+	langfusePrompts := observability.PromptClientFromEnvAndSecrets(c.SecretManager)
 
 	return &agent.RunDependencies{
 		DB:            c.DB,
@@ -132,6 +133,9 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		},
 		RecordLangfuseScore: func(ctx context.Context, score observability.ScoreRequest) error {
 			return langfuseScores.CreateScore(ctx, score)
+		},
+		ResolveLangfusePrompt: func(ctx context.Context, name, fallback string, vars map[string]string) (observability.CompiledPrompt, error) {
+			return langfusePrompts.CompileTextPrompt(ctx, name, vars)
 		},
 		JobID:                 jobID,
 		ListMCPTools:          c.AgentMCPTools,

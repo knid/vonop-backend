@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -40,15 +41,17 @@ func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, 
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 
-	system := `You name apps. Given a project description in any language, respond with a short 2-4 word English app name in Title Case. No punctuation, emoji, quotes, or explanation — just the name.
+	fallbackSystem := `You name apps. Given a project description in any language, respond with a short 2-4 word English app name in Title Case. No punctuation, emoji, quotes, or explanation — just the name.
 
 Examples:
 - "çok basit ai chat uygulaması" → Simple AI Chat
 - "telefonla yemeklerin resimlerini çekip yapay zeka ile tarif çıkaran uygulama" → AI Recipe Scanner
 - "online clothing store for men" → Mens Clothing Store
 - "dashboard for tracking my team's OKRs" → Team OKR Tracker`
+	systemPrompt := c.compileLangfuseTextPrompt(ctx, observability.PromptProjectName, fallbackSystem, nil)
+	tracker.Prompt = observability.PromptLink{Name: systemPrompt.Name, Version: systemPrompt.Version}
 
-	result, err := utils.GetTextFromLLM(ctx, model, system, prompt, provider, 64)
+	result, err := utils.GetTextFromLLM(ctx, model, systemPrompt.Text, prompt, provider, 64)
 	if user != nil {
 		c.RecordTokenUsage(user, "project_name", model, provider.Name, projectRef, "standard", tracker)
 	}

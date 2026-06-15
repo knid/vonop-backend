@@ -125,7 +125,11 @@ func TestTraceAttributesUseFilterableLangfuseKeys(t *testing.T) {
 		RequiredSkills: []string{"web/frontend-patterns"},
 		LoadedSkills:   []string{"shared/api-design"},
 		Environment:    "production",
-		Tags:           []string{"wemob", "agent", "generate_app"},
+		PromptParts: []PromptLink{
+			{Name: PromptAgentWebBase, Version: 1},
+			{Name: PromptAgentWebFirstGen, Version: 2},
+		},
+		Tags: []string{"wemob", "agent", "generate_app"},
 	}))
 
 	assertStringAttr(t, attrs, "langfuse.trace.name", "generate_app")
@@ -143,6 +147,7 @@ func TestTraceAttributesUseFilterableLangfuseKeys(t *testing.T) {
 	assertStringSliceAttr(t, attrs, "langfuse.trace.tags", []string{"wemob", "agent", "generate_app"})
 	assertStringSliceAttr(t, attrs, "wemob.agent.required_skills", []string{"web/frontend-patterns"})
 	assertStringSliceAttr(t, attrs, "wemob.agent.loaded_skills", []string{"shared/api-design"})
+	assertStringAttr(t, attrs, "langfuse.trace.metadata.prompt_parts", `[{"name":"wemob-agent-web-base","version":1},{"name":"wemob-agent-web-first-gen","version":2}]`)
 }
 
 func TestTraceAttributesUseConversationSessionWhenProvided(t *testing.T) {

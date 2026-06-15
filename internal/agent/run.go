@@ -187,6 +187,7 @@ func Run(
 	// --- Step 9: build system messages + registry + tracker ---
 	buildState := NewBuildState(message, isFirstGen)
 	contextPacket := CompileAgentContext(AgentContextInput{
+		Context:         ctx,
 		Project:         project,
 		Deps:            deps,
 		AttachmentsPool: turnAttachments.Pool,
@@ -262,6 +263,9 @@ func Run(
 	tracker.TrackContent = true
 	tracker.TraceInput = message
 	tracker.Prompt = observability.PromptLink{Name: langfusePromptName(profile)}
+	if len(contextPacket.PromptParts) > 0 && contextPacket.PromptParts[0].Name != "" {
+		tracker.Prompt = contextPacket.PromptParts[0]
+	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
 	traceAction := "app_chat"
@@ -296,6 +300,7 @@ func Run(
 		RequiredSkills: requiredSkillIDs,
 		LoadedSkills:   loadedSkillIDs,
 		Environment:    deps.SecretManager.GetEnv(),
+		PromptParts:    contextPacket.PromptParts,
 		Tags:           []string{"wemob", "agent", traceAction},
 	}
 	tracker.SetLangfuseContext(langfuseContext)
