@@ -24,7 +24,7 @@ func main() {
 	}
 
 	controller, redisOpts := bootstrap.BootstrapController()
-	shutdownLangfuse, err := observability.InitLangfuse(context.Background())
+	shutdownLangfuse, err := observability.InitLangfuseWithSecrets(context.Background(), controller.SecretManager)
 	if err != nil {
 		slog.Error("failed to initialize Langfuse OpenTelemetry exporter", "error", err)
 		os.Exit(1)
