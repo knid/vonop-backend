@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -86,6 +87,26 @@ func TestCountToolErrors(t *testing.T) {
 	})
 
 	assert.Equal(t, 2, got)
+}
+
+func TestRecordLangfuseScoreUsesFreshContextWhenCanceled(t *testing.T) {
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	var sawCanceled bool
+	deps := &RunDependencies{
+		RecordLangfuseScore: func(ctx context.Context, score observability.ScoreRequest) error {
+			sawCanceled = ctx.Err() != nil
+			return nil
+		},
+	}
+
+	recordLangfuseScore(canceled, deps, observability.ScoreRequest{
+		TraceID: "trace-1",
+		Name:    observability.ScoreAgentRunSuccess,
+		Value:   0,
+	})
+
+	assert.False(t, sawCanceled)
 }
 
 func TestConvertHistory_AssistantLegacyNoParts(t *testing.T) {

@@ -300,6 +300,8 @@ func Run(
 	}
 	tracker.SetLangfuseContext(langfuseContext)
 	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(langfuseContext))
+	langfuseTraceID := langfuseTrace.SpanContext().TraceID().String()
+	tracker.LangfuseTraceID = langfuseTraceID
 	defer func() {
 		if tracker.TraceOutput != "" {
 			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
@@ -787,7 +789,7 @@ func Run(
 	partsMu.Unlock()
 	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
 		finalParts, tracker, runStart,
-		finalToolCalls, turn, message, user, project)
+		finalToolCalls, turn, message, user, project, langfuseTraceID)
 }
 
 // runAction returns the PostHog action label for this run — matches the
@@ -884,6 +886,7 @@ func finaliseSuccess(
 	userMessage string,
 	user *models.User,
 	project *models.AppProject,
+	langfuseTraceID string,
 ) error {
 	// Derive the legacy fields from the canonical parts slice. New code reads
 	// Parts directly; everything else (LLM history rebuild, analytics, the
@@ -1006,18 +1009,18 @@ func finaliseSuccess(
 		slog.Warn("failed to finalise agent run row", "error", err, "run_id", run.ID)
 	}
 	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
-		TraceID: tracker.TraceID,
+		TraceID: langfuseTraceID,
 		Name:    observability.ScoreAgentRunSuccess,
 		Value:   1,
 		Comment: "agent run completed",
 	})
 	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
-		TraceID: tracker.TraceID,
+		TraceID: langfuseTraceID,
 		Name:    observability.ScoreAgentRunTurns,
 		Value:   turns,
 	})
 	recordLangfuseScore(ctx, deps, observability.ScoreRequest{
-		TraceID: tracker.TraceID,
+		TraceID: langfuseTraceID,
 		Name:    observability.ScoreAgentToolErrors,
 		Value:   countToolErrors(parts),
 	})
@@ -1173,7 +1176,13 @@ func recordLangfuseScore(ctx context.Context, deps *RunDependencies, score obser
 	if deps == nil || deps.RecordLangfuseScore == nil {
 		return
 	}
-	if err := deps.RecordLangfuseScore(ctx, score); err != nil {
+	scoreCtx := ctx
+	cancel := func() {}
+	if scoreCtx == nil || scoreCtx.Err() != nil {
+		scoreCtx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+	}
+	defer cancel()
+	if err := deps.RecordLangfuseScore(scoreCtx, score); err != nil {
 		slog.Warn("failed to record Langfuse score", "error", err, "score", score.Name, "trace_id", score.TraceID)
 	}
 }
@@ -1301,7 +1310,7 @@ func finaliseFailureV2(
 	}
 	if tracker != nil {
 		recordLangfuseScore(ctx, deps, observability.ScoreRequest{
-			TraceID: tracker.TraceID,
+			TraceID: tracker.LangfuseTraceID,
 			Name:    observability.ScoreAgentRunSuccess,
 			Value:   0,
 			Comment: fmt.Sprintf("%s: %s", code, failureMessage),

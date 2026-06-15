@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -35,6 +36,9 @@ func ScoreClientFromEnvAndSecrets(secrets SecretProvider) ScoreClient {
 	publicKey := envOrSecret("LANGFUSE_PUBLIC_KEY", secrets)
 	secretKey := envOrSecret("LANGFUSE_SECRET_KEY", secrets)
 	baseURL := strings.TrimRight(envOrSecret("LANGFUSE_BASE_URL", secrets), "/")
+	if baseURL == "" {
+		baseURL = baseURLFromOTELTracesEndpoint(envOrSecret("LANGFUSE_OTEL_TRACES_ENDPOINT", secrets))
+	}
 	if baseURL == "" {
 		baseURL = defaultLangfuseBaseURL
 	}
@@ -71,4 +75,26 @@ func (c ScoreClient) CreateScore(ctx context.Context, req ScoreRequest) error {
 		return fmt.Errorf("langfuse score status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func baseURLFromOTELTracesEndpoint(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	for _, suffix := range []string{"/api/public/otel/v1/traces", "/api/public/otel"} {
+		if strings.HasSuffix(path, suffix) {
+			path = strings.TrimSuffix(path, suffix)
+			break
+		}
+	}
+	parsed.Path = path
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }

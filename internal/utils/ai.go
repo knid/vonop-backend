@@ -495,6 +495,7 @@ type TokenTracker struct {
 	RequiredSkillIDs  []string
 	LoadedSkillIDs    []string
 	Langfuse          observability.TraceContext
+	LangfuseTraceID   string
 	Prompt            observability.PromptLink
 }
 

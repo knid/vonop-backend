@@ -69,3 +69,37 @@ func TestScoreClientCreateScoreNoopsWhenUnconfigured(t *testing.T) {
 		t.Fatalf("CreateScore returned error: %v", err)
 	}
 }
+
+func TestScoreClientFromEnvAndSecretsUsesOTELTracesEndpointHost(t *testing.T) {
+	t.Setenv("LANGFUSE_PUBLIC_KEY", "")
+	t.Setenv("LANGFUSE_SECRET_KEY", "")
+	t.Setenv("LANGFUSE_BASE_URL", "")
+	t.Setenv("LANGFUSE_OTEL_TRACES_ENDPOINT", "")
+
+	client := ScoreClientFromEnvAndSecrets(fakeSecretProvider{
+		secrets: map[string]string{
+			"LANGFUSE_PUBLIC_KEY":           "pk-lf-secret",
+			"LANGFUSE_SECRET_KEY":           "sk-lf-secret",
+			"LANGFUSE_OTEL_TRACES_ENDPOINT": "https://self-hosted.example.com/custom/api/public/otel/v1/traces",
+		},
+	})
+
+	if client.BaseURL != "https://self-hosted.example.com/custom" {
+		t.Fatalf("BaseURL = %q", client.BaseURL)
+	}
+}
+
+func TestBaseURLFromOTELTracesEndpoint(t *testing.T) {
+	tests := map[string]string{
+		"https://cloud.langfuse.com/api/public/otel/v1/traces":            "https://cloud.langfuse.com",
+		"https://us.cloud.langfuse.com/api/public/otel":                   "https://us.cloud.langfuse.com",
+		"https://langfuse.example.com/base/api/public/otel/v1/traces?x=1": "https://langfuse.example.com/base",
+		"not a url": "",
+		"":          "",
+	}
+	for endpoint, want := range tests {
+		if got := baseURLFromOTELTracesEndpoint(endpoint); got != want {
+			t.Fatalf("baseURLFromOTELTracesEndpoint(%q) = %q, want %q", endpoint, got, want)
+		}
+	}
+}
