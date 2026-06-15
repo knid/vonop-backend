@@ -257,7 +257,7 @@ func TestGenerationAttributesLinkPrompt(t *testing.T) {
 func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	attrs := attrsByKey(ToolAttributes("write_files", `{"path":"app/page.tsx"}`, true, 250))
 
-	assertStringAttr(t, attrs, "langfuse.observation.type", "span")
+	assertStringAttr(t, attrs, "langfuse.observation.type", "tool")
 	assertStringAttr(t, attrs, "langfuse.observation.level", "ERROR")
 	assertStringAttr(t, attrs, "langfuse.observation.metadata.tool_name", "write_files")
 	assertStringAttr(t, attrs, "langfuse.observation.input", `{"path":"app/page.tsx"}`)

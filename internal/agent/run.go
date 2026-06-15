@@ -70,135 +70,178 @@ func Run(
 	// Wall-clock deadline: wrap ctx with a max-lifetime timer.
 	ctx, cancelDeadline := context.WithTimeout(ctx, time.Duration(defaultMaxWallclockMs)*time.Millisecond)
 	defer cancelDeadline()
+	ctx, initSpan := startRuntimePhase(ctx, RuntimePhaseInitializeRun)
+	defer initSpan.End()
 
 	// --- Step 1: enforce single-run-per-project invariant ---
 	// Advisory pre-check (fast path for the common case). The authoritative
 	// check is the partial unique index on app_agent_runs(app_project_id)
 	// WHERE status='running', caught below at InsertAgentRun.
-	if existing, existingErr := deps.DB.GetActiveAgentRun(project.ID); existingErr == nil && existing != nil {
-		return New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
-	}
+	var (
+		runID      uuid.UUID
+		repo       *gitrepo.Repo
+		fileMap    *SafeFileMap
+		run        *models.AppAgentRun
+		provider   *utils.LLMProvider
+		model      string
+		isFirstGen bool
+		preCommit  string
+		todos      *TodoList
+		memory     *AgentRunMemory
+		history    []models.AppChatMessage
+	)
 
-	// --- Step 2: open git repo (creates if missing) ---
-	repo, err := deps.GitRepo.OpenOrInit(project.ID.String())
-	if err != nil {
-		return New(CodeGitError, "setup", "failed to open project repo", err)
-	}
+	if err := withRuntimePhase(ctx, RuntimePhaseLoadProjectState, func(phaseCtx context.Context) error {
+		ctx = phaseCtx
 
-	// --- Step 3: first-run template injection (draft projects only) ---
-	if project.Status == "draft" {
-		existingFiles, _ := repo.ListFiles()
-		if len(existingFiles) == 0 {
-			if n, injErr := InjectTemplates(repo, project); injErr != nil {
-				return New(CodeGitError, "setup", fmt.Sprintf("template injection failed after %d files", n), injErr)
+		if existing, existingErr := deps.DB.GetActiveAgentRun(project.ID); existingErr == nil && existing != nil {
+			return New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
+		}
+
+		// --- Step 2: open git repo (creates if missing) ---
+		var err error
+		repo, err = deps.GitRepo.OpenOrInit(project.ID.String())
+		if err != nil {
+			return New(CodeGitError, "setup", "failed to open project repo", err)
+		}
+
+		// --- Step 3: first-run template injection (draft projects only) ---
+		if project.Status == "draft" {
+			existingFiles, _ := repo.ListFiles()
+			if len(existingFiles) == 0 {
+				if n, injErr := InjectTemplates(repo, project); injErr != nil {
+					return New(CodeGitError, "setup", fmt.Sprintf("template injection failed after %d files", n), injErr)
+				}
 			}
 		}
-	}
 
-	// --- Step 4: load fileMap from disk ---
-	rawFiles, err := repo.ReadAllFiles()
-	if err != nil {
-		return New(CodeGitError, "setup", "failed to read project files", err)
-	}
-	fileMap := NewSafeFileMap(rawFiles)
-
-	// --- Step 5: pre-run commit baseline ---
-	runID := uuid.New()
-	preCommit, err := PreRunCommit(repo, runID.String())
-	if err != nil {
-		return New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
-	}
-
-	// --- Step 6: insert AppAgentRun row ---
-	provider := deps.LLMProvider
-	model := resolveModel(deps.SecretManager, project, provider)
-	isFirstGen := project != nil && project.Status == "draft"
-	todos := NewTodoList(message)
-	memory := NewAgentRunMemory(message)
-	run := &models.AppAgentRun{
-		ID:           runID,
-		AppProjectID: project.ID,
-		UserID:       user.ID,
-		Status:       models.AgentRunStatusRunning,
-		PreCommit:    preCommit,
-		Model:        model,
-		Provider:     provider.Name,
-		Todos:        todos.RawJSON(),
-		Memory:       memory.RawJSON(),
-	}
-	if _, err := deps.DB.InsertAgentRun(run); err != nil {
-		// Check for the partial unique index violation (Postgres SQLSTATE 23505).
-		if isUniqueViolation(err) {
-			return New(CodeRunInProgress, "setup", "another run is already in progress for this project", err)
+		// --- Step 4: load fileMap from disk ---
+		rawFiles, err := repo.ReadAllFiles()
+		if err != nil {
+			return New(CodeGitError, "setup", "failed to read project files", err)
 		}
-		return New(CodeInternal, "setup", "failed to record run", err)
+		fileMap = NewSafeFileMap(rawFiles)
+
+		// --- Step 5: pre-run commit baseline ---
+		runID = uuid.New()
+		preCommit, err = PreRunCommit(repo, runID.String())
+		if err != nil {
+			return New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
+		}
+
+		// --- Step 6: insert AppAgentRun row ---
+		provider = deps.LLMProvider
+		model = resolveModel(deps.SecretManager, project, provider)
+		isFirstGen = project != nil && project.Status == "draft"
+		todos = NewTodoList(message)
+		memory = NewAgentRunMemory(message)
+		run = &models.AppAgentRun{
+			ID:           runID,
+			AppProjectID: project.ID,
+			UserID:       user.ID,
+			Status:       models.AgentRunStatusRunning,
+			PreCommit:    preCommit,
+			Model:        model,
+			Provider:     provider.Name,
+			Todos:        todos.RawJSON(),
+			Memory:       memory.RawJSON(),
+		}
+		if _, err := deps.DB.InsertAgentRun(run); err != nil {
+			// Check for the partial unique index violation (Postgres SQLSTATE 23505).
+			if isUniqueViolation(err) {
+				return New(CodeRunInProgress, "setup", "another run is already in progress for this project", err)
+			}
+			return New(CodeInternal, "setup", "failed to record run", err)
+		}
+
+		// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
+		h, err := deps.DB.GetRecentChatMessages(project.ID, 10)
+		if err != nil {
+			slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
+			h = nil
+		}
+		history = h
+		return nil
+	}); err != nil {
+		return err
 	}
 
-	// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
-	history, err := deps.DB.GetRecentChatMessages(project.ID, 10)
-	if err != nil {
-		slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
-		history = nil
-	}
-
-	// --- Step 8: persist the user message ---
-	attachmentSnapshot := make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
-	currentImageURLs := make([]string, 0, len(turnAttachments.Current))
-	for _, a := range turnAttachments.Current {
-		isImage := constants.ClassifyAttachment(a.ContentType) == constants.AttachmentKindImage
-		attachmentSnapshot = append(attachmentSnapshot, models.ChatMessageAttachment{
-			AssetID:     a.ID,
-			FileName:    a.FileName,
-			ContentType: a.ContentType,
-			FileSize:    a.FileSize,
-			URL:         a.PublicURL,
-			IsImage:     isImage,
+	var (
+		attachmentSnapshot = make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
+		currentImageURLs   = make([]string, 0, len(turnAttachments.Current))
+	)
+	if err := withRuntimePhase(ctx, RuntimePhasePersistAssistantTurn, func(phaseCtx context.Context) error {
+		ctx = phaseCtx
+		for _, a := range turnAttachments.Current {
+			isImage := constants.ClassifyAttachment(a.ContentType) == constants.AttachmentKindImage
+			attachmentSnapshot = append(attachmentSnapshot, models.ChatMessageAttachment{
+				AssetID:     a.ID,
+				FileName:    a.FileName,
+				ContentType: a.ContentType,
+				FileSize:    a.FileSize,
+				URL:         a.PublicURL,
+				IsImage:     isImage,
+			})
+			if isImage {
+				currentImageURLs = append(currentImageURLs, a.PublicURL)
+			}
+		}
+		attachmentsJSON := mustJSON(attachmentSnapshot)
+		// imagesJSON is the legacy column — keep populating it from current image
+		// URLs so old read paths (legacy mapApiMessages fallback on the dashboard)
+		// keep rendering after this ships.
+		imagesJSON := mustJSON(normaliseImages(currentImageURLs))
+		userParts, _ := json.Marshal([]models.ChatMessagePart{
+			{Type: "text", Text: message},
 		})
-		if isImage {
-			currentImageURLs = append(currentImageURLs, a.PublicURL)
+		userMsgRow := &models.AppChatMessage{
+			AppProjectID: project.ID,
+			RunID:        &runID,
+			Role:         "user",
+			Content:      message,
+			Images:       imagesJSON,
+			Attachments:  attachmentsJSON,
+			ToolCalls:    []byte("[]"),
+			Parts:        userParts,
 		}
-	}
-	attachmentsJSON := mustJSON(attachmentSnapshot)
-	// imagesJSON is the legacy column — keep populating it from current image
-	// URLs so old read paths (legacy mapApiMessages fallback on the dashboard)
-	// keep rendering after this ships.
-	imagesJSON := mustJSON(normaliseImages(currentImageURLs))
-	userParts, _ := json.Marshal([]models.ChatMessagePart{
-		{Type: "text", Text: message},
-	})
-	userMsgRow := &models.AppChatMessage{
-		AppProjectID: project.ID,
-		RunID:        &runID,
-		Role:         "user",
-		Content:      message,
-		Images:       imagesJSON,
-		Attachments:  attachmentsJSON,
-		ToolCalls:    []byte("[]"),
-		Parts:        userParts,
-	}
-	if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
-		return New(CodeInternal, "setup", "failed to persist user message", err)
-	}
-	run.UserMessageID = &userMsgRow.ID
-	if err := deps.DB.UpdateAgentRun(run); err != nil {
-		slog.Warn("failed to update run user_message_id", "error", err, "run_id", runID)
+		if _, err := deps.DB.InsertChatMessage(userMsgRow); err != nil {
+			return New(CodeInternal, "setup", "failed to persist user message", err)
+		}
+		run.UserMessageID = &userMsgRow.ID
+		if err := deps.DB.UpdateAgentRun(run); err != nil {
+			slog.Warn("failed to update run user_message_id", "error", err, "run_id", runID)
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	// --- Step 9: build system messages + registry + tracker ---
 	buildState := NewBuildState(message, isFirstGen)
-	contextPacket := CompileAgentContext(AgentContextInput{
-		Context:         ctx,
-		Project:         project,
-		Deps:            deps,
-		AttachmentsPool: turnAttachments.Pool,
-		Message:         message,
-		IsFirstGen:      isFirstGen,
-	})
-	profile := contextPacket.Profile
-	activeSkills := contextPacket.Skills
-	llmMessages := contextPacket.SystemMessages
-	memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
-	memory.Persist(ctx, deps.DB, runID)
+	var profile *AgentProfile
+	var activeSkills []SkillFile
+	var llmMessages []utils.Message
+	var contextPacket AgentContextPacket
+	if err := withRuntimePhase(ctx, RuntimePhaseCompileRuntimeContext, func(phaseCtx context.Context) error {
+		ctx = phaseCtx
+		contextCompiler := RuntimeContextCompiler{}
+		contextPacket = contextCompiler.Compile(AgentContextInput{
+			Context:         ctx,
+			Project:         project,
+			Deps:            deps,
+			AttachmentsPool: turnAttachments.Pool,
+			Message:         message,
+			IsFirstGen:      isFirstGen,
+		})
+		profile = contextPacket.Profile
+		activeSkills = contextPacket.Skills
+		llmMessages = append([]utils.Message(nil), contextPacket.SystemMessages...)
+		memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
+		memory.Persist(ctx, deps.DB, runID)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	llmMessages = append(llmMessages, convertHistory(history)...)
 
@@ -243,7 +286,14 @@ func Run(
 	}
 	llmMessages = append(llmMessages, userTurn)
 
-	registry := BuildRegistryFor(project, deps, model)
+	var registry *Registry
+	if err := withRuntimePhase(ctx, RuntimePhaseBuildRuntimeTools, func(phaseCtx context.Context) error {
+		ctx = phaseCtx
+		registry = BuildRegistryFor(project, deps, model)
+		return nil
+	}); err != nil {
+		return err
+	}
 
 	tracker := utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
@@ -488,60 +538,22 @@ func Run(
 	// (name, args string) -> (result, error)
 	// into our Registry.Execute which also reports isError separately.
 	executor := func(name string, argsJSON string) (string, error) {
-		toolStart := time.Now()
-		toolCallID := uuid.NewString()
-		tracker.RecordToolUsed(name)
-		// Push a placeholder tool_call part — the result/duration/is_error
-		// fields land in the same struct after registry.Execute returns.
-		// Capturing the index up front lets us mutate the same slot rather
-		// than searching by id at the end.
-		partsMu.Lock()
-		partIdx := len(parts)
-		parts = append(parts, models.ChatMessagePart{
-			Type:       "tool_call",
-			ToolCallID: toolCallID,
-			Name:       name,
-			Input:      json.RawMessage(argsJSON),
-		})
-		partsMu.Unlock()
-		emitter.Emit(EventToolCallStart, ToolCallStartEvent{
-			RunID:        runID,
-			Turn:         turn,
-			ToolCallID:   toolCallID,
-			ToolName:     name,
-			RiskLevel:    ClassifyToolRisk(name),
-			InputPreview: stripToolInputForPreview(name, argsJSON),
-		})
-		result, isErr, execErr := registry.Execute(ctx, rc, name, json.RawMessage(argsJSON))
-		durationMs := int(time.Since(toolStart).Milliseconds())
-		status := "ok"
-		if isErr || execErr != nil {
-			status = "error"
+		gateway := &ToolGateway{
+			RunID:    runID,
+			Turn:     turn,
+			Registry: registry,
+			RC:       rc,
+			Emitter:  emitter,
+			Tracker:  tracker,
+			Memory:   memory,
+			Deps:     deps,
+			Parts:    &parts,
+			PartsMu:  &partsMu,
 		}
-		requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
-		langfuseContext := tracker.LangfuseContext()
-		langfuseContext.RequiredSkills = requiredSkillIDs
-		langfuseContext.LoadedSkills = loadedSkillIDs
-		observability.RecordTool(ctx, name, argsJSON, isErr || execErr != nil, durationMs, toolStart,
-			langfuseContext.Attributes("tool")...)
-		emitter.Emit(EventToolCallResult, ToolCallResultEvent{
-			RunID:      runID,
-			ToolCallID: toolCallID,
-			ToolName:   name,
-			RiskLevel:  ClassifyToolRisk(name),
-			Status:     status,
-			DurationMs: durationMs,
-			Summary:    firstLine(result, 140),
-			IsError:    isErr || execErr != nil,
-		})
+		result, execErr := gateway.Execute(ctx, name, argsJSON)
 		partsMu.Lock()
-		parts[partIdx].Result = result
-		parts[partIdx].IsError = isErr || execErr != nil
-		parts[partIdx].DurationMs = durationMs
 		totalToolCalls++
 		partsMu.Unlock()
-		memory.RecordTool(name, argsJSON, result, isErr || execErr != nil)
-		memory.Persist(ctx, deps.DB, runID)
 		if execErr != nil {
 			return result, execErr
 		}
@@ -611,19 +623,19 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 
-	llmText, llmErr := utils.StreamWithTools(
-		ctx,
-		model,
-		llmMessages,
-		toolSchemas,
-		provider,
-		nil, // responseFormat
-		nil, // reasoning
-		executor,
-		nil, // deprecated onToolCall; start events emitted from executor for correlatable IDs
-		narrationSink,
-		reasoningSink,
-		utils.ToolCallConfig{
+	workflow := NewAgentRunWorkflow(nil)
+	loopResult, llmErr := workflow.ExecuteAgentLoop(ctx, AgentLoopInput{
+		Model:          model,
+		Messages:       llmMessages,
+		Tools:          toolSchemas,
+		Provider:       provider,
+		ResponseFormat: nil, // responseFormat
+		Reasoning:      nil, // reasoning
+		Executor:       executor,
+		OnToolCall:     nil, // deprecated onToolCall; start events emitted from gateway for correlatable IDs
+		OnChunk:        narrationSink,
+		OnReasoning:    reasoningSink,
+		Config: utils.ToolCallConfig{
 			MaxRounds: maxTurns,
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
@@ -691,7 +703,8 @@ func Run(
 				return true
 			},
 		},
-	)
+	})
+	llmText := loopResult.Text
 	// Narration-loop wins over any other classification: a tripped detector
 	// means we told StreamWithTools to bail via ShouldContinue, so any
 	// surfacing error is a consequence, not the cause.
@@ -792,9 +805,25 @@ func Run(
 	finalParts := append([]models.ChatMessagePart(nil), parts...)
 	finalToolCalls := totalToolCalls
 	partsMu.Unlock()
-	return finaliseSuccess(ctx, deps, repo, run, emitter, fileMap,
-		finalParts, tracker, runStart,
-		finalToolCalls, turn, message, user, project, langfuseTraceID)
+	finalizer := NewRunFinalizer(deps)
+	return withRuntimePhase(ctx, RuntimePhaseFinalizeRun, func(phaseCtx context.Context) error {
+		return finalizer.Success(FinalizeSuccessInput{
+			Ctx:             phaseCtx,
+			Repo:            repo,
+			Run:             run,
+			Emitter:         emitter,
+			FileMap:         fileMap,
+			Parts:           finalParts,
+			Tracker:         tracker,
+			RunStart:        runStart,
+			TotalToolCalls:  finalToolCalls,
+			Turns:           turn,
+			UserMessage:     message,
+			User:            user,
+			Project:         project,
+			LangfuseTraceID: langfuseTraceID,
+		})
+	})
 }
 
 // runAction returns the PostHog action label for this run — matches the

@@ -312,7 +312,7 @@ func ToolAttributes(toolName, input string, isError bool, durationMs int) []attr
 		level = "ERROR"
 	}
 	return []attribute.KeyValue{
-		attribute.String("langfuse.observation.type", "span"),
+		attribute.String("langfuse.observation.type", "tool"),
 		attribute.String("langfuse.observation.level", level),
 		attribute.String("langfuse.observation.metadata.tool_name", toolName),
 		attribute.String("langfuse.observation.input", truncateLangfusePayload(input, maxToolInputPayload)),

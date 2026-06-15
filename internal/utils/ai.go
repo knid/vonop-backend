@@ -400,7 +400,7 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
 		prompt = tracker.Prompt
 	}
-	_, span := observability.StartGeneration(ctx, spanName, observability.GenerationAttributeInput{
+	_, span := observability.StartGeneration(ctx, langfuseGenerationName(spanName), observability.GenerationAttributeInput{
 		Model:                    model,
 		PromptTokens:             usage.PromptTokens,
 		CompletionTokens:         usage.CompletionTokens,
@@ -431,6 +431,19 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		endOpts = append(endOpts, trace.WithTimestamp(startedAt.Add(time.Duration(latencyMs)*time.Millisecond)))
 	}
 	span.End(endOpts...)
+}
+
+func langfuseGenerationName(spanName string) string {
+	switch spanName {
+	case "stream_with_tools":
+		return "generate-agent-response"
+	case "get_json":
+		return "generate-json"
+	case "get_text":
+		return "generate-text"
+	default:
+		return spanName
+	}
 }
 
 func messageSnapshots(messages []Message) []observability.MessageSnapshot {

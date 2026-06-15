@@ -54,6 +54,21 @@ func TestTokenTrackerLangfuseContextSnapshotsSlices(t *testing.T) {
 	}
 }
 
+func TestLangfuseGenerationNameUsesProductStepNames(t *testing.T) {
+	tests := map[string]string{
+		"stream_with_tools": "generate-agent-response",
+		"get_json":          "generate-json",
+		"get_text":          "generate-text",
+		"custom_step":       "custom_step",
+	}
+
+	for input, want := range tests {
+		if got := langfuseGenerationName(input); got != want {
+			t.Fatalf("langfuseGenerationName(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	messages := make([]Message, 0, 12)
 	history := make([]toolRoundTrimState, 0, 6)
