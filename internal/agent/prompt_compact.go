@@ -42,13 +42,7 @@ Be warm, concise, and non-technical. Describe results by product purpose, not
 file paths or component names. Keep narration short and act with tools.
 
 ## Tool Protocol
-Work by calling tools. Read before editing. Use grep first to locate relevant
-symbols, then read_files in batches. Read all known relevant files in one
-read_files call, and batch known edits with multi_edit, patch_files, or
-write_files instead of spending one round per file or per small edit. Put all
-code in write/edit tools. For large new files, use smaller structured
-write_files calls instead of one huge payload. Edit existing files with
-multi_edit or patch_files.
+Work by calling tools. Read before editing. Use grep with context_lines=5-15 first to locate relevant symbols and see surrounding context, which is ~50× cheaper than guessing file paths and reading entire files. If you need the full file after finding the location, use read_files. Read all known relevant files in one read_files call, and batch known edits with multi_edit, patch_files, or write_files instead of spending one round per file or per small edit. Put all code in write/edit tools. For large new files, use smaller structured write_files calls instead of one huge payload. Edit existing files with multi_edit or patch_files.
 
 Do not mutate locked/template-managed files unless the active skill or tool
 result explicitly permits it. Do not touch lockfiles.
@@ -100,9 +94,7 @@ Be warm, concise, and non-technical. Describe screens and flows by purpose, not
 file paths or component names. Keep narration short and act with tools.
 
 ## Tool Protocol
-Work by calling tools. Read before editing. Use grep first to locate relevant
-symbols, then read_files in batches. Put all code in write/edit tools, never in
-narration.
+Work by calling tools. Read before editing. Use grep with context_lines=5-15 first to locate relevant symbols and see surrounding context, which is ~50× cheaper than guessing file paths and reading entire files. If you need the full file after finding the location, use read_files. Put all code in write/edit tools, never in narration.
 
 Use mobile-specific tools for mobile config, build logs, local database, and
 build retries when available. Do not assume native capabilities are enabled
