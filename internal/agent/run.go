@@ -372,10 +372,22 @@ func Run(
 
 	// emitCreditsUpdate fires a credits_update event with the running
 	// cumulative billed credits so the frontend can render a live meter
-	// after each turn end. Tokens is informational (input+output total).
+	// after each turn end. It also applies incremental credit deductions so
+	// the user balance updates while generation is in progress.
+	// action uses the same label as the final success-path deduction for
+	// consistent billing analytics.
+	deductAction := runAction(project)
+	if isFirstGen {
+		deductAction = "generate_app"
+	}
+	lastDeductedCredits := 0
+	deductLiveCredits := func(creditsUsed int) {
+		lastDeductedCredits = chargeCreditDeltas(context.Background(), deps, deductAction, project.ID.String(), creditsUsed, lastDeductedCredits)
+	}
 	emitCreditsUpdate := func(turn int) {
 		credits := creditsBilled(deps, tracker, project.ID.String())
 		_, _, total, _ := tracker.Totals()
+		deductLiveCredits(credits)
 		emitter.Emit(EventCreditsUpdate, CreditsUpdateEvent{
 			RunID:       runID,
 			Turn:        turn,
@@ -458,7 +470,7 @@ func Run(
 				c = c[idx+len(requestMarker):]
 			}
 		}
-		
+
 		// Proactive budget guardrail: warn the LLM when approaching the token limit
 		budgetWarning := ""
 		if tracker != nil {
@@ -466,7 +478,7 @@ func Run(
 				budgetWarning = "\n\n⚠️ BUDGET WARNING: You are approaching the token limit for this run. Please conclude your current task, summarize your findings, and ask the user for the next step. Do not start new large file reads or complex refactors.\n"
 			}
 		}
-		
+
 		msg.Content = "CURRENT RUN CONTEXT\n===================\n\n" + prefix + budgetWarning + requestMarker + c
 	}
 	refreshRunPrefix(&userTurn)
@@ -1087,18 +1099,7 @@ func finaliseSuccess(
 		Value:   countToolErrors(parts),
 	})
 
-	// 4. Deduct credits.
-	if deps.DeductCredits != nil && credits > 0 {
-		action := "app_chat"
-		if isInitial {
-			action = "generate_app"
-		}
-		if err := deps.DeductCredits(ctx, credits, action, project.ID.String()); err != nil {
-			slog.Warn("failed to deduct credits", "error", err, "credits", credits)
-		}
-	}
-
-	// 5. Emit `done`.
+	// 4. Emit `done`.
 	emitter.Emit(EventDone, DoneEvent{
 		RunID:        run.ID,
 		FinalCommit:  finalCommit,
@@ -1110,7 +1111,7 @@ func finaliseSuccess(
 		DurationMs:   durationMs,
 	})
 
-	// 6. Track PostHog.
+	// 5. Track PostHog.
 	if deps.TrackUserEvent != nil {
 		action := constants.EVENT_APP_CHAT_COMPLETED
 		if isInitial {
@@ -1131,7 +1132,7 @@ func finaliseSuccess(
 		})
 	}
 
-	// 6b. Fire lifecycle event — mirrors PostHog event names.
+	// 5b. Fire lifecycle event — mirrors PostHog event names.
 	if deps.SendResendEvent != nil {
 		crmEvent := constants.EVENT_APP_CHAT_COMPLETED
 		if isInitial {
@@ -1145,7 +1146,7 @@ func finaliseSuccess(
 		})
 	}
 
-	// 7. PostHog LLM Analytics: emit per-call $ai_generation events plus a
+	// 6. PostHog LLM Analytics: emit per-call $ai_generation events plus a
 	// grouping $ai_trace event for the built-in dashboard. The tracker has
 	// been collecting messages/usage throughout the run via TrackContent.
 	// Note: runAction would now return "app_chat" because we already flipped
@@ -1232,6 +1233,36 @@ func creditsBilled(deps *RunDependencies, tracker *utils.TokenTracker, projectID
 		total += models.TokensToCreditsWithConfig(e.PromptTokens, e.CompletionTokens, e.CacheReadInputTokens, tpc, om, crd, e.CacheReadInclusive)
 	}
 	return total
+}
+
+// chargeCreditDeltas deducts only the unbilled portion of creditsUsed via the
+// dependency callback. Callers pass cumulative `creditsUsed` each time they
+// emit a live credits_update, and this function returns the new highest billed
+// amount to track for the next invocation.
+func chargeCreditDeltas(
+	ctx context.Context,
+	deps *RunDependencies,
+	action,
+	projectID string,
+	creditsUsed,
+	alreadyDeducted int,
+) int {
+	if deps == nil || deps.DeductCredits == nil {
+		return alreadyDeducted
+	}
+	if creditsUsed <= alreadyDeducted {
+		return alreadyDeducted
+	}
+	delta := creditsUsed - alreadyDeducted
+	if err := deps.DeductCredits(ctx, delta, action, projectID); err != nil {
+		slog.Warn("failed to deduct live credits",
+			"error", err,
+			"delta", delta,
+			"credits_used", creditsUsed,
+			"already_deducted", alreadyDeducted)
+		return alreadyDeducted
+	}
+	return creditsUsed
 }
 
 func recordLangfuseScore(ctx context.Context, deps *RunDependencies, score observability.ScoreRequest) {
@@ -1379,16 +1410,7 @@ func finaliseFailureV2(
 		})
 	}
 
-	// 3b. Deduct credits for consumed tokens. Uses the same action label as
-	// the success path so ai_credit_transactions rows group consistently.
-	if deps.DeductCredits != nil && credits > 0 {
-		deductAction := runAction(project)
-		if err := deps.DeductCredits(context.Background(), credits, deductAction, run.AppProjectID.String()); err != nil {
-			slog.Warn("failed to deduct credits for failed run", "error", err, "credits", credits, "run_id", run.ID)
-		}
-	}
-
-	// 4. Track PostHog. Mirror the success-path properties so analytics can
+	// 3. Track PostHog. Mirror the success-path properties so analytics can
 	// compare model/token spend and durations across success and failure on
 	// the same axes — without this, error funnels can't surface "expensive
 	// failures" or per-model failure rates. Split chat vs initial generation

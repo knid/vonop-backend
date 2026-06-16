@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"context"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/knid/wemob/internal/utils"
+	"github.com/stretchr/testify/require"
 )
 
 // recordingEmitter captures every Emit call into an ordered slice so tests
@@ -25,7 +28,7 @@ func (r *recordingEmitter) Emit(eventType string, data any) bool {
 }
 
 func (r *recordingEmitter) Buffer() []Event { return r.events }
-func (r *recordingEmitter) Close()           {}
+func (r *recordingEmitter) Close()          {}
 
 // TestCreditsUpdateEventEmittedAfterTurnEnd asserts that for every
 // TurnEndEvent emitted by the agent loop, a CreditsUpdateEvent is emitted
@@ -190,4 +193,53 @@ func TestCreditsUpdateEmitFollowsEveryTurnEnd_SourceContract(t *testing.T) {
 				m[0], nextLine)
 		}
 	}
+}
+
+func TestChargeCreditDeltasIsIncremental(t *testing.T) {
+	projectID := uuid.New().String()
+	var deductions []int
+	deps := &RunDependencies{
+		DeductCredits: func(_ context.Context, credits int, action, gotProjectID string) error {
+			if gotProjectID != projectID {
+				t.Fatalf("projectID = %s, want %s", gotProjectID, projectID)
+			}
+			if action != "app_chat" {
+				t.Fatalf("action = %q, want %q", action, "app_chat")
+			}
+			deductions = append(deductions, credits)
+			return nil
+		},
+	}
+
+	deducted := 0
+	deducted = chargeCreditDeltas(context.Background(), deps, "app_chat", projectID, 3, deducted)
+	require.Equal(t, 3, deducted)
+	require.Equal(t, []int{3}, deductions)
+
+	// Repeat a lower or equal cumulative amount should not re-charge.
+	deducted = chargeCreditDeltas(context.Background(), deps, "app_chat", projectID, 3, deducted)
+	require.Equal(t, 3, deducted)
+	deducted = chargeCreditDeltas(context.Background(), deps, "app_chat", projectID, 1, deducted)
+	require.Equal(t, 3, deducted)
+	require.Equal(t, []int{3}, deductions)
+
+	// Moving from 3 -> 8 should charge only the delta (5), not a full 8.
+	deducted = chargeCreditDeltas(context.Background(), deps, "app_chat", projectID, 8, deducted)
+	require.Equal(t, 8, deducted)
+	require.Equal(t, []int{3, 5}, deductions)
+}
+
+func TestChargeCreditDeltasNoUpdateOnFailure(t *testing.T) {
+	projectID := uuid.New().String()
+	var callCount int
+	deps := &RunDependencies{
+		DeductCredits: func(context.Context, int, string, string) error {
+			callCount++
+			return errors.New("deduction failed")
+		},
+	}
+
+	deducted := chargeCreditDeltas(context.Background(), deps, "app_chat", projectID, 10, 0)
+	require.Equal(t, 0, deducted)
+	require.Equal(t, 1, callCount)
 }
