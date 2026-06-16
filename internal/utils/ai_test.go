@@ -196,6 +196,43 @@ func TestBuildLLMRequestBodyAppliesOpenRouterDefaultReasoning(t *testing.T) {
 	}
 }
 
+func TestBuildLLMRequestBodyStripsReasoningContentFromMessages(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:  "test-model",
+		Stream: true,
+		Messages: []Message{
+			{Role: "assistant", Content: "ok", ReasoningContent: "should not be sent"},
+			{Role: "user", Content: "next", ReasoningContent: "also hidden"},
+		},
+	}, &LLMProvider{
+		Name:             "openrouter",
+		BaseURL:          "https://openrouter.ai/api/v1",
+		APIKey:           "test-key",
+		DefaultReasoning: &ReasoningConfig{Effort: "none"},
+	})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody returned error: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	rawMessages, ok := got["messages"].([]any)
+	if !ok {
+		t.Fatalf("request body missing messages array: %s", body)
+	}
+	for _, raw := range rawMessages {
+		msg, ok := raw.(map[string]any)
+		if !ok {
+			t.Fatalf("message is not object: %#v", raw)
+		}
+		if _, has := msg["reasoning_content"]; has {
+			t.Fatalf("request message leaked reasoning_content: %#v", msg)
+		}
+	}
+}
+
 func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
