@@ -701,6 +701,15 @@ func Run(
 				}
 				return ""
 			}(),
+			// OpenRouter session_id: stable per-run so sticky routing keeps the
+			// cache warm across multi-turn tool calls, even if message prefixes
+			// shift slightly. Only set for OpenRouter.
+			SessionID: func() string {
+				if provider.IsOpenRouter() {
+					return runID.String()
+				}
+				return ""
+			}(),
 			// Provider-executed server tools do not pass through our local
 			// executor, so we cannot emit a matching tool_call_result. Emitting
 			// starts without terminal results leaves the chat UI with orphan

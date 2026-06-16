@@ -870,6 +870,7 @@ type ChatRequest struct {
 	Thinking            *ThinkingConfig      `json:"thinking,omitempty"`
 	DisablePromptCache  bool                 `json:"-"`                          // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
 	PromptCacheKey      string               `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
+	SessionID           string               `json:"session_id,omitempty"`       // OpenRouter sticky routing session ID for multi-turn caching
 }
 
 type Message struct {
@@ -1399,6 +1400,7 @@ type ToolCallConfig struct {
 	MaxContinuations     int                                                        // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
 	ShouldContinue       func() bool                                                // Called before each round/continuation. Return false to abort. nil = always continue.
 	PromptCacheKey       string                                                     // Moonshot K2.6 session-level prompt cache key (sent on every round)
+	SessionID            string                                                     // OpenRouter sticky routing session ID for multi-turn caching
 	MaxMessages          int                                                        // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
 	RefreshPrefix        func(msg *Message)                                         // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
 	CompactHistory       func(messages []Message) ([]Message, bool)                 // Called before each round to replace old history with a compact LLM view. bool=true when changed.
@@ -1439,8 +1441,10 @@ func StreamWithTools(
 		}
 	}
 	promptCacheKey := ""
+	sessionID := ""
 	if len(opts) > 0 {
 		promptCacheKey = opts[0].PromptCacheKey
+		sessionID = opts[0].SessionID
 	}
 	keepRecentToolRounds := 1
 	if len(opts) > 0 && opts[0].KeepRecentToolRounds > 0 {
@@ -1650,6 +1654,7 @@ func StreamWithTools(
 			Tools:          roundTools,
 			ResponseFormat: responseFormat,
 			PromptCacheKey: promptCacheKey,
+			SessionID:      sessionID,
 		}, provider)
 		if err != nil {
 			return "", fmt.Errorf("round %d: error building request: %w", round, err)
