@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/knid/wemob/internal/agent"
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -85,6 +86,7 @@ func (v *HttpViews) GetAdminAgentSystem(w http.ResponseWriter, r *http.Request) 
 		Settings: []string{
 			"agent_require_approval",
 			"agent_enforce_skill_tool_allowlist",
+			constants.AgentSettingAllowSandboxExec,
 		},
 	}, http.StatusOK)
 }

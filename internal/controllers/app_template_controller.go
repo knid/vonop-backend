@@ -290,7 +290,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		BackendRuntime:  backendRuntime,
 		Theme:           template.Theme,
 		DataModels:      template.DataModels,
-		Settings:        template.Settings,
+		Settings:        cloneProjectSettingsWithDefaults(template.Settings),
 		Status:          "ready",
 		TemplateID:      &template.ID,
 	}
