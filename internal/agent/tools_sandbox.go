@@ -243,13 +243,6 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
 	}
-	if rc == nil || rc.Project == nil || rc.Project.Settings == nil {
-		return "sandbox_exec is disabled for this project", true, nil
-	}
-	allowed, _ := rc.Project.Settings["agent_allow_sandbox_exec"].(bool)
-	if !allowed {
-		return "sandbox_exec is disabled for this project. Enable settings.agent_allow_sandbox_exec only for trusted debugging sessions.", true, nil
-	}
 	if err := validateSandboxCommand(args.Command); err != nil {
 		return err.Error(), true, nil
 	}
