@@ -1,6 +1,12 @@
 package agent
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/knid/wemob/internal/models"
+)
 
 func TestValidateSandboxWritePathArtifactsOnly(t *testing.T) {
 	if _, err := validateSandboxWritePath("/home/user/artifacts/run/report.md"); err != nil {
@@ -44,6 +50,41 @@ func TestValidateSandboxCommandBlocksRiskyCommands(t *testing.T) {
 		if err := validateSandboxCommand(cmd); err == nil {
 			t.Fatalf("expected command %q to be blocked", cmd)
 		}
+	}
+}
+
+func TestSandboxExecAllowedByDefault(t *testing.T) {
+	called := false
+	deps := &RunDependencies{
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			called = true
+			if req.Action != "exec" {
+				t.Fatalf("action: got %q want exec", req.Action)
+			}
+			if req.Command != "npm test" {
+				t.Fatalf("command: got %q want npm test", req.Command)
+			}
+			if req.Cwd != sandboxRootProject {
+				t.Fatalf("cwd: got %q want %q", req.Cwd, sandboxRootProject)
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	}
+	rc := &RunContext{
+		Project: &models.AppProject{Settings: map[string]any{}},
+		User:    &models.User{},
+		Deps:    deps,
+	}
+
+	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"npm test"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("Execute returned isErr=true: %s", result)
+	}
+	if !called {
+		t.Fatal("SandboxControl was not called")
 	}
 }
 
