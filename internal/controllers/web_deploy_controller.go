@@ -29,6 +29,8 @@ import (
 // rejects the insert because another deploy is already enqueued or running.
 var ErrDeployInProgress = errors.New("deploy already in progress for this project")
 
+const webDeployMaxRetry = 2
+
 func isUniqueViolation(err error) bool {
 	if err == nil {
 		return false
@@ -117,7 +119,7 @@ func (c *Controller) EnqueueWebDeploy(deploymentID uuid.UUID, isPaidPlan bool) (
 	task := asynq.NewTask(tasks.TypeDeployWeb, payload)
 	_, err = c.TaskService.Enqueue(task,
 		asynq.Queue(queue),
-		asynq.MaxRetry(4),
+		asynq.MaxRetry(webDeployMaxRetry),
 		asynq.Timeout(15*time.Minute),
 		asynq.TaskID(deploymentID.String()),
 	)
