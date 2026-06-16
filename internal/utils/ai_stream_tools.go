@@ -112,11 +112,7 @@ func trimToolRoundsOlderThan(
 }
 
 func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int]*ToolCall, attempt, maxAttempts int) string {
-	indices := make([]int, 0, len(toolCallsMap))
-	for idx := range toolCallsMap {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
+	details := incompleteToolCallDetails(toolCallsMap)
 
 	var sb strings.Builder
 	sb.WriteString("The previous response started a tool call but ended before the tool call contained complete valid JSON")
@@ -125,26 +121,46 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 	}
 	sb.WriteString(".\n")
 	fmt.Fprintf(&sb, "Recovery attempt %d of %d.\n\n", attempt, maxAttempts)
+	if attempt > 1 {
+		sb.WriteString("The previous recovery attempt also produced incomplete tool-call JSON. Focus on emitting one complete, syntactically valid JSON argument object now. Prefer patch_files or multi_edit when they express the change cleanly, because their argument shape is easier to complete reliably.\n\n")
+	}
 	sb.WriteString("Incomplete tool call(s):\n")
-	for _, idx := range indices {
-		tc := toolCallsMap[idx]
-		name := ""
-		args := ""
-		if tc != nil && tc.Function != nil {
-			name = tc.Function.Name
-			args = tc.Function.Arguments
-		}
+	for _, detail := range details {
+		name := detail.Name
 		if name == "" {
 			name = "(unknown)"
 		}
-		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(args, 700))
+		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(detail.ArgumentsSoFar, 700))
 	}
 	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. Do not retry write_files for this recovery attempt. Use smaller structured calls instead: write one smaller file at a time, use multi_edit for exact replacements in an existing file, or use patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+		sb.WriteString("\nThe incomplete call was write_files. This means the streamed tool-call JSON ended incomplete; it does not mean write_files cannot create the requested file. For this recovery attempt, do not repeat the same write_files call shape. Re-issue the change as complete valid JSON, preferably with multi_edit for exact replacements in an existing file or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	} else {
 		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	}
 	return sb.String()
+}
+
+func incompleteToolCallDetails(toolCallsMap map[int]*ToolCall) []IncompleteToolCallDetail {
+	indices := make([]int, 0, len(toolCallsMap))
+	for idx := range toolCallsMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+	details := make([]IncompleteToolCallDetail, 0, len(indices))
+	for _, idx := range indices {
+		tc := toolCallsMap[idx]
+		detail := IncompleteToolCallDetail{Index: idx}
+		if tc != nil {
+			detail.ID = tc.ID
+			if tc.Function != nil {
+				detail.Name = tc.Function.Name
+				detail.ArgumentsSoFar = tc.Function.Arguments
+				detail.ArgumentBytes = len(tc.Function.Arguments)
+			}
+		}
+		details = append(details, detail)
+	}
+	return details
 }
 
 func incompleteToolCallsInclude(toolCallsMap map[int]*ToolCall, toolName string) bool {

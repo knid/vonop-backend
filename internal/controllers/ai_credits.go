@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1524,6 +1525,16 @@ func (c *Controller) RecordTokenUsage(user *models.User, action, model, provider
 			if tracker.TraceErrorMessage != "" {
 				traceProps.Set("$ai_error_message", tracker.TraceErrorMessage)
 			}
+			if tracker.TraceErrorFinishReason != "" {
+				traceProps.Set("error_finish_reason", tracker.TraceErrorFinishReason)
+			}
+			if len(tracker.TraceErrorToolCalls) > 0 {
+				traceProps.Set("incomplete_tool_count", len(tracker.TraceErrorToolCalls))
+				traceProps.Set("incomplete_tool_names", incompleteToolCallNames(tracker.TraceErrorToolCalls))
+				if raw, err := json.Marshal(tracker.TraceErrorToolCalls); err == nil {
+					traceProps.Set("incomplete_tool_calls", string(raw))
+				}
+			}
 		}
 		c.PostHog.Enqueue(posthog.Capture{
 			DistinctId: user.ID.String(),
@@ -1780,6 +1791,18 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		props.Set("$ai_error_code", errCode)
 		props.Set("$ai_error_type", errCode)
 	}
+	if tracker != nil {
+		if tracker.TraceErrorFinishReason != "" {
+			props.Set("error_finish_reason", tracker.TraceErrorFinishReason)
+		}
+		if len(tracker.TraceErrorToolCalls) > 0 {
+			props.Set("incomplete_tool_count", len(tracker.TraceErrorToolCalls))
+			props.Set("incomplete_tool_names", incompleteToolCallNames(tracker.TraceErrorToolCalls))
+			if raw, err := json.Marshal(tracker.TraceErrorToolCalls); err == nil {
+				props.Set("incomplete_tool_calls", string(raw))
+			}
+		}
+	}
 	if tracker.OrganizationID != "" {
 		props.Set("org_id", tracker.OrganizationID)
 	}
@@ -1802,4 +1825,21 @@ func (c *Controller) RecordLLMError(user *models.User, tracker *utils.TokenTrack
 		Event:      string(constants.EVENT_AI_GENERATION),
 		Properties: props,
 	})
+}
+
+func incompleteToolCallNames(details []utils.IncompleteToolCallDetail) []string {
+	if len(details) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(details))
+	names := make([]string, 0, len(details))
+	for _, detail := range details {
+		name := strings.TrimSpace(detail.Name)
+		if name == "" || seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
 }

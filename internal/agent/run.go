@@ -373,6 +373,14 @@ func Run(
 				attribute.String("langfuse.trace.metadata.error_code", tracker.TraceErrorCode),
 				attribute.String("langfuse.trace.metadata.error_message", msg),
 			)
+			if tracker.TraceErrorFinishReason != "" {
+				langfuseTrace.SetAttributes(attribute.String("langfuse.trace.metadata.error_finish_reason", tracker.TraceErrorFinishReason))
+			}
+			if len(tracker.TraceErrorToolCalls) > 0 {
+				if raw, err := json.Marshal(tracker.TraceErrorToolCalls); err == nil {
+					langfuseTrace.SetAttributes(attribute.String("langfuse.trace.metadata.incomplete_tool_calls", string(raw)))
+				}
+			}
 		}
 		langfuseTrace.End()
 	}()
@@ -1429,6 +1437,11 @@ func finaliseFailureV2(
 	if tracker != nil {
 		tracker.TraceErrorCode = string(code)
 		tracker.TraceErrorMessage = errMsg
+		var incomplete *utils.IncompleteToolCallError
+		if errors.As(wrapped, &incomplete) {
+			tracker.TraceErrorFinishReason = incomplete.FinishReason
+			tracker.TraceErrorToolCalls = append([]utils.IncompleteToolCallDetail(nil), incomplete.Details...)
+		}
 	}
 	// Always emit the grouping $ai_trace — even when tracker is empty — so
 	// every agent run shows up on the LLM Analytics dashboard. The recorder
