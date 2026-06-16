@@ -131,6 +131,25 @@ func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	}
 }
 
+func TestMessageSnapshotsIncludeReasoningContent(t *testing.T) {
+	snapshots := messageSnapshots([]Message{
+		{
+			Role:             "assistant",
+			Content:          "visible text",
+			ReasoningContent: "hidden plan",
+			Images:           []string{"img://one"},
+		},
+		{Role: "user", Content: "next"},
+	})
+
+	if got := snapshots[0].ReasoningContent; got != "hidden plan" {
+		t.Fatalf("reasoning_content = %q, want hidden plan", got)
+	}
+	if snapshots[0].Role != "assistant" {
+		t.Fatalf("role = %q, want assistant", snapshots[0].Role)
+	}
+}
+
 func TestStreamDeltaGetReasoningPrefersReasoningContent(t *testing.T) {
 	d := StreamDelta{Reasoning: "openrouter", ReasoningContent: "moonshot"}
 	if got := d.GetReasoning(); got != "moonshot" {

@@ -105,9 +105,10 @@ func (tc TraceContext) Attributes(extraTags ...string) []attribute.KeyValue {
 }
 
 type MessageSnapshot struct {
-	Role    string   `json:"role"`
-	Content string   `json:"content,omitempty"`
-	Images  []string `json:"images,omitempty"`
+	Role             string   `json:"role"`
+	Content          string   `json:"content,omitempty"`
+	Images           []string `json:"images,omitempty"`
+	ReasoningContent string   `json:"reasoning_content,omitempty"`
 }
 
 type GenerationAttributeInput struct {
@@ -124,6 +125,7 @@ type GenerationAttributeInput struct {
 	CostSource               string
 	InputMessages            []MessageSnapshot
 	OutputText               string
+	ReasoningText            string
 	ToolNames                []string
 	PromptName               string
 	PromptVersion            int
@@ -299,6 +301,9 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	}
 	if entry.OutputText != "" {
 		attrs = append(attrs, attribute.String("langfuse.observation.output", truncateLangfusePayload(entry.OutputText, maxObservationPayload)))
+	}
+	if entry.ReasoningText != "" {
+		attrs = append(attrs, attribute.String("langfuse.observation.metadata.reasoning", truncateLangfusePayload(entry.ReasoningText, maxObservationPayload)))
 	}
 	if len(entry.ToolNames) > 0 {
 		attrs = append(attrs, attribute.StringSlice("langfuse.observation.metadata.tools", dedupeOrdered(entry.ToolNames)))

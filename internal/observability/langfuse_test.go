@@ -221,7 +221,8 @@ func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 		InputMessages: []MessageSnapshot{
 			{Role: "user", Content: "hello"},
 		},
-		OutputText: "world",
+		OutputText:    "world",
+		ReasoningText: "think",
 	}
 
 	attrs := attrsByKey(GenerationAttributes(entry, 2))
@@ -241,6 +242,7 @@ func TestGenerationAttributesMapUsageCostAndContent(t *testing.T) {
 	assertBoolAttr(t, attrs, "langfuse.observation.metadata.streaming", true)
 	assertFloatAttr(t, attrs, "gen_ai.usage.cost", 0.0123)
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.latency_ms", 1234)
+	assertStringAttr(t, attrs, "langfuse.observation.metadata.reasoning", "think")
 }
 
 func TestGenerationAttributesLinkPrompt(t *testing.T) {

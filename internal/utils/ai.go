@@ -436,7 +436,7 @@ func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens), "catalog_estimate"
 }
 
-func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, toolNames []string) {
+func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, reasoningText string, toolNames []string) {
 	cost, costSource := resolveCostUSD(model, usage)
 	var prompt observability.PromptLink
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
@@ -456,6 +456,7 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		CostSource:               costSource,
 		InputMessages:            messageSnapshots(inputMessages),
 		OutputText:               outputText,
+		ReasoningText:            reasoningText,
 		ToolNames:                toolNames,
 		PromptName:               prompt.Name,
 		PromptVersion:            prompt.Version,
@@ -495,9 +496,10 @@ func messageSnapshots(messages []Message) []observability.MessageSnapshot {
 	out := make([]observability.MessageSnapshot, 0, len(messages))
 	for _, m := range messages {
 		out = append(out, observability.MessageSnapshot{
-			Role:    m.Role,
-			Content: m.Content,
-			Images:  append([]string(nil), m.Images...),
+			Role:             m.Role,
+			Content:          m.Content,
+			Images:           append([]string(nil), m.Images...),
+			ReasoningContent: m.ReasoningContent,
 		})
 	}
 	return out
@@ -1221,7 +1223,7 @@ func getJSONFromLLMOnce(ctx context.Context, model, system, message string, prov
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
 		}
-		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_json", 1, start, msgs, content, nil)
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_json", 1, start, msgs, content, "", nil)
 	}
 
 	return content, nil
@@ -1334,7 +1336,7 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
 			}
 		}
-		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_text", 1, start, msgs, content, nil)
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_text", 1, start, msgs, content, "", nil)
 	}
 
 	// Detect truncated responses — the model hit max_tokens before finishing.
@@ -2017,7 +2019,7 @@ func StreamWithTools(
 					}
 				}
 			}
-			recordLangfuseGeneration(ctx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, toolNames)
+			recordLangfuseGeneration(ctx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, fullReasoning.String(), toolNames)
 		}
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
