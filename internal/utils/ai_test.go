@@ -218,6 +218,22 @@ func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 	if !errors.Is(err, ErrIncompleteToolCall) {
 		t.Fatalf("error = %v, want ErrIncompleteToolCall", err)
 	}
+	var incomplete *IncompleteToolCallError
+	if !errors.As(err, &incomplete) {
+		t.Fatalf("error = %T, want IncompleteToolCallError", err)
+	}
+	if incomplete.FinishReason != "stop" {
+		t.Fatalf("finish reason = %q, want stop", incomplete.FinishReason)
+	}
+	if len(incomplete.Details) != 1 {
+		t.Fatalf("details len = %d, want 1", len(incomplete.Details))
+	}
+	if incomplete.Details[0].Name != "write_files" {
+		t.Fatalf("tool name = %q, want write_files", incomplete.Details[0].Name)
+	}
+	if incomplete.Details[0].ArgumentsSoFar != `{"files": ` {
+		t.Fatalf("arguments so far = %q", incomplete.Details[0].ArgumentsSoFar)
+	}
 	if executed {
 		t.Fatal("executor should not run for incomplete tool call arguments")
 	}
@@ -307,6 +323,12 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	if strings.Contains(recoveryRequestBody, "BEGIN_WEMOB_FILE") || strings.Contains(recoveryRequestBody, "END_WEMOB_FILE") {
 		t.Fatalf("recovery request referenced removed raw file block protocol: %s", recoveryRequestBody)
 	}
+	if !strings.Contains(recoveryRequestBody, "streamed tool-call JSON ended incomplete") {
+		t.Fatalf("recovery request did not diagnose incomplete JSON: %s", recoveryRequestBody)
+	}
+	if !strings.Contains(recoveryRequestBody, "does not mean write_files cannot create the requested file") {
+		t.Fatalf("recovery request implied write_files cannot create files: %s", recoveryRequestBody)
+	}
 	if !strings.Contains(recoveryRequestBody, "multi_edit") || !strings.Contains(recoveryRequestBody, "patch_files") {
 		t.Fatalf("recovery request did not steer toward edit tools: %s", recoveryRequestBody)
 	}
@@ -315,6 +337,97 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	}
 	if !strings.Contains(executedArgs, "app/page.tsx") {
 		t.Fatalf("executor args = %s, want recovered edit payload", executedArgs)
+	}
+}
+
+func TestStreamWithToolsRetriesSecondIncompleteToolCallRecovery(t *testing.T) {
+	var requests int
+	var recoveryPromptCount int
+	var secondRecoveryPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), "previous response started a tool call") {
+			recoveryPromptCount++
+		}
+		if secondRecoveryPrompt == "" && strings.Contains(string(body), "Recovery attempt 2 of 2") {
+			secondRecoveryPrompt = string(body)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch requests {
+		case 1:
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_files","arguments":"{\"files\": "}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+		case 2:
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"patch_files","arguments":"{\"patches\": "}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}}`)
+		case 3:
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_3","type":"function","function":{"name":"multi_edit","arguments":"{\"path\":\"frontend/src/App.tsx\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
+		default:
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Recovered."}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`)
+		}
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	var executed []string
+	got, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		[]Message{{Role: "user", Content: "make the changes"}},
+		[]Tool{
+			{Type: "function", Function: ToolFunction{Name: "write_files"}},
+			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
+			{Type: "function", Function: ToolFunction{Name: "multi_edit"}},
+		},
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		func(name, arguments string) (string, error) {
+			executed = append(executed, name)
+			if !json.Valid([]byte(arguments)) {
+				t.Fatalf("executor received invalid JSON args for %s: %s", name, arguments)
+			}
+			return "edited frontend/src/App.tsx", nil
+		},
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{MaxRounds: 3},
+	)
+
+	if err != nil {
+		t.Fatalf("StreamWithTools returned error after second recovery: %v", err)
+	}
+	if got != "Recovered." {
+		t.Fatalf("response = %q, want Recovered.", got)
+	}
+	if requests != 4 {
+		t.Fatalf("requests = %d, want 4", requests)
+	}
+	if recoveryPromptCount < 2 {
+		t.Fatalf("recovery prompts = %d, want at least 2", recoveryPromptCount)
+	}
+	if secondRecoveryPrompt == "" {
+		t.Fatal("second recovery prompt missing attempt count")
+	}
+	if !strings.Contains(secondRecoveryPrompt, "previous recovery attempt also produced incomplete tool-call JSON") {
+		t.Fatalf("second recovery prompt missing stronger warning: %s", secondRecoveryPrompt)
+	}
+	if strings.Contains(secondRecoveryPrompt, "smallest possible valid JSON payload") {
+		t.Fatalf("second recovery prompt used old size-oriented warning: %s", secondRecoveryPrompt)
+	}
+	if len(executed) != 1 || executed[0] != "multi_edit" {
+		t.Fatalf("executed tools = %#v, want only multi_edit", executed)
 	}
 }
 

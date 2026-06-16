@@ -31,7 +31,7 @@ const maxResponseBufferSize = 2 * 1024 * 1024 // 2 MB
 
 // incompleteToolCallRecoveryRetries bounds in-run recovery when a provider
 // ends a stream after starting, but not completing, a tool call.
-const incompleteToolCallRecoveryRetries = 1
+const incompleteToolCallRecoveryRetries = 2
 
 // maxBase64ImageBytes is the maximum raw image size we will convert to base64
 // before sending to LLM providers (OpenRouter, Moonshot, etc.). Larger images
@@ -47,6 +47,48 @@ var ErrResponseTruncated = errors.New("LLM response truncated (output token limi
 // ErrIncompleteToolCall is returned when a streaming response starts emitting
 // tool calls but ends before the provider marks them as complete.
 var ErrIncompleteToolCall = errors.New("LLM response ended with incomplete tool call")
+
+type IncompleteToolCallDetail struct {
+	Index          int    `json:"index"`
+	ID             string `json:"id,omitempty"`
+	Name           string `json:"name,omitempty"`
+	ArgumentsSoFar string `json:"arguments_so_far,omitempty"`
+	ArgumentBytes  int    `json:"argument_bytes"`
+}
+
+type IncompleteToolCallError struct {
+	FinishReason string                     `json:"finish_reason,omitempty"`
+	Details      []IncompleteToolCallDetail `json:"details,omitempty"`
+}
+
+func (e *IncompleteToolCallError) Error() string {
+	if e == nil {
+		return ErrIncompleteToolCall.Error()
+	}
+	names := make([]string, 0, len(e.Details))
+	for _, d := range e.Details {
+		if d.Name != "" {
+			names = append(names, d.Name)
+		}
+	}
+	msg := ErrIncompleteToolCall.Error()
+	if e.FinishReason != "" {
+		msg += fmt.Sprintf(": finish_reason=%q", e.FinishReason)
+	}
+	if len(names) > 0 {
+		msg += ": tools=" + strings.Join(names, ",")
+	}
+	return msg
+}
+
+func (e *IncompleteToolCallError) Unwrap() error { return ErrIncompleteToolCall }
+
+func NewIncompleteToolCallError(finishReason string, toolCallsMap map[int]*ToolCall) *IncompleteToolCallError {
+	return &IncompleteToolCallError{
+		FinishReason: finishReason,
+		Details:      incompleteToolCallDetails(toolCallsMap),
+	}
+}
 
 type ToolRoundsExceededError struct {
 	MaxRounds int
@@ -502,14 +544,16 @@ type TokenTracker struct {
 	// event as errored so PostHog's trace list surfaces the failure without
 	// relying on scanning child generations. Populated by agent.Run's failure
 	// path before RecordLLMUsage is invoked.
-	TraceErrorCode    string
-	TraceErrorMessage string
-	StartedAt         time.Time // wall-clock start of the generation (for accurate $ai_latency)
-	RequiredSkillIDs  []string
-	LoadedSkillIDs    []string
-	Langfuse          observability.TraceContext
-	LangfuseTraceID   string
-	Prompt            observability.PromptLink
+	TraceErrorCode         string
+	TraceErrorMessage      string
+	TraceErrorFinishReason string
+	TraceErrorToolCalls    []IncompleteToolCallDetail
+	StartedAt              time.Time // wall-clock start of the generation (for accurate $ai_latency)
+	RequiredSkillIDs       []string
+	LoadedSkillIDs         []string
+	Langfuse               observability.TraceContext
+	LangfuseTraceID        string
+	Prompt                 observability.PromptLink
 }
 
 // RecordToolUsed appends a tool name to the list of tools called in this trace.
@@ -2022,7 +2066,7 @@ func StreamWithTools(
 					round-- // retry the same logical round with recovery context
 					continue
 				}
-				return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
+				return fullText.String(), NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
 			}
 
 			// Append assistant message with tool calls. Older rounds are later
@@ -2255,7 +2299,7 @@ func StreamWithTools(
 				round-- // retry the same logical round with recovery context
 				continue
 			}
-			return fullText.String(), fmt.Errorf("%w: finish_reason=%q", ErrIncompleteToolCall, lastFinishReason)
+			return fullText.String(), NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
 		}
 
 		// Chunks were already streamed in real-time via onChunk above.
