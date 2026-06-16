@@ -505,6 +505,18 @@ func messageSnapshots(messages []Message) []observability.MessageSnapshot {
 	return out
 }
 
+func sanitizedMessages(messages []Message) []Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]Message, len(messages))
+	for i, m := range messages {
+		m.ReasoningContent = ""
+		out[i] = m
+	}
+	return out
+}
+
 func toolCallNamesFromMap(toolCallsMap map[int]*ToolCall) []string {
 	if len(toolCallsMap) == 0 {
 		return nil
@@ -976,6 +988,9 @@ type ChatResponse struct {
 // buildLLMRequestBody marshals a ChatRequest into the correct wire format
 // for the given provider. For Anthropic, it translates to the Messages API format.
 func buildLLMRequestBody(req ChatRequest, provider *LLMProvider) ([]byte, error) {
+	if len(req.Messages) > 0 {
+		req.Messages = sanitizedMessages(req.Messages)
+	}
 	if provider != nil && provider.IsAnthropic() {
 		anthReq := convertToAnthropicRequest(req, provider)
 		return json.Marshal(anthReq)
