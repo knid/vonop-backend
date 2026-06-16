@@ -266,21 +266,6 @@ func Run(
 	// compact source of truth even when older tool messages are trimmed.
 	coreUserContent := expandedMessage
 	userTurn := utils.Message{Role: "user", Content: coreUserContent}
-	refreshRunPrefix := func(msg *utils.Message) {
-		prefix := renderRunPrefix(fileMap, buildState, todos)
-		if prefix == "" {
-			return
-		}
-		c := msg.Content
-		const requestMarker = "\n\nUSER REQUEST\n============\n\n"
-		if strings.HasPrefix(c, "CURRENT RUN CONTEXT\n") {
-			if idx := strings.Index(c, requestMarker); idx >= 0 {
-				c = c[idx+len(requestMarker):]
-			}
-		}
-		msg.Content = "CURRENT RUN CONTEXT\n===================\n\n" + prefix + requestMarker + c
-	}
-	refreshRunPrefix(&userTurn)
 	if len(currentImageURLs) > 0 {
 		userTurn.Images = currentImageURLs
 	}
@@ -459,6 +444,32 @@ func Run(
 	if compactIntervalTokens <= 0 {
 		compactIntervalTokens = compactAfterTokens
 	}
+
+	// Define refreshRunPrefix here so it can access tracker and maxTokensPerRun
+	refreshRunPrefix := func(msg *utils.Message) {
+		prefix := renderRunPrefix(fileMap, buildState, todos)
+		if prefix == "" {
+			return
+		}
+		c := msg.Content
+		const requestMarker = "\n\nUSER REQUEST\n============\n\n"
+		if strings.HasPrefix(c, "CURRENT RUN CONTEXT\n") {
+			if idx := strings.Index(c, requestMarker); idx >= 0 {
+				c = c[idx+len(requestMarker):]
+			}
+		}
+		
+		// Proactive budget guardrail: warn the LLM when approaching the token limit
+		budgetWarning := ""
+		if tracker != nil {
+			if _, _, total, _ := tracker.Totals(); total > (maxTokensPerRun * 8 / 10) {
+				budgetWarning = "\n\n⚠️ BUDGET WARNING: You are approaching the token limit for this run. Please conclude your current task, summarize your findings, and ask the user for the next step. Do not start new large file reads or complex refactors.\n"
+			}
+		}
+		
+		msg.Content = "CURRENT RUN CONTEXT\n===================\n\n" + prefix + budgetWarning + requestMarker + c
+	}
+	refreshRunPrefix(&userTurn)
 
 	rc := &RunContext{
 		RunID:          runID,

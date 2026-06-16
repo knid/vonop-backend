@@ -765,6 +765,10 @@ func (GrepTool) Schema() map[string]any {
 				"type":        "boolean",
 				"description": "If true, match regardless of case.",
 			},
+			"context_lines": map[string]any{
+				"type":        "integer",
+				"description": "Number of lines to show before and after each match. Default 0 (match only). Recommended: 5-15 for context.",
+			},
 		},
 		"required": []string{"pattern"},
 	}
@@ -775,6 +779,7 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 		Pattern         string `json:"pattern"`
 		Glob            string `json:"glob"`
 		CaseInsensitive bool   `json:"case_insensitive"`
+		ContextLines    int    `json:"context_lines"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
@@ -817,7 +822,8 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 			continue
 		}
 		fileHit := false
-		for i, line := range strings.Split(content, "\n") {
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
 			if !re.MatchString(line) {
 				continue
 			}
@@ -825,12 +831,43 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 				truncated = true
 				break
 			}
-			if len(line) > grepMaxLineLen {
-				line = line[:grepMaxLineLen] + "…"
-			}
-			fmt.Fprintf(&sb, "%s:%d:%s\n", p, i+1, line)
-			matches++
 			fileHit = true
+			matches++
+
+			if args.ContextLines > 0 {
+				start := i - args.ContextLines
+				if start < 0 {
+					start = 0
+				}
+				end := i + args.ContextLines + 1
+				if end > len(lines) {
+					end = len(lines)
+				}
+				fmt.Fprintf(&sb, "--- %s (lines %d-%d) ---\n", p, start+1, end)
+				for j := start; j < end; j++ {
+					prefix := "  "
+					if j == i {
+						prefix = "> "
+					}
+					displayLine := lines[j]
+					if len(displayLine) > grepMaxLineLen {
+						displayLine = displayLine[:grepMaxLineLen] + "…"
+					}
+					fmt.Fprintf(&sb, "%s%4d: %s\n", prefix, j+1, displayLine)
+				}
+				fmt.Fprintln(&sb)
+			} else {
+				displayLine := line
+				if len(displayLine) > grepMaxLineLen {
+					displayLine = displayLine[:grepMaxLineLen] + "…"
+				}
+				fmt.Fprintf(&sb, "%s:%d:%s\n", p, i+1, displayLine)
+			}
+
+			if matches >= grepMaxMatches || sb.Len() >= grepMaxBytes {
+				truncated = true
+				break
+			}
 		}
 		if fileHit {
 			filesHit++
