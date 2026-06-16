@@ -807,7 +807,10 @@ func (v *HttpViews) AuthorizeE2BAgentSandbox(w http.ResponseWriter, r *http.Requ
 		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
 		return
 	}
-	allowExec, _ := project.Settings["agent_allow_sandbox_exec"].(bool)
+	allowExec, ok := project.Settings[constants.AgentSettingAllowSandboxExec].(bool)
+	if !ok {
+		allowExec = true
+	}
 	utils.JSONResponse(w, map[string]any{
 		"authorized":         true,
 		"sandbox_id":         project.SandboxID,

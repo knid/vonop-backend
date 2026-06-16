@@ -141,6 +141,7 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	// until the agent or a manual edit writes one — but the project
 	// already has a generated name we can mirror in.
 	settings := map[string]any{}
+	applyDefaultAgentSettings(settings)
 	if projectType == models.ProjectTypeMobileAppNative {
 		settings["build_defaults"] = map[string]any{
 			"app_name": name,

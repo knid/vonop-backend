@@ -14,6 +14,10 @@ const (
 
 	// MAX_DOMAINS_PER_PROJECT is the maximum number of custom domains per project
 	MAX_DOMAINS_PER_PROJECT = 10
+
+	// Agent settings keys written in AppProject.Settings.
+	// These are used by the agent tool authorization layer and e2b control plane.
+	AgentSettingAllowSandboxExec = "agent_allow_sandbox_exec"
 )
 
 // -----------------------------------------------------------------------------
@@ -25,10 +29,10 @@ const (
 // -----------------------------------------------------------------------------
 const (
 	// Core org & membership management (owner/admin typically)
-	PermOrgSettings   = "org.settings"
-	PermMemberInvite  = "member.invite"
-	PermMemberManage  = "member.manage" // includes remove, role/perm changes
-	PermOrgTransfer   = "org.transfer"  // ownership transfer (owner only)
+	PermOrgSettings  = "org.settings"
+	PermMemberInvite = "member.invite"
+	PermMemberManage = "member.manage" // includes remove, role/perm changes
+	PermOrgTransfer  = "org.transfer"  // ownership transfer (owner only)
 
 	// AI features (generate full apps, chat in studio)
 	PermAIGenerate = "ai.generate"
