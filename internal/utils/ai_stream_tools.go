@@ -133,7 +133,7 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(detail.ArgumentsSoFar, 700))
 	}
 	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. This means the streamed tool-call JSON ended incomplete; it does not mean write_files cannot create the requested file. For this recovery attempt, do not repeat the same write_files call shape. Re-issue the change as complete valid JSON, preferably with multi_edit for exact replacements in an existing file or patch_files when editing multiple files. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+		sb.WriteString("\nThe incomplete call was write_files. This means the streamed tool-call JSON ended incomplete due to provider payload size limits; it does not mean write_files cannot create the requested file. For this recovery attempt, DO NOT attempt to write the entire file at once. Break the file into smaller logical chunks (e.g., separate components) and call write_files multiple times, or use patch_files/multi_edit for targeted replacements. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	} else {
 		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	}

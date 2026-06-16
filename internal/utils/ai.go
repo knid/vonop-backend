@@ -1425,7 +1425,7 @@ func StreamWithTools(
 	}
 
 	maxRounds := 10
-	maxTokens := 16384
+	maxTokens := 32768 // Increased from 16384 to accommodate larger tool call payloads (e.g., write_files) without hitting provider truncation limits
 	maxContinuations := 3
 	if len(opts) > 0 {
 		if opts[0].MaxRounds > 0 {
