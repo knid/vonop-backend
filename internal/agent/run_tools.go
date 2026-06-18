@@ -40,7 +40,7 @@ func trackerDelta(t *utils.TokenTracker) TokenUsage {
 // before stamping it into ToolCallStartEvent.InputPreview.
 func stripToolInputForPreview(name string, argsJSON string) json.RawMessage {
 	switch name {
-	case "write_file", "write_files", "edit_file", "multi_edit", "patch_files", "delete_file":
+	case "write_file", "write_files", "edit_file", "multi_edit", "delete_file":
 		var m map[string]json.RawMessage
 		if err := json.Unmarshal([]byte(argsJSON), &m); err != nil {
 			return json.RawMessage("{}")

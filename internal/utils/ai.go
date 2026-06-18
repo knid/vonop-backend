@@ -536,6 +536,31 @@ func toolCallNamesFromMap(toolCallsMap map[int]*ToolCall) []string {
 	return names
 }
 
+func sortedToolCallsWithIDs(toolCallsMap map[int]*ToolCall, round int, providerName, model string) []ToolCall {
+	if len(toolCallsMap) == 0 {
+		return nil
+	}
+	indices := make([]int, 0, len(toolCallsMap))
+	for idx := range toolCallsMap {
+		indices = append(indices, idx)
+	}
+	sort.Ints(indices)
+
+	toolCalls := make([]ToolCall, 0, len(indices))
+	for _, idx := range indices {
+		tc := toolCallsMap[idx]
+		if tc == nil {
+			continue
+		}
+		if tc.ID == "" {
+			tc.ID = fmt.Sprintf("call_synth_%d_%d", round, idx)
+			slog.Warn("LLM streaming omitted tool_call id; using synthetic id", "round", round, "index", idx, "synthetic_id", tc.ID, "provider", providerName, "model", model)
+		}
+		toolCalls = append(toolCalls, *tc)
+	}
+	return toolCalls
+}
+
 // TokenTracker is a thread-safe accumulator that collects token usage across multiple LLM calls.
 type TokenTracker struct {
 	mu             sync.Mutex
@@ -2058,20 +2083,9 @@ func StreamWithTools(
 			}
 			roundChunks = nil // discard intermediate reasoning chunks
 
-			// Build sorted tool calls list
-			indices := make([]int, 0, len(toolCallsMap))
-			for idx := range toolCallsMap {
-				indices = append(indices, idx)
-			}
-			sort.Ints(indices)
-
-			toolCalls := make([]ToolCall, 0, len(indices))
+			toolCalls := sortedToolCallsWithIDs(toolCallsMap, round, provider.Name, model)
 			hasInvalidToolArgs := false
-			for _, idx := range indices {
-				if toolCallsMap[idx].ID == "" {
-					toolCallsMap[idx].ID = fmt.Sprintf("call_synth_%d_%d", round, idx)
-					slog.Warn("LLM streaming omitted tool_call id; using synthetic id", "round", round, "index", idx, "synthetic_id", toolCallsMap[idx].ID, "provider", provider.Name, "model", model)
-				}
+			for idx := range toolCallsMap {
 				if tc := toolCallsMap[idx]; tc != nil && tc.Function != nil {
 					args := tc.Function.Arguments
 					if args != "" && args != "{}" && !isValidJSON(args) {
@@ -2082,7 +2096,6 @@ func StreamWithTools(
 							"args_len", len(args))
 					}
 				}
-				toolCalls = append(toolCalls, *toolCallsMap[idx])
 			}
 			if hasInvalidToolArgs {
 				if recoverIncompleteToolCall(round, lastFinishReason, toolCallsMap) {

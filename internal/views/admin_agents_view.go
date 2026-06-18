@@ -151,7 +151,6 @@ func adminAgentToolRisks() []adminAgentToolRiskResponse {
 		"write_files",
 		"edit_file",
 		"multi_edit",
-		"patch_files",
 		"delete_file",
 		"generate_image",
 		"execute_sql",

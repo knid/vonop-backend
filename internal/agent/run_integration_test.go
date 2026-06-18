@@ -378,7 +378,7 @@ func TestRunIntegrationToolMatrixReadSearchPatchDelete(t *testing.T) {
 				"description": "update app copy and tag",
 			})
 		case 5:
-			streamToolCall(t, w, "call_patch", "patch_files", map[string]any{
+			streamToolCall(t, w, "call_multi_files", "multi_edit", map[string]any{
 				"files": []any{
 					map[string]any{
 						"path": "frontend/src/App.tsx",
@@ -440,7 +440,7 @@ func TestRunIntegrationToolMatrixReadSearchPatchDelete(t *testing.T) {
 	require.Contains(t, string(messages[1].ToolCalls), "grep")
 	require.Contains(t, string(messages[1].ToolCalls), "read_files")
 	require.Contains(t, string(messages[1].ToolCalls), "multi_edit")
-	require.Contains(t, string(messages[1].ToolCalls), "patch_files")
+	require.NotContains(t, string(messages[1].ToolCalls), "patch_files")
 	require.Contains(t, string(messages[1].ToolCalls), "delete_file")
 }
 

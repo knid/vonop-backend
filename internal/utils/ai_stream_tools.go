@@ -122,7 +122,7 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 	sb.WriteString(".\n")
 	fmt.Fprintf(&sb, "Recovery attempt %d of %d.\n\n", attempt, maxAttempts)
 	if attempt > 1 {
-		sb.WriteString("The previous recovery attempt also produced incomplete tool-call JSON. Focus on emitting one complete, syntactically valid JSON argument object now. Prefer patch_files or multi_edit when they express the change cleanly, because their argument shape is easier to complete reliably.\n\n")
+		sb.WriteString("The previous recovery attempt also produced incomplete tool-call JSON. Focus on emitting one complete, syntactically valid JSON argument object now. Prefer multi_edit when it expresses the change cleanly, because its argument shape is easier to complete reliably.\n\n")
 	}
 	sb.WriteString("Incomplete tool call(s):\n")
 	for _, detail := range details {
@@ -133,7 +133,7 @@ func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int
 		fmt.Fprintf(&sb, "- %s arguments so far: %s\n", name, truncateBody(detail.ArgumentsSoFar, 700))
 	}
 	if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-		sb.WriteString("\nThe incomplete call was write_files. This means the streamed tool-call JSON ended incomplete due to provider payload size limits; it does not mean write_files cannot create the requested file. For this recovery attempt, DO NOT attempt to write the entire file at once. Break the file into smaller logical chunks (e.g., separate components) and call write_files multiple times, or use patch_files/multi_edit for targeted replacements. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
+		sb.WriteString("\nThe incomplete call was write_files. This means the streamed tool-call JSON ended incomplete due to provider payload size limits; it does not mean write_files cannot create the requested file. For this recovery attempt, DO NOT attempt to write the entire file at once. Break the file into smaller logical chunks (e.g., separate components) and call write_files multiple times, or use multi_edit for targeted replacements. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	} else {
 		sb.WriteString("\nRe-issue only the missing or incomplete tool call with complete valid JSON. Do not restart the task, do not repeat successful work, and do not respond with plain text unless the task is already complete.")
 	}

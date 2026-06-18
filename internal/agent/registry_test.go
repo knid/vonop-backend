@@ -19,6 +19,12 @@ func TestBuildRegistryFor_ExposesWriteFilesButNotWriteFile(t *testing.T) {
 	if !names["write_files"] {
 		t.Fatal("expected write_files to be exposed")
 	}
+	if names["patch_files"] {
+		t.Fatal("patch_files must not be exposed; use multi_edit for single-file and multi-file exact-string edits")
+	}
+	if !names["multi_edit"] {
+		t.Fatal("expected multi_edit to be exposed")
+	}
 	if names["update_todos"] {
 		t.Fatal("update_todos must not be exposed by default; failed todo calls waste agent rounds")
 	}
