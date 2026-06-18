@@ -1188,12 +1188,12 @@ func toolsWithProviderCompatibleSchemas(tools []Tool) []Tool {
 		if out[i].Type != "function" || len(out[i].Function.Parameters) == 0 {
 			continue
 		}
-		out[i].Function.Parameters = schemaWithoutRootCombinators(out[i].Function.Parameters)
+		out[i].Function.Parameters = schemaWithoutUnsupportedRootCombinators(out[i].Function.Parameters)
 	}
 	return out
 }
 
-func schemaWithoutRootCombinators(schema map[string]any) map[string]any {
+func schemaWithoutUnsupportedRootCombinators(schema map[string]any) map[string]any {
 	if len(schema) == 0 {
 		return schema
 	}
@@ -1206,7 +1206,92 @@ func schemaWithoutRootCombinators(schema map[string]any) map[string]any {
 			out[k] = v
 		}
 	}
+	mergeRootCombinatorObjectShapes(out, schema, "anyOf", false)
+	mergeRootCombinatorObjectShapes(out, schema, "oneOf", false)
+	mergeRootCombinatorObjectShapes(out, schema, "allOf", true)
 	return out
+}
+
+func mergeRootCombinatorObjectShapes(out map[string]any, schema map[string]any, keyword string, requireAll bool) {
+	raw, ok := schema[keyword].([]any)
+	if !ok || len(raw) == 0 {
+		return
+	}
+
+	mergedProps := map[string]any{}
+	requiredCounts := map[string]int{}
+	objectCandidates := 0
+	for _, candidate := range raw {
+		candidateSchema, ok := candidate.(map[string]any)
+		if !ok {
+			continue
+		}
+		if props, ok := candidateSchema["properties"].(map[string]any); ok {
+			objectCandidates++
+			for name, prop := range props {
+				if _, exists := mergedProps[name]; !exists {
+					mergedProps[name] = prop
+				}
+			}
+			for _, req := range schemaRequiredStrings(candidateSchema["required"]) {
+				requiredCounts[req]++
+			}
+			continue
+		}
+		if t, _ := candidateSchema["type"].(string); t == "object" {
+			objectCandidates++
+			for _, req := range schemaRequiredStrings(candidateSchema["required"]) {
+				requiredCounts[req]++
+			}
+		}
+	}
+	if objectCandidates == 0 {
+		return
+	}
+
+	out["type"] = "object"
+	if len(mergedProps) > 0 {
+		if existing, ok := out["properties"].(map[string]any); ok {
+			for name, prop := range mergedProps {
+				if _, exists := existing[name]; !exists {
+					existing[name] = prop
+				}
+			}
+		} else {
+			out["properties"] = mergedProps
+		}
+	}
+
+	requiredThreshold := objectCandidates
+	if requireAll {
+		requiredThreshold = 1
+	}
+	var required []string
+	for name, count := range requiredCounts {
+		if count >= requiredThreshold {
+			required = append(required, name)
+		}
+	}
+	if len(required) > 0 {
+		out["required"] = required
+	}
+}
+
+func schemaRequiredStrings(raw any) []string {
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.
