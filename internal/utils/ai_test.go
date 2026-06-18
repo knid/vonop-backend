@@ -343,7 +343,6 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 		[]Tool{
 			{Type: "function", Function: ToolFunction{Name: "write_files"}},
 			{Type: "function", Function: ToolFunction{Name: "multi_edit"}},
-			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
 		},
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
@@ -385,8 +384,8 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	if !strings.Contains(recoveryRequestBody, "does not mean write_files cannot create the requested file") {
 		t.Fatalf("recovery request implied write_files cannot create files: %s", recoveryRequestBody)
 	}
-	if !strings.Contains(recoveryRequestBody, "multi_edit") || !strings.Contains(recoveryRequestBody, "patch_files") {
-		t.Fatalf("recovery request did not steer toward edit tools: %s", recoveryRequestBody)
+	if !strings.Contains(recoveryRequestBody, "multi_edit") {
+		t.Fatalf("recovery request did not steer toward multi_edit: %s", recoveryRequestBody)
 	}
 	if !json.Valid([]byte(executedArgs)) {
 		t.Fatalf("executor received invalid JSON args: %s", executedArgs)
@@ -416,7 +415,7 @@ func TestStreamWithToolsRetriesSecondIncompleteToolCallRecovery(t *testing.T) {
 			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"write_files","arguments":"{\"files\": "}}]}}]}`)
 			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
 		case 2:
-			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"patch_files","arguments":"{\"patches\": "}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"multi_edit","arguments":"{\"files\": "}}]}}]}`)
 			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":11,"completion_tokens":5,"total_tokens":16}}`)
 		case 3:
 			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_3","type":"function","function":{"name":"multi_edit","arguments":"{\"path\":\"frontend/src/App.tsx\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
@@ -442,7 +441,6 @@ func TestStreamWithToolsRetriesSecondIncompleteToolCallRecovery(t *testing.T) {
 		[]Message{{Role: "user", Content: "make the changes"}},
 		[]Tool{
 			{Type: "function", Function: ToolFunction{Name: "write_files"}},
-			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
 			{Type: "function", Function: ToolFunction{Name: "multi_edit"}},
 		},
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
@@ -506,7 +504,7 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 			return
 		}
 		if requests == 2 {
-			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"patch_files","arguments":"{\"patches\":[{\"path\":\"frontend/src/App.tsx\",\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"multi_edit","arguments":"{\"path\":\"frontend/src/App.tsx\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
 			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":100,"completion_tokens":20,"total_tokens":120}}`)
 			fmt.Fprintln(w, "data: [DONE]")
 			return
@@ -530,7 +528,7 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 		[]Message{{Role: "user", Content: "build a portfolio"}},
 		[]Tool{
 			{Type: "function", Function: ToolFunction{Name: "write_files"}},
-			{Type: "function", Function: ToolFunction{Name: "patch_files"}},
+			{Type: "function", Function: ToolFunction{Name: "multi_edit"}},
 		},
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
@@ -540,7 +538,7 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 			if !json.Valid([]byte(arguments)) {
 				t.Fatalf("executor received invalid JSON args for %s: %s", name, arguments)
 			}
-			return "patched frontend/src/App.tsx", nil
+			return "edited frontend/src/App.tsx", nil
 		},
 		nil,
 		nil,
@@ -563,8 +561,8 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
 		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
 	}
-	if len(executed) != 1 || executed[0] != "patch_files" {
-		t.Fatalf("executed tools = %#v, want only recovered patch_files", executed)
+	if len(executed) != 1 || executed[0] != "multi_edit" {
+		t.Fatalf("executed tools = %#v, want only recovered multi_edit", executed)
 	}
 }
 

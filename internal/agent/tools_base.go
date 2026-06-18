@@ -419,7 +419,7 @@ func planFileWrite(rc *RunContext, rawPath, content string, overwrite bool, reas
 	} else if strings.TrimSpace(reason) == "" {
 		return nil, fmt.Sprintf("overwrite reason is required for existing file: %s", path)
 	} else if len(existing) > largeExistingFileRewriteBytes {
-		return nil, fmt.Sprintf("existing file is too large for full rewrite: %s is %d bytes (limit %d). Use multi_edit for multiple exact replacements in this file, or patch_files when editing multiple files", path, len(existing), largeExistingFileRewriteBytes)
+		return nil, fmt.Sprintf("existing file is too large for full rewrite: %s is %d bytes (limit %d). Use multi_edit for exact-string replacements, including multi-file batches", path, len(existing), largeExistingFileRewriteBytes)
 	}
 
 	return &fileWritePlan{
@@ -479,7 +479,7 @@ type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for multiple exact replacements in one large file, or patch_files across files."
+	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for exact-string replacements, including multi-file batches."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -495,7 +495,7 @@ func (WriteFilesTool) Schema() map[string]any {
 						"content":     map[string]any{"type": "string"},
 						"description": map[string]any{"type": "string"},
 						"overwrite":   map[string]any{"type": "boolean", "description": "Required to replace an existing small file. Large existing files cannot be overwritten with write_files."},
-						"reason":      map[string]any{"type": "string", "description": "Required when overwrite=true. For existing files larger than 30KB, use multi_edit or patch_files instead."},
+						"reason":      map[string]any{"type": "string", "description": "Required when overwrite=true. For existing files larger than 30KB, use multi_edit instead."},
 					},
 					"required": []string{"path", "content"},
 				},
@@ -665,7 +665,7 @@ type EditFileTool struct{}
 
 func (EditFileTool) Name() string { return "edit_file" }
 func (EditFileTool) Description() string {
-	return "Surgically replace exactly one occurrence of old_string with new_string in exactly one existing file. For 2+ edits in this file, use multi_edit; for edits across 2+ files, use patch_files. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
+	return "Surgically replace exactly one occurrence of old_string with new_string in exactly one existing file. For 2+ edits or edits across files, use multi_edit. Fails if old_string does not appear or appears more than once — in that case, add surrounding context to old_string and retry."
 }
 func (EditFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -889,13 +889,16 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 
 // ---------- multi_edit ----------
 
-const multiEditMaxEdits = 50
+const (
+	multiEditMaxEdits = 50
+	multiEditMaxFiles = 20
+)
 
 type MultiEditTool struct{}
 
 func (MultiEditTool) Name() string { return "multi_edit" }
 func (MultiEditTool) Description() string {
-	return "Apply multiple surgical edits to a single file in one call. Each edit replaces one occurrence of old_string with new_string unless replace_all=true is set for that edit; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have ≥2 changes to the same file — same semantics, one round-trip."
+	return "Apply surgical exact-string edits to one file or a batch of files. Each edit replaces one occurrence of old_string with new_string unless replace_all=true is set for that edit; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have 2+ changes or edits across files."
 }
 
 func editReplacementSchema() map[string]any {
@@ -927,6 +930,15 @@ func editReplacementsSchema(description string) map[string]any {
 }
 
 func (MultiEditTool) Schema() map[string]any {
+	fileEntrySchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string"},
+			"edits":       editReplacementsSchema("Ordered list of exact-string edits for this file."),
+			"description": map[string]any{"type": "string"},
+		},
+		"required": []string{"path", "edits"},
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -935,9 +947,13 @@ func (MultiEditTool) Schema() map[string]any {
 				"description": "The project-relative path to the file.",
 			},
 			"edits":       editReplacementsSchema("Ordered list of edits. Each is applied to the file in turn; a later edit sees the content produced by earlier edits."),
+			"files":       map[string]any{"type": "array", "description": "Optional multi-file batch. Each entry has path and edits.", "items": fileEntrySchema},
 			"description": map[string]any{"type": "string"},
 		},
-		"required": []string{"path", "edits"},
+		"anyOf": []any{
+			map[string]any{"required": []string{"path", "edits"}},
+			map[string]any{"required": []string{"files"}},
+		},
 	}
 }
 
@@ -963,54 +979,123 @@ func decodeEditReplacements(raw json.RawMessage) ([]editReplacement, error) {
 }
 
 func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
+	type multiEditFileInput struct {
 		Path        string          `json:"path"`
 		Edits       json.RawMessage `json:"edits"`
 		Description string          `json:"description"`
 	}
+	var args struct {
+		Path        string               `json:"path"`
+		Edits       json.RawMessage      `json:"edits"`
+		Files       []multiEditFileInput `json:"files"`
+		Description string               `json:"description"`
+	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
 	}
-	edits, err := decodeEditReplacements(args.Edits)
-	if err != nil {
-		return fmt.Sprintf("invalid edits: %v", err), true, nil
+	if len(args.Files) == 0 && args.Path != "" {
+		args.Files = []multiEditFileInput{{
+			Path:        args.Path,
+			Edits:       args.Edits,
+			Description: args.Description,
+		}}
 	}
-	path, err := sanitizePath(args.Path)
-	if err != nil {
-		return err.Error(), true, nil
+	if len(args.Files) == 0 {
+		return "path and edits, or files, must be provided", true, nil
 	}
-	if isProtected(path) {
-		return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
-	}
-	if msg := enforceProjectPathScope(rc, path); msg != "" {
-		return msg, true, nil
-	}
-	if len(edits) == 0 {
-		return "edits must contain at least one entry", true, nil
-	}
-	if len(edits) > multiEditMaxEdits {
-		return fmt.Sprintf("too many edits: %d (max %d) — split into multiple calls", len(edits), multiEditMaxEdits), true, nil
-	}
-	content, ok := rc.FileMap.Get(path)
-	if !ok {
-		return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
+	if len(args.Files) > multiEditMaxFiles {
+		return fmt.Sprintf("too many files: %d (max %d) — split into multiple calls", len(args.Files), multiEditMaxFiles), true, nil
 	}
 
+	seen := map[string]bool{}
+	type preparedEdit struct {
+		path         string
+		edits        []editReplacement
+		nextContent  string
+		replacements int
+	}
+	prepared := make([]preparedEdit, 0, len(args.Files))
+	for fileIdx, file := range args.Files {
+		edits, err := decodeEditReplacements(file.Edits)
+		if err != nil {
+			return fmt.Sprintf("file %d: invalid edits: %v", fileIdx+1, err), true, nil
+		}
+		path, err := sanitizePath(file.Path)
+		if err != nil {
+			return err.Error(), true, nil
+		}
+		if seen[path] {
+			return fmt.Sprintf("duplicate path in multi_edit: %s", path), true, nil
+		}
+		seen[path] = true
+		if isProtected(path) {
+			return fmt.Sprintf("protected file, cannot edit: %s", path), true, nil
+		}
+		if msg := enforceProjectPathScope(rc, path); msg != "" {
+			return msg, true, nil
+		}
+		if len(edits) == 0 {
+			return fmt.Sprintf("%s: edits must contain at least one entry", path), true, nil
+		}
+		if len(edits) > multiEditMaxEdits {
+			return fmt.Sprintf("%s: too many edits: %d (max %d) — split into multiple calls", path, len(edits), multiEditMaxEdits), true, nil
+		}
+		content, ok := rc.FileMap.Get(path)
+		if !ok {
+			return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
+		}
+		nextContent, replacements, toolErr := applyEditReplacements(content, edits)
+		if toolErr != "" {
+			return fmt.Sprintf("%s: %s", path, toolErr), true, nil
+		}
+		if len(nextContent) > maxWriteBytes {
+			return fmt.Sprintf("resulting file too large: %s is %d bytes (max %d)", path, len(nextContent), maxWriteBytes), true, nil
+		}
+		prepared = append(prepared, preparedEdit{
+			path:         path,
+			edits:        edits,
+			nextContent:  nextContent,
+			replacements: replacements,
+		})
+	}
+
+	var totalReplacements int
+	for _, p := range prepared {
+		rc.FileMap.Set(p.path, p.nextContent)
+		if rc.BuildState != nil {
+			rc.BuildState.RecordFileWrite(p.path, "update")
+		}
+		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
+			RunID:     rc.RunID,
+			Path:      p.path,
+			Operation: "update",
+			Bytes:     len(p.nextContent),
+			Content:   p.nextContent,
+		})
+		totalReplacements += p.replacements
+	}
+	if len(prepared) == 1 {
+		return fmt.Sprintf("edited %s (%d replacements, %d bytes)", prepared[0].path, totalReplacements, len(prepared[0].nextContent)), false, nil
+	}
+	return fmt.Sprintf("edited %d files (%d replacements)", len(prepared), totalReplacements), false, nil
+}
+
+func applyEditReplacements(content string, edits []editReplacement) (string, int, string) {
 	working := content
 	totalReplacements := 0
 	for i, e := range edits {
 		if e.OldString == "" {
-			return fmt.Sprintf("edit %d: old_string must not be empty", i+1), true, nil
+			return "", 0, fmt.Sprintf("edit %d: old_string must not be empty", i+1)
 		}
 		count := strings.Count(working, e.OldString)
 		switch count {
 		case 0:
-			return fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region or the content differs from your last view. Use grep first to inspect the current state if needed", i+1), true, nil
+			return "", 0, fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region or the content differs from your last view. Use grep first to inspect the current state if needed", i+1)
 		case 1:
 			// ok
 		default:
 			if !e.ReplaceAll {
-				return fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate, or set replace_all=true only when you intentionally want every exact match changed", i+1, count), true, nil
+				return "", 0, fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate, or set replace_all=true only when you intentionally want every exact match changed", i+1, count)
 			}
 		}
 		limit := 1
@@ -1020,111 +1105,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		working = strings.Replace(working, e.OldString, e.NewString, limit)
 		totalReplacements += count
 	}
-	if len(working) > maxWriteBytes {
-		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(working), maxWriteBytes), true, nil
-	}
-
-	rc.FileMap.Set(path, working)
-	if rc.BuildState != nil {
-		rc.BuildState.RecordFileWrite(path, "update")
-	}
-	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
-		RunID:     rc.RunID,
-		Path:      path,
-		Operation: "update",
-		Bytes:     len(working),
-		Content:   working,
-	})
-	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, totalReplacements, len(working)), false, nil
-}
-
-// ---------- patch_files ----------
-
-const patchFilesMaxFiles = 20
-
-type PatchFilesTool struct{}
-
-func (PatchFilesTool) Name() string { return "patch_files" }
-func (PatchFilesTool) Description() string {
-	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit, including per-edit replace_all=true for intentional global replacements in that file."
-}
-func (PatchFilesTool) Schema() map[string]any {
-	fileEntrySchema := map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":        map[string]any{"type": "string"},
-			"edits":       editReplacementsSchema("Ordered list of exact-string edits for this file."),
-			"description": map[string]any{"type": "string"},
-		},
-		"required": []string{"path", "edits"},
-	}
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"files": map[string]any{
-				"type":        "array",
-				"description": "Files to patch in order.",
-				"items":       fileEntrySchema,
-			},
-			"path":        map[string]any{"type": "string", "description": "Shorthand single-file path."},
-			"edits":       editReplacementsSchema("Ordered list of exact-string edits for the shorthand single-file patch."),
-			"description": map[string]any{"type": "string"},
-		},
-		"anyOf": []any{
-			map[string]any{"required": []string{"files"}},
-			map[string]any{"required": []string{"path", "edits"}},
-		},
-	}
-}
-
-func (PatchFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	type patchFileInput struct {
-		Path        string          `json:"path"`
-		Edits       json.RawMessage `json:"edits"`
-		Description string          `json:"description"`
-	}
-	var args struct {
-		Files       []patchFileInput `json:"files"`
-		Path        string           `json:"path"`
-		Edits       json.RawMessage  `json:"edits"`
-		Description string           `json:"description"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	if len(args.Files) == 0 && args.Path != "" {
-		args.Files = []patchFileInput{{
-			Path:        args.Path,
-			Edits:       args.Edits,
-			Description: args.Description,
-		}}
-	}
-	if len(args.Files) == 0 {
-		return "files must contain at least one entry", true, nil
-	}
-	if len(args.Files) > patchFilesMaxFiles {
-		return fmt.Sprintf("too many files: %d (max %d) — split into multiple calls", len(args.Files), patchFilesMaxFiles), true, nil
-	}
-
-	var sb strings.Builder
-	hadError := false
-	tool := MultiEditTool{}
-	for i, f := range args.Files {
-		payload, _ := json.Marshal(f)
-		result, isErr, err := tool.Execute(ctx, rc, payload)
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		if isErr || err != nil {
-			hadError = true
-		}
-		if err != nil {
-			fmt.Fprintf(&sb, "%s: %v", f.Path, err)
-			continue
-		}
-		sb.WriteString(result)
-	}
-	return sb.String(), hadError, nil
+	return working, totalReplacements, ""
 }
 
 // ---------- generate_image ----------

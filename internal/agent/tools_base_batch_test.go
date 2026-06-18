@@ -120,7 +120,7 @@ func TestWriteFilesTool_RejectsLargeExistingFileRewriteEvenWithOverwrite(t *test
 	if !strings.Contains(out, "existing file is too large for full rewrite") {
 		t.Fatalf("expected large-file rewrite guidance; got: %s", out)
 	}
-	if !strings.Contains(out, "multi_edit") || !strings.Contains(out, "patch_files") {
+	if !strings.Contains(out, "multi_edit") {
 		t.Fatalf("expected edit-tool guidance; got: %s", out)
 	}
 	if got, _ := rc.FileMap.Get("app/panel/linkler/page.tsx"); got != original {
@@ -235,60 +235,50 @@ func TestWriteFilesTool_ReturnsBatchSummary(t *testing.T) {
 	}
 }
 
-func TestPatchFilesTool_AcceptsSingleFileShorthand(t *testing.T) {
-	rc := newPathScopeTestRC(models.ProjectTypeApp)
-	rc.FileMap.Set("app/page.tsx", "hello old")
-
-	out, isError, err := PatchFilesTool{}.Execute(context.Background(), rc,
-		json.RawMessage(`{"path":"app/page.tsx","edits":[{"old_string":"old","new_string":"new"}],"description":"fix copy"}`))
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if isError {
-		t.Fatalf("expected shorthand patch_files success, got: %s", out)
-	}
-	got, _ := rc.FileMap.Get("app/page.tsx")
-	if got != "hello new" {
-		t.Fatalf("file content = %q, want %q", got, "hello new")
-	}
-}
-
-func TestPatchFilesTool_SchemaAdvertisesSingleFileShorthandAndStringEdits(t *testing.T) {
-	schema := PatchFilesTool{}.Schema()
+func TestMultiEditTool_SchemaAdvertisesSingleFileAndMultiFileShapes(t *testing.T) {
+	schema := MultiEditTool{}.Schema()
 	if _, ok := schema["anyOf"]; !ok {
-		t.Fatalf("patch_files schema should allow files[] or shorthand path+edits: %#v", schema)
+		t.Fatalf("multi_edit schema should allow single-file or files[] shapes: %#v", schema)
 	}
 	props, ok := schema["properties"].(map[string]any)
 	if !ok {
-		t.Fatalf("patch_files schema properties missing: %#v", schema)
+		t.Fatalf("multi_edit schema properties missing: %#v", schema)
 	}
 	if _, ok := props["path"]; !ok {
-		t.Fatalf("patch_files schema should advertise shorthand path: %#v", props)
+		t.Fatalf("multi_edit schema should advertise path: %#v", props)
+	}
+	if _, ok := props["files"]; !ok {
+		t.Fatalf("multi_edit schema should advertise files: %#v", props)
 	}
 	edits, ok := props["edits"].(map[string]any)
 	if !ok {
-		t.Fatalf("patch_files schema should advertise shorthand edits: %#v", props)
+		t.Fatalf("multi_edit schema should advertise edits: %#v", props)
 	}
 	if _, ok := edits["anyOf"]; !ok {
-		t.Fatalf("patch_files edits schema should allow array or JSON string: %#v", edits)
+		t.Fatalf("multi_edit edits schema should allow array or JSON string: %#v", edits)
 	}
 }
 
-func TestPatchFilesTool_AcceptsStringifiedEdits(t *testing.T) {
+func TestMultiEditTool_AcceptsMultiFileBatch(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "hello old")
+	rc.FileMap.Set("app/card.tsx", "card old")
 
-	out, isError, err := PatchFilesTool{}.Execute(context.Background(), rc,
-		json.RawMessage(`{"files":[{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"}]}`))
+	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"},{"path":"app/card.tsx","edits":[{"old_string":"old","new_string":"fresh"}]}]}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if isError {
-		t.Fatalf("expected stringified patch_files edits success, got: %s", out)
+		t.Fatalf("expected multi-file multi_edit success, got: %s", out)
 	}
-	got, _ := rc.FileMap.Get("app/page.tsx")
-	if got != "hello new" {
-		t.Fatalf("file content = %q, want %q", got, "hello new")
+	page, _ := rc.FileMap.Get("app/page.tsx")
+	card, _ := rc.FileMap.Get("app/card.tsx")
+	if page != "hello new" || card != "card fresh" {
+		t.Fatalf("contents = %q / %q", page, card)
+	}
+	if !strings.Contains(out, "edited 2 files") {
+		t.Fatalf("expected batch summary, got: %s", out)
 	}
 }
 
