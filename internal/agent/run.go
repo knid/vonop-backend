@@ -395,6 +395,17 @@ func Run(
 			Tokens:      total,
 		})
 	}
+	finaliseFailure := func(
+		failureCtx context.Context,
+		phase string,
+		code ErrorCode,
+		failureMessage string,
+		wrapped error,
+	) error {
+		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
+			code, failureMessage, wrapped, tracker, runStart,
+			fileMap, message)
+	}
 
 	// Bind the credit checker to the run's token tracker.
 	var creditCheck func() bool
@@ -525,9 +536,7 @@ func Run(
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("agent.Run panicked", "error", r, "project_id", project.ID, "stack", string(debug.Stack()))
-			runErr = finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeInternal, fmt.Sprintf("panic: %v", r), nil, tracker, runStart,
-				fileMap, message)
+			runErr = finaliseFailure(ctx, "agent_loop", CodeInternal, fmt.Sprintf("panic: %v", r), nil)
 		}
 	}()
 
@@ -546,13 +555,22 @@ func Run(
 		parts          []models.ChatMessagePart
 		partsMu        sync.Mutex
 	)
+	finaliseFailure = func(
+		failureCtx context.Context,
+		phase string,
+		code ErrorCode,
+		failureMessage string,
+		wrapped error,
+	) error {
+		lastDeductedCredits = chargeFinalCreditDelta(context.Background(), deps, emitter, runID, turn, tracker, deductAction, project.ID.String(), lastDeductedCredits)
+		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
+			code, failureMessage, wrapped, tracker, runStart,
+			fileMap, message)
+	}
 
 	// Budget check before entering the loop.
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeCreditsExhausted, "AI credits exhausted before run started", nil,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", CodeCreditsExhausted, "AI credits exhausted before run started", nil)
 	}
 
 	// The dedicated keepalive goroutine that used to emit a typed
@@ -751,10 +769,7 @@ func Run(
 	if repetition.Tripped() {
 		slog.Warn("agent aborted: narration repetition loop",
 			"project_id", project.ID, "run_id", runID)
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeRepetitionLoop, "model got stuck repeating output", nil,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", CodeRepetitionLoop, "model got stuck repeating output", nil)
 	}
 	if llmErr != nil {
 		// A ctx-triggered stream abort surfaces here as llmErr — classify it
@@ -765,70 +780,43 @@ func Run(
 			slog.Warn("agent LLM call aborted by context",
 				"project_id", project.ID, "ctx_err", ctxErr, "llm_err", llmErr)
 			code, msg := classifyCtxErr(ctxErr)
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				code, msg, ctxErr,
-				tracker, runStart,
-				fileMap, message)
+			return finaliseFailure(ctx, "agent_loop", code, msg, ctxErr)
 		}
 		// Truncation isn't a provider fault — it means the model exhausted
 		// its per-call token budget and the continuation loop failed too.
 		// Surface it distinctly so the UI can prompt the user to narrow
 		// the request rather than showing a generic "provider error".
 		if errors.Is(llmErr, utils.ErrResponseTruncated) {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeTruncated, "model response exceeded token budget", llmErr,
-				tracker, runStart,
-				fileMap, message)
+			return finaliseFailure(ctx, "agent_loop", CodeTruncated, "model response exceeded token budget", llmErr)
 		}
 		if errors.Is(llmErr, utils.ErrIncompleteToolCall) {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeTruncated, "model response ended during a tool call", llmErr,
-				tracker, runStart,
-				fileMap, message)
+			return finaliseFailure(ctx, "agent_loop", CodeTruncated, "model response ended during a tool call", llmErr)
 		}
 		var toolRoundsErr *utils.ToolRoundsExceededError
 		if errors.As(llmErr, &toolRoundsErr) {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-				CodeToolRoundsExceeded, "tool round limit reached — reply \"continue\" to keep going from saved progress", llmErr,
-				tracker, runStart,
-				fileMap, message)
+			return finaliseFailure(ctx, "agent_loop", CodeToolRoundsExceeded, "tool round limit reached — reply \"continue\" to keep going from saved progress", llmErr)
 		}
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeProviderError, "LLM call failed", llmErr,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", CodeProviderError, "LLM call failed", llmErr)
 	}
 
 	// Post-loop budget checks to classify why the loop ended.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		code, msg := classifyCtxErr(ctxErr)
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			code, msg, ctxErr,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", code, msg, ctxErr)
 	}
 	if creditCheck != nil && !creditCheck() {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeCreditsExhausted, "AI credits exhausted mid-run", nil,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", CodeCreditsExhausted, "AI credits exhausted mid-run", nil)
 	}
 	if _, _, total, _ := tracker.Totals(); total > maxTokensPerRun {
-		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "agent_loop",
-			CodeBudgetExceeded,
-			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil,
-			tracker, runStart,
-			fileMap, message)
+		return finaliseFailure(ctx, "agent_loop", CodeBudgetExceeded,
+			fmt.Sprintf("token budget exceeded (%d > %d)", total, maxTokensPerRun), nil)
 	}
 
 	_ = llmText
 
 	if !contextPacket.ReadOnly {
 		if validationErr := ValidateAgentOutput(profile, fileMap, buildState, message, isFirstGen, project, rc.Skills); validationErr != nil {
-			return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "validation",
-				CodeValidationFailed, validationErr.Error(), validationErr,
-				tracker, runStart,
-				fileMap, message)
+			return finaliseFailure(ctx, "validation", CodeValidationFailed, validationErr.Error(), validationErr)
 		}
 	}
 
@@ -1263,6 +1251,34 @@ func chargeCreditDeltas(
 		return alreadyDeducted
 	}
 	return creditsUsed
+}
+
+func chargeFinalCreditDelta(
+	ctx context.Context,
+	deps *RunDependencies,
+	emitter EventEmitter,
+	runID uuid.UUID,
+	turn int,
+	tracker *utils.TokenTracker,
+	action,
+	projectID string,
+	alreadyDeducted int,
+) int {
+	credits := creditsBilled(deps, tracker, projectID)
+	if credits <= alreadyDeducted {
+		return alreadyDeducted
+	}
+	deducted := chargeCreditDeltas(ctx, deps, action, projectID, credits, alreadyDeducted)
+	if emitter != nil {
+		_, _, total, _ := tracker.Totals()
+		emitter.Emit(EventCreditsUpdate, CreditsUpdateEvent{
+			RunID:       runID,
+			Turn:        turn,
+			CreditsUsed: credits,
+			Tokens:      total,
+		})
+	}
+	return deducted
 }
 
 func recordLangfuseScore(ctx context.Context, deps *RunDependencies, score observability.ScoreRequest) {
