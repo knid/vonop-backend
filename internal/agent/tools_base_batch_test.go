@@ -70,6 +70,55 @@ func TestReadFilesTool_RejectsEmptyAndOversizedBatches(t *testing.T) {
 	}
 }
 
+func TestGrepTool_DefaultsToTwentyFiveContextLines(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	lines := make([]string, 61)
+	for i := range lines {
+		lines[i] = "line"
+	}
+	lines[5] = "before-default-window"
+	lines[30] = "target-marker"
+	lines[56] = "outside-default-window"
+	rc.FileMap.Set("frontend/src/App.tsx", strings.Join(lines, "\n"))
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target-marker","glob":"frontend/src/App.tsx"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if !strings.Contains(out, "lines 6-56") {
+		t.Fatalf("expected default 25-line context window, got: %s", out)
+	}
+	if !strings.Contains(out, "before-default-window") {
+		t.Fatalf("expected line inside default context window, got: %s", out)
+	}
+	if strings.Contains(out, "outside-default-window") {
+		t.Fatalf("did not expect line outside default context window, got: %s", out)
+	}
+}
+
+func TestGrepTool_SchemaAdvertisesContextDefaultAndRecommendation(t *testing.T) {
+	schema := GrepTool{}.Schema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("grep schema missing properties: %#v", schema)
+	}
+	contextLines, ok := props["context_lines"].(map[string]any)
+	if !ok {
+		t.Fatalf("grep schema missing context_lines: %#v", props)
+	}
+	if got := contextLines["default"]; got != grepDefaultContextLines {
+		t.Fatalf("context_lines default = %#v, want %d", got, grepDefaultContextLines)
+	}
+	desc, _ := contextLines["description"].(string)
+	if !strings.Contains(desc, "Default 25") || !strings.Contains(desc, "40-80") {
+		t.Fatalf("context_lines description should guide larger code-edit context, got: %q", desc)
+	}
+}
+
 func TestWriteFilesTool_RejectsAccidentalRewriteOfExistingFile(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", strings.Repeat("a", 6*1024))

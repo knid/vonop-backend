@@ -738,16 +738,17 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 // ---------- grep ----------
 
 const (
-	grepMaxMatches = 200
-	grepMaxBytes   = 64 * 1024
-	grepMaxLineLen = 400
+	grepDefaultContextLines = 25
+	grepMaxMatches          = 200
+	grepMaxBytes            = 64 * 1024
+	grepMaxLineLen          = 400
 )
 
 type GrepTool struct{}
 
 func (GrepTool) Name() string { return "grep" }
 func (GrepTool) Description() string {
-	return "Search file contents for a regex pattern across the project. Returns file:line:content for each match. Use this BEFORE read_file / edit_file when you need to find where a string or symbol lives — it is ~50× cheaper than guessing file paths and reading them one by one."
+	return "Search file contents for a regex pattern across the project. Returns matching lines with surrounding context. Use this BEFORE read_files / edit_file when you need to locate a string or symbol. For JSX/component edits, use the default context or more, then read the full file if the edit spans a larger block."
 }
 func (GrepTool) Schema() map[string]any {
 	return map[string]any{
@@ -767,7 +768,8 @@ func (GrepTool) Schema() map[string]any {
 			},
 			"context_lines": map[string]any{
 				"type":        "integer",
-				"description": "Number of lines to show before and after each match. Default 0 (match only). Recommended: 5-15 for context.",
+				"description": fmt.Sprintf("Number of lines to show before and after each match. Default %d. Recommended: 25 for normal code edits, 40-80 for JSX/component blocks or multi-line replacements.", grepDefaultContextLines),
+				"default":     grepDefaultContextLines,
 			},
 		},
 		"required": []string{"pattern"},
@@ -786,6 +788,9 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 	}
 	if args.Pattern == "" {
 		return "pattern is required", true, nil
+	}
+	if args.ContextLines == 0 {
+		args.ContextLines = grepDefaultContextLines
 	}
 
 	pattern := args.Pattern
