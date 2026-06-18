@@ -80,7 +80,7 @@ func InitLangfuseWithSecrets(ctx context.Context, secrets SecretProvider) (*Lang
 	}
 
 	provider := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithBatcher(NewSanitizingSpanExporter(exporter)),
 		sdktrace.WithResource(res),
 	)
 	otel.SetTracerProvider(provider)
@@ -113,8 +113,8 @@ func StartGeneration(ctx context.Context, name string, in GenerationAttributeInp
 	return Tracer().Start(ctx, name, opts...)
 }
 
-func StartTool(ctx context.Context, toolName, input string, isError bool, durationMs int, startedAt time.Time) (context.Context, trace.Span) {
-	opts := []trace.SpanStartOption{trace.WithAttributes(ToolAttributes(toolName, input, isError, durationMs)...)}
+func StartTool(ctx context.Context, toolName, input string, output string, isError bool, durationMs int, startedAt time.Time) (context.Context, trace.Span) {
+	opts := []trace.SpanStartOption{trace.WithAttributes(ToolAttributes(toolName, input, output, isError, durationMs)...)}
 	if !startedAt.IsZero() {
 		opts = append(opts, trace.WithTimestamp(startedAt))
 	}
@@ -125,8 +125,8 @@ func StartTool(ctx context.Context, toolName, input string, isError bool, durati
 	return ctx, span
 }
 
-func RecordTool(ctx context.Context, toolName, input string, isError bool, durationMs int, startedAt time.Time, extraAttrs ...attribute.KeyValue) {
-	_, span := StartTool(ctx, toolName, input, isError, durationMs, startedAt)
+func RecordTool(ctx context.Context, toolName, input string, output string, isError bool, durationMs int, startedAt time.Time, extraAttrs ...attribute.KeyValue) {
+	_, span := StartTool(ctx, toolName, input, output, isError, durationMs, startedAt)
 	if len(extraAttrs) > 0 {
 		span.SetAttributes(extraAttrs...)
 	}

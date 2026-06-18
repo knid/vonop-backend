@@ -70,15 +70,30 @@ func Run(
 	// Wall-clock deadline: wrap ctx with a max-lifetime timer.
 	ctx, cancelDeadline := context.WithTimeout(ctx, time.Duration(defaultMaxWallclockMs)*time.Millisecond)
 	defer cancelDeadline()
-	ctx, initSpan := startRuntimePhase(ctx, RuntimePhaseInitializeRun)
-	defer initSpan.End()
+
+	runID := uuid.New()
+	traceAction := runAction(project)
+	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput{
+		Name:        traceAction,
+		Action:      traceAction,
+		AppType:     project.ProjectType,
+		Reference:   project.ID.String(),
+		UserID:      user.ID.String(),
+		OrgID:       project.OrganizationID.String(),
+		ProjectID:   project.ID.String(),
+		TraceID:     runID.String(),
+		RunID:       runID.String(),
+		Input:       message,
+		Environment: deps.SecretManager.GetEnv(),
+		Tags:        []string{"wemob", "agent", traceAction},
+	})
+	langfuseTraceID := langfuseTrace.SpanContext().TraceID().String()
 
 	// --- Step 1: enforce single-run-per-project invariant ---
 	// Advisory pre-check (fast path for the common case). The authoritative
 	// check is the partial unique index on app_agent_runs(app_project_id)
 	// WHERE status='running', caught below at InsertAgentRun.
 	var (
-		runID      uuid.UUID
 		repo       *gitrepo.Repo
 		fileMap    *SafeFileMap
 		run        *models.AppAgentRun
@@ -90,11 +105,52 @@ func Run(
 		todos      *TodoList
 		memory     *AgentRunMemory
 		history    []models.AppChatMessage
+		tracker    *utils.TokenTracker
 	)
 
-	if err := withRuntimePhase(ctx, RuntimePhaseLoadProjectState, func(phaseCtx context.Context) error {
-		ctx = phaseCtx
+	defer func() {
+		if tracker != nil && tracker.TraceOutput != "" {
+			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
+		}
+		if (tracker != nil && tracker.TraceErrorCode != "") || runErr != nil {
+			msg := ""
+			if tracker != nil {
+				msg = tracker.TraceErrorMessage
+			}
+			if msg == "" && runErr != nil {
+				msg = runErr.Error()
+			}
+			langfuseTrace.SetStatus(codes.Error, msg)
+			attrs := []attribute.KeyValue{
+				attribute.String("langfuse.observation.level", "ERROR"),
+				attribute.String("langfuse.observation.status_message", msg),
+			}
+			if tracker != nil {
+				attrs = append(attrs,
+					attribute.String("langfuse.trace.metadata.error_code", tracker.TraceErrorCode),
+					attribute.String("langfuse.trace.metadata.error_message", msg),
+				)
+				if tracker.TraceErrorFinishReason != "" {
+					attrs = append(attrs, attribute.String("langfuse.trace.metadata.error_finish_reason", tracker.TraceErrorFinishReason))
+				}
+				if len(tracker.TraceErrorToolCalls) > 0 {
+					if raw, err := json.Marshal(tracker.TraceErrorToolCalls); err == nil {
+						attrs = append(attrs, attribute.String("langfuse.trace.metadata.incomplete_tool_calls", string(raw)))
+					}
+				}
+			}
+			langfuseTrace.SetAttributes(attrs...)
+		}
+		langfuseTrace.End()
+	}()
 
+	if err := withRuntimePhase(ctx, RuntimePhaseInitializeRun, func(context.Context) error {
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	if err := withRuntimePhase(ctx, RuntimePhaseLoadProjectState, func(phaseCtx context.Context) error {
 		if existing, existingErr := deps.DB.GetActiveAgentRun(project.ID); existingErr == nil && existing != nil {
 			return New(CodeRunInProgress, "setup", "another run is already in progress for this project", nil)
 		}
@@ -124,7 +180,6 @@ func Run(
 		fileMap = NewSafeFileMap(rawFiles)
 
 		// --- Step 5: pre-run commit baseline ---
-		runID = uuid.New()
 		preCommit, err = PreRunCommit(repo, runID.String())
 		if err != nil {
 			return New(CodeGitError, "setup", "failed to create pre-run snapshot", err)
@@ -172,8 +227,7 @@ func Run(
 		attachmentSnapshot = make([]models.ChatMessageAttachment, 0, len(turnAttachments.Current))
 		currentImageURLs   = make([]string, 0, len(turnAttachments.Current))
 	)
-	if err := withRuntimePhase(ctx, RuntimePhasePersistAssistantTurn, func(phaseCtx context.Context) error {
-		ctx = phaseCtx
+	if err := withRuntimePhase(ctx, RuntimePhasePersistUserTurn, func(phaseCtx context.Context) error {
 		for _, a := range turnAttachments.Current {
 			isImage := constants.ClassifyAttachment(a.ContentType) == constants.AttachmentKindImage
 			attachmentSnapshot = append(attachmentSnapshot, models.ChatMessageAttachment{
@@ -225,10 +279,9 @@ func Run(
 	var llmMessages []utils.Message
 	var contextPacket AgentContextPacket
 	if err := withRuntimePhase(ctx, RuntimePhaseCompileRuntimeContext, func(phaseCtx context.Context) error {
-		ctx = phaseCtx
 		contextCompiler := RuntimeContextCompiler{}
 		contextPacket = contextCompiler.Compile(AgentContextInput{
-			Context:         ctx,
+			Context:         phaseCtx,
 			Project:         project,
 			Deps:            deps,
 			AttachmentsPool: turnAttachments.Pool,
@@ -239,7 +292,7 @@ func Run(
 		activeSkills = contextPacket.Skills
 		llmMessages = append([]utils.Message(nil), contextPacket.SystemMessages...)
 		memory.RecordRuntime(profile.ID, contextPacket.RequiredSkills, contextPacket.SkillManifest)
-		memory.Persist(ctx, deps.DB, runID)
+		memory.Persist(phaseCtx, deps.DB, runID)
 		return nil
 	}); err != nil {
 		return err
@@ -275,14 +328,13 @@ func Run(
 
 	var registry *Registry
 	if err := withRuntimePhase(ctx, RuntimePhaseBuildRuntimeTools, func(phaseCtx context.Context) error {
-		ctx = phaseCtx
 		registry = BuildRegistryFor(project, deps, model)
 		return nil
 	}); err != nil {
 		return err
 	}
 
-	tracker := utils.NewTokenTracker()
+	tracker = utils.NewTokenTracker()
 	tracker.UserID = user.ID.String()
 	tracker.ProjectID = project.ID.String()
 	tracker.OrganizationID = project.OrganizationID.String()
@@ -305,10 +357,6 @@ func Run(
 	}
 	ctx = utils.WithTokenTracker(ctx, tracker)
 	requiredSkillIDs, loadedSkillIDs := tracker.AgentSkills()
-	traceAction := "app_chat"
-	if isFirstGen {
-		traceAction = "generate_app"
-	}
 	conversation, convErr := deps.DB.GetAppConversationByProjectID(project.ID.String())
 	if convErr != nil {
 		if !errors.Is(convErr, sql.ErrNoRows) {
@@ -341,36 +389,8 @@ func Run(
 		Tags:           []string{"wemob", "agent", traceAction},
 	}
 	tracker.SetLangfuseContext(langfuseContext)
-	ctx, langfuseTrace := observability.StartTrace(ctx, observability.TraceAttributeInput(langfuseContext))
-	langfuseTraceID := langfuseTrace.SpanContext().TraceID().String()
 	tracker.LangfuseTraceID = langfuseTraceID
-	defer func() {
-		if tracker.TraceOutput != "" {
-			langfuseTrace.SetAttributes(attribute.String("langfuse.trace.output", tracker.TraceOutput))
-		}
-		if tracker.TraceErrorCode != "" || runErr != nil {
-			msg := tracker.TraceErrorMessage
-			if msg == "" && runErr != nil {
-				msg = runErr.Error()
-			}
-			langfuseTrace.SetStatus(codes.Error, msg)
-			langfuseTrace.SetAttributes(
-				attribute.String("langfuse.observation.level", "ERROR"),
-				attribute.String("langfuse.observation.status_message", msg),
-				attribute.String("langfuse.trace.metadata.error_code", tracker.TraceErrorCode),
-				attribute.String("langfuse.trace.metadata.error_message", msg),
-			)
-			if tracker.TraceErrorFinishReason != "" {
-				langfuseTrace.SetAttributes(attribute.String("langfuse.trace.metadata.error_finish_reason", tracker.TraceErrorFinishReason))
-			}
-			if len(tracker.TraceErrorToolCalls) > 0 {
-				if raw, err := json.Marshal(tracker.TraceErrorToolCalls); err == nil {
-					langfuseTrace.SetAttributes(attribute.String("langfuse.trace.metadata.incomplete_tool_calls", string(raw)))
-				}
-			}
-		}
-		langfuseTrace.End()
-	}()
+	langfuseTrace.SetAttributes(langfuseContext.Attributes()...)
 
 	// emitCreditsUpdate fires a credits_update event with the running
 	// cumulative billed credits so the frontend can render a live meter
@@ -539,10 +559,9 @@ func Run(
 
 	emitter.Emit(EventTurnStart, TurnStartEvent{RunID: runID, Turn: turn})
 
-	// Tool executor adapter bridging the utils.ToolExecutor shape
-	// (name, args string) -> (result, error)
-	// into our Registry.Execute which also reports isError separately.
-	executor := func(name string, argsJSON string) (string, error) {
+	// Tool executor adapter bridging the utils.ToolExecutor shape into our
+	// Registry.Execute, which also reports isError separately.
+	executor := func(execCtx context.Context, name string, argsJSON string) (string, error) {
 		gateway := &ToolGateway{
 			RunID:    runID,
 			Turn:     turn,
@@ -555,7 +574,7 @@ func Run(
 			Parts:    &parts,
 			PartsMu:  &partsMu,
 		}
-		result, execErr := gateway.Execute(ctx, name, argsJSON)
+		result, execErr := gateway.Execute(execCtx, name, argsJSON)
 		partsMu.Lock()
 		totalToolCalls++
 		partsMu.Unlock()

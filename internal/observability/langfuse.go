@@ -1,8 +1,10 @@
 package observability
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 
@@ -311,12 +313,12 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	return attrs
 }
 
-func ToolAttributes(toolName, input string, isError bool, durationMs int) []attribute.KeyValue {
+func ToolAttributes(toolName, input string, output string, isError bool, durationMs int) []attribute.KeyValue {
 	level := "DEFAULT"
 	if isError {
 		level = "ERROR"
 	}
-	return []attribute.KeyValue{
+	attrs := []attribute.KeyValue{
 		attribute.String("langfuse.observation.type", "tool"),
 		attribute.String("langfuse.observation.level", level),
 		attribute.String("langfuse.observation.metadata.tool_name", toolName),
@@ -324,6 +326,15 @@ func ToolAttributes(toolName, input string, isError bool, durationMs int) []attr
 		attribute.Bool("langfuse.observation.metadata.is_error", isError),
 		attribute.Int("langfuse.observation.metadata.duration_ms", durationMs),
 	}
+	if output != "" {
+		sum := sha256.Sum256([]byte(output))
+		attrs = append(attrs,
+			attribute.String("langfuse.observation.output", truncateLangfusePayload(output, maxObservationPayload)),
+			attribute.Int("langfuse.observation.metadata.output_bytes", len(output)),
+			attribute.String("langfuse.observation.metadata.output_sha256", fmt.Sprintf("%x", sum[:])),
+		)
+	}
+	return attrs
 }
 
 func truncateLangfusePayload(s string, max int) string {

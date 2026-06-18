@@ -190,12 +190,12 @@ func (c *Controller) CreateDashboard(ctx context.Context, project *models.AppPro
 		Name        string `json:"name"`
 		Description string `json:"description"`
 		Panels      []struct {
-			Title     string         `json:"title"`
-			PanelType string         `json:"panel_type"`
+			Title     string          `json:"title"`
+			PanelType string          `json:"panel_type"`
 			Query     json.RawMessage `json:"query"`
-			Config    map[string]any `json:"config"`
-			SortOrder int            `json:"sort_order"`
-			GridWidth int            `json:"grid_width"`
+			Config    map[string]any  `json:"config"`
+			SortOrder int             `json:"sort_order"`
+			GridWidth int             `json:"grid_width"`
 		} `json:"panels"`
 	}
 	if err := json.Unmarshal([]byte(panelResult), &generated); err != nil {
@@ -492,7 +492,7 @@ func (c *Controller) StreamDashboardChat(ctx context.Context, dashboard *models.
 	}
 
 	// Build tool executor
-	executor := func(name string, arguments string) (string, error) {
+	executor := func(ctx context.Context, name string, arguments string) (string, error) {
 		switch name {
 		case "list_panels":
 			currentPanels, _ := c.DB.GetAppDashboardPanelsByDashboardID(dashboard.ID.String())
@@ -714,4 +714,3 @@ func buildPanelResponses(panels []models.AppDashboardPanel) []responses.Dashboar
 	}
 	return result
 }
-

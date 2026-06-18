@@ -238,7 +238,7 @@ func (s *Service) Tools() []utils.Tool {
 
 // ToolExecutor returns a ToolExecutor that routes calls to the correct MCP server.
 func (s *Service) ToolExecutor() utils.ToolExecutor {
-	return func(name string, arguments string) (string, error) {
+	return func(ctx context.Context, name string, arguments string) (string, error) {
 		return s.callTool(name, arguments)
 	}
 }

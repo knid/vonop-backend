@@ -81,7 +81,7 @@ func (g *ToolGateway) Execute(ctx context.Context, name string, argsJSON string)
 		langfuseContext := g.Tracker.LangfuseContext()
 		langfuseContext.RequiredSkills = requiredSkillIDs
 		langfuseContext.LoadedSkills = loadedSkillIDs
-		observability.RecordTool(ctx, name, argsJSON, isFailure, durationMs, toolStart,
+		observability.RecordTool(ctx, name, argsJSON, result, isFailure, durationMs, toolStart,
 			langfuseContext.Attributes("tool")...)
 	}
 
