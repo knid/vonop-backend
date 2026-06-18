@@ -30,6 +30,60 @@ func TestReadFilesTool_ReturnsContentsForAllPaths(t *testing.T) {
 	}
 }
 
+func TestReadFilesTool_MarksFilesAsReadForLaterEdits(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+
+	_, isError, err := ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
+	if err != nil {
+		t.Fatalf("read execute: %v", err)
+	}
+	if isError {
+		t.Fatal("expected read_files to succeed")
+	}
+
+	out, isError, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","old_string":"old","new_string":"new"}`))
+	if err != nil {
+		t.Fatalf("edit execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected edit_file after read_files to succeed, got: %s", out)
+	}
+}
+
+func TestReadFileRangeTool_ReturnsBoundedNumberedLinesAndMarksFileRead(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "line 1\nline 2\nline 3\nline 4")
+
+	out, isError, err := ReadFileRangeTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","start_line":2,"end_line":3}`))
+	if err != nil {
+		t.Fatalf("range execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected read_file_range success, got: %s", out)
+	}
+	if !strings.Contains(out, "===== app/page.tsx lines 2-3 =====") ||
+		!strings.Contains(out, "   2: line 2") ||
+		!strings.Contains(out, "   3: line 3") {
+		t.Fatalf("expected numbered bounded output, got: %s", out)
+	}
+	if strings.Contains(out, "line 1") || strings.Contains(out, "line 4") {
+		t.Fatalf("range output included lines outside request: %s", out)
+	}
+
+	editOut, editErrFlag, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","old_string":"line 3","new_string":"changed"}`))
+	if err != nil {
+		t.Fatalf("edit execute: %v", err)
+	}
+	if editErrFlag {
+		t.Fatalf("expected range read to satisfy read-before-edit, got: %s", editOut)
+	}
+}
+
 func TestReadFilesTool_MissingPathReportsToolErrorAndInlineDetail(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("a.tsx", "AAA")
@@ -116,6 +170,21 @@ func TestGrepTool_SchemaAdvertisesContextDefaultAndRecommendation(t *testing.T) 
 	desc, _ := contextLines["description"].(string)
 	if !strings.Contains(desc, "Default 25") || !strings.Contains(desc, "40-80") {
 		t.Fatalf("context_lines description should guide larger code-edit context, got: %q", desc)
+	}
+}
+
+func TestGrepTool_SchemaRequiresNonEmptyPatternAndBoundsContext(t *testing.T) {
+	props := GrepTool{}.Schema()["properties"].(map[string]any)
+	pattern := props["pattern"].(map[string]any)
+	if got := pattern["minLength"]; got != 1 {
+		t.Fatalf("grep pattern minLength = %#v, want 1", got)
+	}
+	contextLines := props["context_lines"].(map[string]any)
+	if got := contextLines["minimum"]; got != 0 {
+		t.Fatalf("context_lines minimum = %#v, want 0", got)
+	}
+	if got := contextLines["maximum"]; got != 100 {
+		t.Fatalf("context_lines maximum = %#v, want 100", got)
 	}
 }
 
@@ -312,6 +381,8 @@ func TestMultiEditTool_AcceptsMultiFileBatch(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "hello old")
 	rc.FileMap.Set("app/card.tsx", "card old")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx","app/card.tsx"]}`))
 
 	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
 		json.RawMessage(`{"files":[{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"},{"path":"app/card.tsx","edits":[{"old_string":"old","new_string":"fresh"}]}]}`))
@@ -349,6 +420,8 @@ func TestMultiEditTool_SchemaAdvertisesStringEdits(t *testing.T) {
 func TestMultiEditTool_ReplaceAllReplacesEveryMatch(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "text-gray-400 text-gray-400 text-gray-700")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
 
 	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
 		json.RawMessage(`{"path":"app/page.tsx","edits":[{"old_string":"text-gray-400","new_string":"text-foreground-muted","replace_all":true}]}`))
@@ -381,6 +454,8 @@ func TestMultiEditTool_SchemaAdvertisesReplaceAll(t *testing.T) {
 func TestMultiEditTool_AcceptsStringifiedEdits(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "hello old")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
 
 	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
 		json.RawMessage(`{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"}`))
@@ -393,5 +468,112 @@ func TestMultiEditTool_AcceptsStringifiedEdits(t *testing.T) {
 	got, _ := rc.FileMap.Get("app/page.tsx")
 	if got != "hello new" {
 		t.Fatalf("file content = %q, want %q", got, "hello new")
+	}
+}
+
+func TestEditFileTool_RequiresCurrentReadBeforeEditing(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+
+	out, isError, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","old_string":"old","new_string":"new"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected edit without prior read to fail, got: %s", out)
+	}
+	if !strings.Contains(out, "must read current file before editing") {
+		t.Fatalf("expected read-before-edit guidance, got: %s", out)
+	}
+	got, _ := rc.FileMap.Get("app/page.tsx")
+	if got != "hello old" {
+		t.Fatalf("file mutated despite read-before-edit rejection: %q", got)
+	}
+}
+
+func TestEditFileTool_RejectsStaleRead(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
+	rc.FileMap.Set("app/page.tsx", "hello changed")
+
+	out, isError, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","old_string":"changed","new_string":"new"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected stale read rejection, got: %s", out)
+	}
+	if !strings.Contains(out, "file changed since last read") {
+		t.Fatalf("expected stale-read guidance, got: %s", out)
+	}
+}
+
+func TestEditFileTool_ReturnsStructuredSuccessResult(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old\nsecond line")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
+
+	out, isError, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","old_string":"old","new_string":"new","description":"rename marker"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected edit success, got: %s", out)
+	}
+	var result struct {
+		Changed      bool   `json:"changed"`
+		Path         string `json:"path"`
+		Replacements int    `json:"replacements"`
+		Summary      string `json:"summary"`
+		OldHash      string `json:"old_hash"`
+		NewHash      string `json:"new_hash"`
+		ChangedLines []int  `json:"changed_lines"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("expected structured JSON result, got %q: %v", out, err)
+	}
+	if !result.Changed || result.Path != "app/page.tsx" || result.Replacements != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if result.OldHash == "" || result.NewHash == "" || result.OldHash == result.NewHash {
+		t.Fatalf("expected distinct old/new hashes: %+v", result)
+	}
+	if len(result.ChangedLines) == 0 || result.Summary != "rename marker" {
+		t.Fatalf("expected changed line and summary: %+v", result)
+	}
+}
+
+func TestMultiEditTool_ReturnsStructuredOldStringNotFoundFailure(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+	_, _, _ = ReadFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"paths":["app/page.tsx"]}`))
+
+	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","edits":[{"old_string":"missing","new_string":"new"}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected old_string failure, got: %s", out)
+	}
+	var result struct {
+		Changed       bool   `json:"changed"`
+		ErrorCode     string `json:"error_code"`
+		NextStep      string `json:"next_step"`
+		SuggestedGrep string `json:"suggested_grep"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("expected structured JSON error, got %q: %v", out, err)
+	}
+	if result.Changed || result.ErrorCode != "old_string_not_found" ||
+		result.NextStep != "read_file_range" || result.SuggestedGrep != "missing" {
+		t.Fatalf("unexpected structured error: %+v", result)
 	}
 }

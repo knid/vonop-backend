@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
@@ -92,6 +93,9 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 		}
 		return "<tool_output tool=\"" + name + "\">" + escapeUntrustedTag(msg, "tool_output") + "</tool_output>", true, nil
 	}
+	if msg := validateToolInput(t.Schema(), input); msg != "" {
+		return fmt.Sprintf("invalid %s input: %s", name, msg), true, nil
+	}
 	result, isErr, err := t.Execute(ctx, rc, input)
 	// read_attachment wraps its body in <attachment> itself (with filename/mime
 	// metadata); everything else gets the generic <tool_output> wrap. Both are
@@ -101,6 +105,131 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 		result = "<tool_output tool=\"" + name + "\">" + escapeUntrustedTag(result, "tool_output") + "</tool_output>"
 	}
 	return result, isErr, err
+}
+
+func validateToolInput(schema map[string]any, input json.RawMessage) string {
+	if len(schema) == 0 {
+		return ""
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return fmt.Sprintf("invalid JSON: %v", err)
+	}
+	if msg := validateRequired(schema, obj); msg != "" {
+		return msg
+	}
+	props, _ := schema["properties"].(map[string]any)
+	for name, propAny := range props {
+		value, ok := obj[name]
+		if !ok {
+			continue
+		}
+		prop, _ := propAny.(map[string]any)
+		if msg := validateProperty(name, prop, value); msg != "" {
+			return msg
+		}
+	}
+	return ""
+}
+
+func validateRequired(schema map[string]any, obj map[string]any) string {
+	if anyOf, ok := schema["anyOf"].([]any); ok && len(anyOf) > 0 {
+		var reasons []string
+		for _, candidate := range anyOf {
+			candidateSchema, _ := candidate.(map[string]any)
+			if msg := validateRequired(candidateSchema, obj); msg == "" {
+				return ""
+			} else {
+				reasons = append(reasons, msg)
+			}
+		}
+		return "does not match any required input shape: " + strings.Join(reasons, "; ")
+	}
+	for _, req := range schemaRequired(schema) {
+		if _, ok := obj[req]; !ok {
+			return fmt.Sprintf("missing required field %q", req)
+		}
+	}
+	return ""
+}
+
+func schemaRequired(schema map[string]any) []string {
+	raw, ok := schema["required"]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func validateProperty(name string, schema map[string]any, value any) string {
+	if len(schema) == 0 {
+		return ""
+	}
+	if expected, _ := schema["type"].(string); expected != "" {
+		switch expected {
+		case "string":
+			s, ok := value.(string)
+			if !ok {
+				return fmt.Sprintf("field %q must be a string", name)
+			}
+			if min, ok := numberConstraint(schema["minLength"]); ok && len(s) < int(min) {
+				return fmt.Sprintf("field %q must be at least %d characters", name, int(min))
+			}
+		case "array":
+			arr, ok := value.([]any)
+			if !ok {
+				return fmt.Sprintf("field %q must be an array", name)
+			}
+			if min, ok := numberConstraint(schema["minItems"]); ok && len(arr) < int(min) {
+				return fmt.Sprintf("field %q must contain at least %d item(s)", name, int(min))
+			}
+			if max, ok := numberConstraint(schema["maxItems"]); ok && len(arr) > int(max) {
+				return fmt.Sprintf("field %q must contain at most %d item(s)", name, int(max))
+			}
+		case "integer":
+			n, ok := value.(float64)
+			if !ok || n != float64(int(n)) {
+				return fmt.Sprintf("field %q must be an integer", name)
+			}
+			if min, ok := numberConstraint(schema["minimum"]); ok && n < min {
+				return fmt.Sprintf("field %q must be >= %v", name, min)
+			}
+			if max, ok := numberConstraint(schema["maximum"]); ok && n > max {
+				return fmt.Sprintf("field %q must be <= %v", name, max)
+			}
+		case "boolean":
+			if _, ok := value.(bool); !ok {
+				return fmt.Sprintf("field %q must be a boolean", name)
+			}
+		}
+	}
+	return ""
+}
+
+func numberConstraint(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 // BuildRegistryFor returns a registry populated with the base tools plus any
@@ -166,6 +295,7 @@ func registerBaseBuilderTools(r *Registry, deps *RunDependencies) {
 	r.Register(SearchSkillsTool{})
 	r.Register(LoadSkillTool{})
 	r.Register(ReadFilesTool{})
+	r.Register(ReadFileRangeTool{})
 	r.Register(ListFilesTool{})
 	r.Register(GrepTool{})
 	r.Register(CreateDesignTool{})

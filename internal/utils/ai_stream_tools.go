@@ -20,6 +20,30 @@ func normalizeToolCacheKey(name, args string) string {
 	return name + ":" + args
 }
 
+func shouldCacheToolResult(toolName string, result string) bool {
+	switch toolName {
+	case "edit_file", "multi_edit":
+		var payload struct {
+			Changed   *bool  `json:"changed"`
+			ErrorCode string `json:"error_code"`
+		}
+		if json.Unmarshal([]byte(result), &payload) == nil && payload.Changed != nil && !*payload.Changed {
+			switch payload.ErrorCode {
+			case "old_string_not_found", "old_string_ambiguous", "stale_read", "old_string_empty":
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func exactStringEditRecoveryInstruction(toolName string, result string) string {
+	if shouldCacheToolResult(toolName, result) {
+		return ""
+	}
+	return "The exact-string edit failed because the file state or match was invalid. Do not retry the same edit. Call read_file_range on the target file or grep for the current target text first, then issue one corrected edit."
+}
+
 // sanitizeToolError strips internal details from tool execution errors before
 // the message is fed back into the LLM context.
 func sanitizeToolError(toolName string, err error) string {
