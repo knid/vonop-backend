@@ -243,3 +243,63 @@ func TestChargeCreditDeltasNoUpdateOnFailure(t *testing.T) {
 	require.Equal(t, 0, deducted)
 	require.Equal(t, 1, callCount)
 }
+
+func TestChargeFinalCreditDeltaDeductsUnemittedRemainder(t *testing.T) {
+	projectID := uuid.New().String()
+	runID := uuid.New()
+	tracker := utils.NewTokenTracker()
+	tracker.Record("claude-sonnet-4-6", utils.UsageInfo{
+		PromptTokens:     7000,
+		CompletionTokens: 2000,
+		TotalTokens:      9000,
+	}, 0, true)
+
+	var deductions []int
+	deps := &RunDependencies{
+		DeductCredits: func(_ context.Context, credits int, action, gotProjectID string) error {
+			require.Equal(t, "app_chat", action)
+			require.Equal(t, projectID, gotProjectID)
+			deductions = append(deductions, credits)
+			return nil
+		},
+	}
+	emitter := &recordingEmitter{}
+
+	deducted := chargeFinalCreditDelta(context.Background(), deps, emitter, runID, 2, tracker, "app_chat", projectID, 1)
+
+	require.Equal(t, creditsBilled(deps, tracker, projectID), deducted)
+	require.Equal(t, []int{deducted - 1}, deductions)
+	require.Len(t, emitter.events, 1)
+	require.Equal(t, EventCreditsUpdate, emitter.events[0].Type)
+	payload, ok := emitter.events[0].Data.(CreditsUpdateEvent)
+	require.True(t, ok)
+	require.Equal(t, runID, payload.RunID)
+	require.Equal(t, 2, payload.Turn)
+	require.Equal(t, deducted, payload.CreditsUsed)
+}
+
+func TestChargeFinalCreditDeltaSkipsWhenAlreadyDeducted(t *testing.T) {
+	projectID := uuid.New().String()
+	tracker := utils.NewTokenTracker()
+	tracker.Record("claude-sonnet-4-6", utils.UsageInfo{
+		PromptTokens:     7000,
+		CompletionTokens: 2000,
+		TotalTokens:      9000,
+	}, 0, true)
+	alreadyDeducted := creditsBilled(nil, tracker, projectID)
+
+	var callCount int
+	deps := &RunDependencies{
+		DeductCredits: func(context.Context, int, string, string) error {
+			callCount++
+			return nil
+		},
+	}
+	emitter := &recordingEmitter{}
+
+	deducted := chargeFinalCreditDelta(context.Background(), deps, emitter, uuid.New(), 1, tracker, "app_chat", projectID, alreadyDeducted)
+
+	require.Equal(t, alreadyDeducted, deducted)
+	require.Zero(t, callCount)
+	require.Empty(t, emitter.events)
+}
