@@ -53,6 +53,24 @@ func TestToolRoundLimitClassificationTellsUserToContinue(t *testing.T) {
 	assert.Contains(t, humanizeErrorKind("tool_rounds_exceeded"), "continue")
 }
 
+func TestRefreshRunContextMessageDoesNotRepeatUserRequest(t *testing.T) {
+	msg := utils.Message{Role: "user", Content: "remove that limit feature"}
+
+	refreshRunContextMessage(&msg, "FILE TREE\nfirst\n", "", true)
+
+	assert.Contains(t, msg.Content, "CURRENT RUN CONTEXT")
+	assert.Contains(t, msg.Content, "USER REQUEST")
+	assert.Contains(t, msg.Content, "remove that limit feature")
+
+	refreshRunContextMessage(&msg, "FILE TREE\nsecond\n", "", false)
+
+	assert.Contains(t, msg.Content, "CURRENT RUN CONTEXT")
+	assert.Contains(t, msg.Content, "FILE TREE\nsecond")
+	assert.NotContains(t, msg.Content, "FILE TREE\nfirst")
+	assert.NotContains(t, msg.Content, "USER REQUEST")
+	assert.NotContains(t, msg.Content, "remove that limit feature")
+}
+
 func TestLangfuseSessionIDUsesConversationID(t *testing.T) {
 	conversationID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	projectID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
