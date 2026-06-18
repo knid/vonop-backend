@@ -6,28 +6,66 @@ import (
 	"strings"
 
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/utils"
 )
 
 const (
-	editHistoryMessageLimit        = 6
-	firstGenHistoryMessageLimit    = 10
-	editHistoryToolResultLimit     = 4
-	firstGenHistoryToolResultLimit = 8
+	KeepLastMessages             = 15
+	KeepLastToolResults          = 5
+	KeepLastTruncatedToolResults = 10
 )
 
-func historyLimitForRun(isFirstGen bool) int {
-	if isFirstGen {
-		return firstGenHistoryMessageLimit
-	}
-	return editHistoryMessageLimit
+type HistoryWindowConfig struct {
+	KeepLastMessages             int
+	KeepLastToolResults          int
+	KeepLastTruncatedToolResults int
 }
 
-func historicalToolResultLimitForRun(isFirstGen bool) int {
-	if isFirstGen {
-		return firstGenHistoryToolResultLimit
+func defaultHistoryWindowConfig() HistoryWindowConfig {
+	return HistoryWindowConfig{
+		KeepLastMessages:             KeepLastMessages,
+		KeepLastToolResults:          KeepLastToolResults,
+		KeepLastTruncatedToolResults: KeepLastTruncatedToolResults,
 	}
-	return editHistoryToolResultLimit
+}
+
+func historyWindowConfigForRun(isFirstGen bool, rc *remoteconfig.Service) HistoryWindowConfig {
+	cfg := defaultHistoryWindowConfig()
+	if rc == nil {
+		return cfg
+	}
+	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(isFirstGen)
+	cfg.KeepLastMessages = positiveOrDefault(rc.GetInt(messageKey, remoteconfig.Global), cfg.KeepLastMessages)
+	cfg.KeepLastToolResults = positiveOrDefault(rc.GetInt(fullToolKey, remoteconfig.Global), cfg.KeepLastToolResults)
+	cfg.KeepLastTruncatedToolResults = positiveOrDefault(rc.GetInt(truncatedToolKey, remoteconfig.Global), cfg.KeepLastTruncatedToolResults)
+	return cfg
+}
+
+func historyWindowKeysForRun(isFirstGen bool) (remoteconfig.Key, remoteconfig.Key, remoteconfig.Key) {
+	if isFirstGen {
+		return remoteconfig.AIGenerationKeepLastMessages,
+			remoteconfig.AIGenerationKeepLastToolResults,
+			remoteconfig.AIGenerationKeepLastTruncatedToolResults
+	}
+	return remoteconfig.AIBuilderKeepLastMessages,
+		remoteconfig.AIBuilderKeepLastToolResults,
+		remoteconfig.AIBuilderKeepLastTruncatedToolResults
+}
+
+func positiveOrDefault(v, fallback int) int {
+	if v > 0 {
+		return v
+	}
+	return fallback
+}
+
+func historyToolMessageLimitForRun(cfg HistoryWindowConfig) int {
+	limit := cfg.KeepLastToolResults + cfg.KeepLastTruncatedToolResults
+	if limit < 0 {
+		return 0
+	}
+	return limit
 }
 
 // partsToContent flattens an ordered parts slice into the legacy plain-text
@@ -62,28 +100,37 @@ func partsToToolCalls(parts []models.ChatMessagePart) []models.ChatMessageToolCa
 	return out
 }
 
-func convertHistoryForRun(history []models.AppChatMessage, isFirstGen bool) []utils.Message {
-	limit := historyLimitForRun(isFirstGen)
-	if limit > 0 && len(history) > limit {
-		history = history[len(history)-limit:]
-	}
-	return convertHistoryWithToolLimit(history, historicalToolResultLimitForRun(isFirstGen))
+func convertHistoryForRun(history []models.AppChatMessage, cfg HistoryWindowConfig) []utils.Message {
+	return convertHistoryWithWindow(history, cfg)
 }
 
 func convertHistory(history []models.AppChatMessage) []utils.Message {
-	return convertHistoryWithToolLimit(history, -1)
+	cfg := HistoryWindowConfig{
+		KeepLastMessages:             0,
+		KeepLastToolResults:          int(^uint(0) >> 1),
+		KeepLastTruncatedToolResults: 0,
+	}
+	return convertHistoryWithWindow(history, cfg)
 }
 
 func convertHistoryWithToolLimit(history []models.AppChatMessage, maxToolResults int) []utils.Message {
-	var out []utils.Message
-	skipToolResults := 0
-	if maxToolResults >= 0 {
-		totalToolResults := countAssistantToolParts(history)
-		if totalToolResults > maxToolResults {
-			skipToolResults = totalToolResults - maxToolResults
-		}
+	cfg := HistoryWindowConfig{
+		KeepLastMessages:             0,
+		KeepLastToolResults:          maxToolResults,
+		KeepLastTruncatedToolResults: 0,
 	}
-	for _, m := range history {
+	if maxToolResults < 0 {
+		cfg.KeepLastToolResults = int(^uint(0) >> 1)
+	}
+	return convertHistoryWithWindow(history, cfg)
+}
+
+func convertHistoryWithWindow(history []models.AppChatMessage, cfg HistoryWindowConfig) []utils.Message {
+	var out []utils.Message
+	toolModes := toolHistoryModes(history, cfg)
+	toolIndex := 0
+	keepTranscript := transcriptHistoryKeepMask(history, cfg.KeepLastMessages)
+	for i, m := range history {
 		if m.ErrorKind != "" {
 			reason := strings.TrimSpace(m.Content)
 			if reason == "" {
@@ -98,6 +145,9 @@ func convertHistoryWithToolLimit(history []models.AppChatMessage, maxToolResults
 
 		content := m.Content
 		if m.Role == "user" {
+			if !keepTranscript[i] {
+				continue
+			}
 			content, _, _ = ExpandSlashCommand(content)
 			content = "<user_message>" + escapeUntrustedTag(content, "user_message") + "</user_message>"
 			out = append(out, utils.Message{Role: m.Role, Content: content})
@@ -110,17 +160,43 @@ func convertHistoryWithToolLimit(history []models.AppChatMessage, maxToolResults
 				_ = json.Unmarshal(m.Parts, &parts)
 			}
 			if len(parts) == 0 {
-				out = append(out, utils.Message{Role: "assistant", Content: content})
+				if keepTranscript[i] {
+					out = append(out, utils.Message{Role: "assistant", Content: content})
+				}
 				continue
 			}
-			msgs, _ := convertAssistantPartsWithToolLimit(parts, &skipToolResults)
+			msgs := convertAssistantPartsWithToolWindow(parts, toolModes, &toolIndex, keepTranscript[i])
 			out = append(out, msgs...)
 			continue
 		}
 
-		out = append(out, utils.Message{Role: m.Role, Content: content})
+		if keepTranscript[i] {
+			out = append(out, utils.Message{Role: m.Role, Content: content})
+		}
 	}
 	return out
+}
+
+func transcriptHistoryKeepMask(history []models.AppChatMessage, limit int) map[int]bool {
+	keep := map[int]bool{}
+	if limit == 0 {
+		for i := range history {
+			keep[i] = true
+		}
+		return keep
+	}
+	if limit < 0 {
+		return keep
+	}
+	remaining := limit
+	for i := len(history) - 1; i >= 0 && remaining > 0; i-- {
+		switch history[i].Role {
+		case "user", "assistant":
+			keep[i] = true
+			remaining--
+		}
+	}
+	return keep
 }
 
 func countAssistantToolParts(history []models.AppChatMessage) int {
@@ -143,16 +219,87 @@ func countAssistantToolParts(history []models.AppChatMessage) int {
 }
 
 func convertAssistantParts(parts []models.ChatMessagePart) []utils.Message {
-	msgs, _ := convertAssistantPartsWithToolLimit(parts, nil)
-	return msgs
+	return convertAssistantPartsWithToolWindow(parts, nil, nil, true)
 }
 
 func convertAssistantPartsWithToolLimit(parts []models.ChatMessagePart, skipToolResults *int) ([]utils.Message, int) {
+	if skipToolResults == nil {
+		return convertAssistantParts(parts), 0
+	}
+	total := 0
+	for _, p := range parts {
+		if p.Type == "tool_call" {
+			total++
+		}
+	}
+	modes := make([]toolHistoryMode, total)
+	for i := range modes {
+		if *skipToolResults > 0 {
+			modes[i] = toolHistoryDrop
+			*skipToolResults--
+			continue
+		}
+		modes[i] = toolHistoryFull
+	}
+	idx := 0
+	return convertAssistantPartsWithToolWindow(parts, modes, &idx, true), countToolMode(modes, toolHistoryDrop)
+}
+
+type toolHistoryMode int
+
+const (
+	toolHistoryDrop toolHistoryMode = iota
+	toolHistoryTruncated
+	toolHistoryFull
+)
+
+func toolHistoryModes(history []models.AppChatMessage, cfg HistoryWindowConfig) []toolHistoryMode {
+	total := countAssistantToolParts(history)
+	modes := make([]toolHistoryMode, total)
+	full := cfg.KeepLastToolResults
+	if full < 0 {
+		full = 0
+	}
+	truncated := cfg.KeepLastTruncatedToolResults
+	if truncated < 0 {
+		truncated = 0
+	}
+	fullStart := total - full
+	if fullStart < 0 {
+		fullStart = 0
+	}
+	truncatedStart := fullStart - truncated
+	if truncatedStart < 0 {
+		truncatedStart = 0
+	}
+	for i := range modes {
+		switch {
+		case i >= fullStart:
+			modes[i] = toolHistoryFull
+		case i >= truncatedStart:
+			modes[i] = toolHistoryTruncated
+		default:
+			modes[i] = toolHistoryDrop
+		}
+	}
+	return modes
+}
+
+func countToolMode(modes []toolHistoryMode, want toolHistoryMode) int {
+	n := 0
+	for _, mode := range modes {
+		if mode == want {
+			n++
+		}
+	}
+	return n
+}
+
+func convertAssistantPartsWithToolWindow(parts []models.ChatMessagePart, modes []toolHistoryMode, toolIndex *int, includeText bool) []utils.Message {
 	var out []utils.Message
 	var pendingText string
 	var pendingToolCalls []utils.ToolCall
 	var pendingToolResults []utils.Message
-	skippedToolResults := 0
 
 	flush := func() {
 		if pendingText == "" && len(pendingToolCalls) == 0 {
@@ -174,34 +321,80 @@ func convertAssistantPartsWithToolLimit(parts []models.ChatMessagePart, skipTool
 		case "reasoning":
 			continue
 		case "text":
+			if !includeText {
+				continue
+			}
 			if pendingText != "" || len(pendingToolCalls) > 0 {
 				flush()
 			}
 			pendingText = p.Text
 		case "tool_call":
-			if skipToolResults != nil && *skipToolResults > 0 {
-				*skipToolResults--
-				skippedToolResults++
+			mode := toolHistoryFull
+			if toolIndex != nil {
+				if *toolIndex < len(modes) {
+					mode = modes[*toolIndex]
+				}
+				*toolIndex++
+			}
+			if mode == toolHistoryDrop {
 				continue
+			}
+			args := string(p.Input)
+			result := p.Result
+			if mode == toolHistoryTruncated {
+				args = truncatedToolArgs(p)
+				result = truncatedToolResult(p)
 			}
 			pendingToolCalls = append(pendingToolCalls, utils.ToolCall{
 				ID:   p.ToolCallID,
 				Type: "function",
 				Function: &utils.FunctionCall{
 					Name:      p.Name,
-					Arguments: string(p.Input),
+					Arguments: args,
 				},
 			})
 			pendingToolResults = append(pendingToolResults, utils.Message{
 				Role:       "tool",
 				ToolCallID: p.ToolCallID,
 				Name:       p.Name,
-				Content:    p.Result,
+				Content:    result,
 			})
 		}
 	}
 	flush()
-	return out, skippedToolResults
+	return out
+}
+
+func truncatedToolArgs(p models.ChatMessagePart) string {
+	payload := map[string]any{
+		"summary":            "truncated older tool call args",
+		"original_arg_bytes": len(p.Input),
+	}
+	if paths := extractToolPaths(string(p.Input)); len(paths) > 0 {
+		payload["paths"] = paths
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return `{"summary":"truncated older tool call args"}`
+	}
+	return string(raw)
+}
+
+func truncatedToolResult(p models.ChatMessagePart) string {
+	paths := extractToolPaths(string(p.Input))
+	parts := []string{
+		fmt.Sprintf("Tool result truncated: %s", p.Name),
+		fmt.Sprintf("error: %t", p.IsError),
+		fmt.Sprintf("args_bytes: %d", len(p.Input)),
+		fmt.Sprintf("result_bytes: %d", len(p.Result)),
+	}
+	if len(paths) > 0 {
+		parts = append(parts, "paths: "+strings.Join(paths, ", "))
+	}
+	if preview := firstLine(p.Result, 240); preview != "" {
+		parts = append(parts, "preview: "+preview)
+	}
+	return strings.Join(parts, "\n")
 }
 
 // lastAssistantTurn returns the most recent non-error assistant message in

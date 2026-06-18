@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -45,6 +46,51 @@ func (db *Database) GetRecentChatMessages(projectID uuid.UUID, limit int) ([]mod
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
 	return msgs, nil
+}
+
+// GetAgentHistoryMessages returns the union of recent transcript messages and
+// recent tool-bearing assistant messages, oldest-first. The two windows are
+// loaded independently so long text-only conversations do not hide the latest
+// tool usage history from the agent prompt.
+func (db *Database) GetAgentHistoryMessages(projectID uuid.UUID, transcriptLimit, toolMessageLimit int) ([]models.AppChatMessage, error) {
+	byID := map[uuid.UUID]models.AppChatMessage{}
+	if transcriptLimit > 0 {
+		msgs, err := db.GetRecentChatMessages(projectID, transcriptLimit)
+		if err != nil {
+			return nil, err
+		}
+		for _, msg := range msgs {
+			byID[msg.ID] = msg
+		}
+	}
+	if toolMessageLimit > 0 {
+		var toolMsgs []models.AppChatMessage
+		err := db.DB.NewSelect().
+			Model(&toolMsgs).
+			Where("app_project_id = ?", projectID).
+			Where("role = ?", "assistant").
+			Where("jsonb_array_length(tool_calls) > 0").
+			Order("created_at DESC").
+			Limit(toolMessageLimit).
+			Scan(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		for _, msg := range toolMsgs {
+			byID[msg.ID] = msg
+		}
+	}
+	out := make([]models.AppChatMessage, 0, len(byID))
+	for _, msg := range byID {
+		out = append(out, msg)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID.String() < out[j].ID.String()
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
 }
 
 // ClearChatMessages deletes all messages for a project. Called by the

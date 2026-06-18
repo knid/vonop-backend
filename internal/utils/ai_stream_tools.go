@@ -135,6 +135,107 @@ func trimToolRoundsOlderThan(
 	return toolRoundHistory[cutoff:]
 }
 
+type toolCallWindowMode int
+
+const (
+	toolCallWindowDrop toolCallWindowMode = iota
+	toolCallWindowTruncate
+	toolCallWindowFull
+)
+
+func trimToolCallsForWindow(
+	currentMessages []Message,
+	keepFull int,
+	keepTruncated int,
+	trimArgs func(toolName, args string) string,
+	trimResults func(toolName, result string) string,
+) []Message {
+	if keepFull < 0 {
+		keepFull = 0
+	}
+	if keepTruncated < 0 {
+		keepTruncated = 0
+	}
+	type ref struct {
+		id string
+	}
+	var refs []ref
+	for _, msg := range currentMessages {
+		if msg.Role != "assistant" {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID != "" {
+				refs = append(refs, ref{id: tc.ID})
+			}
+		}
+	}
+	if len(refs) == 0 {
+		return currentMessages
+	}
+	fullStart := len(refs) - keepFull
+	if fullStart < 0 {
+		fullStart = 0
+	}
+	truncatedStart := fullStart - keepTruncated
+	if truncatedStart < 0 {
+		truncatedStart = 0
+	}
+	modes := make(map[string]toolCallWindowMode, len(refs))
+	for i, r := range refs {
+		switch {
+		case i >= fullStart:
+			modes[r.id] = toolCallWindowFull
+		case i >= truncatedStart:
+			modes[r.id] = toolCallWindowTruncate
+		default:
+			modes[r.id] = toolCallWindowDrop
+		}
+	}
+	out := make([]Message, 0, len(currentMessages))
+	for _, msg := range currentMessages {
+		switch msg.Role {
+		case "assistant":
+			if len(msg.ToolCalls) == 0 {
+				out = append(out, msg)
+				continue
+			}
+			kept := make([]ToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				mode, ok := modes[tc.ID]
+				if !ok || mode == toolCallWindowFull {
+					kept = append(kept, tc)
+					continue
+				}
+				if mode == toolCallWindowDrop {
+					continue
+				}
+				if trimArgs != nil && tc.Function != nil {
+					tc.Function.Arguments = trimArgs(tc.Function.Name, tc.Function.Arguments)
+				}
+				kept = append(kept, tc)
+			}
+			msg.ToolCalls = kept
+			if len(msg.ToolCalls) == 0 && strings.TrimSpace(msg.Content) == "" {
+				continue
+			}
+			out = append(out, msg)
+		case "tool":
+			mode, ok := modes[msg.ToolCallID]
+			if ok && mode == toolCallWindowDrop {
+				continue
+			}
+			if ok && mode == toolCallWindowTruncate && trimResults != nil {
+				msg.Content = trimResults(msg.Name, msg.Content)
+			}
+			out = append(out, msg)
+		default:
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
 func incompleteToolCallRecoveryMessage(finishReason string, toolCallsMap map[int]*ToolCall, attempt, maxAttempts int) string {
 	details := incompleteToolCallDetails(toolCallsMap)
 

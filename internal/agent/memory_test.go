@@ -42,7 +42,7 @@ func TestCompactLLMHistoryKeepsSystemMemoryPinnedAndTail(t *testing.T) {
 		{Role: "system", Content: "base"},
 		{Role: "user", Content: "old user"},
 		{Role: "assistant", Content: "old assistant"},
-		{Role: "user", Content: "CURRENT RUN CONTEXT\n===================\n\nfiles\n\nUSER REQUEST\n============\n\nbuild dashboard"},
+		{Role: "user", Content: "build dashboard"},
 		{Role: "assistant", Content: "recent"},
 		{Role: "user", Content: "[System] nudge"},
 	}
@@ -54,7 +54,6 @@ func TestCompactLLMHistoryKeepsSystemMemoryPinnedAndTail(t *testing.T) {
 	assert.Equal(t, "user", out[1].Role)
 	assert.Contains(t, out[1].Content, agentMemoryMarker)
 	assert.Contains(t, out[1].Content, "app/page.tsx")
-	assert.Contains(t, out[2].Content, "CURRENT RUN CONTEXT")
 	assert.Equal(t, "assistant", out[len(out)-2].Role)
 	assert.Equal(t, "user", out[len(out)-1].Role)
 	assert.Equal(t, 1, mem.Compactions)
