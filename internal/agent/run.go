@@ -155,7 +155,7 @@ func Run(
 		}
 
 		// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
-		h, err := deps.DB.GetRecentChatMessages(project.ID, 10)
+		h, err := deps.DB.GetRecentChatMessages(project.ID, historyLimitForRun(project != nil && project.Status == "draft"))
 		if err != nil {
 			slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
 			h = nil
@@ -243,7 +243,7 @@ func Run(
 		return err
 	}
 
-	llmMessages = append(llmMessages, convertHistory(history)...)
+	llmMessages = append(llmMessages, convertHistoryForRun(history, isFirstGen)...)
 
 	// Append the current turn explicitly — we don't rely on history reload
 	// to round-trip images, and we want the turn to land even if history

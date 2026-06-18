@@ -340,7 +340,7 @@ func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
 	}
 }
 
-func TestBuildSystemMessages_ChatWebIncludesEditingDiscipline(t *testing.T) {
+func TestBuildSystemMessages_ChatWebIncludesSmallEditPrompt(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{},
@@ -351,8 +351,14 @@ func TestBuildSystemMessages_ChatWebIncludesEditingDiscipline(t *testing.T) {
 	if strings.Contains(joined, "Design Brief + App Shell First") {
 		t.Error("chat web must NOT include first-gen work order")
 	}
-	if !strings.Contains(joined, "EDITING DISCIPLINE") {
-		t.Error("expected chat web to include editing discipline")
+	if !strings.Contains(joined, "Existing App Edit") {
+		t.Error("expected chat web to include existing edit guidance")
+	}
+	if !strings.Contains(joined, "Fix only what the user asked for") {
+		t.Error("expected chat web to emphasize narrow fixes")
+	}
+	if !strings.Contains(joined, "Do not update DESIGN.md for targeted bug fixes") {
+		t.Error("expected chat web to avoid DESIGN.md updates for bug fixes")
 	}
 }
 

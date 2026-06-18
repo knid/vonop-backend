@@ -12,8 +12,9 @@ import (
 func TestCompileAgentContext_WebSEO(t *testing.T) {
 	project := &models.AppProject{ProjectType: models.ProjectTypeApp, Settings: map[string]any{}}
 	packet := CompileAgentContext(AgentContextInput{
-		Project: project,
-		Message: "/seo",
+		Project:    project,
+		Message:    "/seo",
+		IsFirstGen: false,
 	})
 
 	if packet.Profile.ID != AgentIDWebBuilder {
@@ -35,11 +36,76 @@ func TestCompileAgentContext_WebSEO(t *testing.T) {
 	for _, msg := range packet.SystemMessages {
 		combined += msg.Content + "\n"
 	}
-	if !strings.Contains(combined, "AVAILABLE SKILLS") || !strings.Contains(combined, "id: web-seo") {
-		t.Fatalf("expected compact skill manifest to include web-seo metadata:\n%s", combined)
+	if strings.Contains(combined, "AVAILABLE SKILLS") {
+		t.Fatalf("existing edit context should not inject the skill manifest:\n%s", combined)
 	}
 	if strings.Contains(combined, "# SKILL: Web SEO") {
 		t.Fatal("optional web-seo skill body should not be injected as a system message")
+	}
+}
+
+func TestCompileAgentContext_WebEditDoesNotInjectRequiredSkillsOrManifest(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Status:      "ready",
+		Settings:    map[string]any{},
+	}
+	packet := CompileAgentContext(AgentContextInput{
+		Project:    project,
+		Message:    "dark mode is broken",
+		IsFirstGen: false,
+	})
+
+	if len(packet.SkillIDs) != 0 {
+		t.Fatalf("existing edit should not load required skill bodies, got %v", packet.SkillIDs)
+	}
+
+	combined := ""
+	for _, msg := range packet.SystemMessages {
+		combined += msg.Content + "\n"
+	}
+	for _, forbidden := range []string{
+		"AVAILABLE SKILLS",
+		"# SKILL:",
+		"Tailwind v4 UI System",
+		"Web Builder Foundation",
+		"production-grade web apps",
+	} {
+		if strings.Contains(combined, forbidden) {
+			t.Fatalf("existing edit context contains prompt bloat %q:\n%s", forbidden, combined)
+		}
+	}
+	if !strings.Contains(combined, "smallest correct change") {
+		t.Fatalf("existing edit prompt should emphasize narrow fixes:\n%s", combined)
+	}
+}
+
+func TestCompileAgentContext_WebEditCollapsesDuplicatedEditPrompts(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Status:      "ready",
+		Settings:    map[string]any{},
+	}
+	packet := CompileAgentContext(AgentContextInput{
+		Project:    project,
+		Message:    "dark mode is broken",
+		IsFirstGen: false,
+	})
+
+	var planningBlocks, leanGuidanceBlocks int
+	for _, msg := range packet.SystemMessages {
+		if strings.Contains(msg.Content, "## Planning Discipline") {
+			planningBlocks++
+		}
+		if strings.Contains(msg.Content, "## Existing Edit Guidance") {
+			leanGuidanceBlocks++
+		}
+	}
+	if planningBlocks != 0 {
+		t.Fatalf("existing web edits should not append a separate planning prompt, got %d", planningBlocks)
+	}
+	if leanGuidanceBlocks != 0 {
+		t.Fatalf("existing web edits should not append a separate lean guidance prompt, got %d", leanGuidanceBlocks)
 	}
 }
 

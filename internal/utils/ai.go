@@ -1661,6 +1661,7 @@ func StreamWithTools(
 			}
 		}
 
+		currentMessages = sanitizedMessages(currentMessages)
 		body, err := buildLLMRequestBody(ChatRequest{
 			Model:          model,
 			Stream:         true,
@@ -2097,9 +2098,6 @@ func StreamWithTools(
 				Role:      "assistant",
 				Content:   fullText.String(),
 				ToolCalls: toolCalls,
-			}
-			if fullReasoning.Len() > 0 {
-				assistantMsg.ReasoningContent = fullReasoning.String()
 			}
 			currentMessages = append(currentMessages, assistantMsg)
 

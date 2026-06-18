@@ -49,6 +49,9 @@ func CompileAgentContext(input AgentContextInput) AgentContextPacket {
 	skills := ResolveSkills(profile, input.Project, input.Message, input.IsFirstGen)
 	suggestedSkills := ResolveSuggestedSkills(profile, input.Project, input.Message, input.IsFirstGen)
 	manifestSkills := ResolveCompatibleSkills(profile, input.Project)
+	if leanWebEditContext(profile, input.IsFirstGen) {
+		manifestSkills = nil
+	}
 	if len(manifestSkills) > 0 {
 		msgs = append(msgs, RenderSkillManifestMessage(manifestSkills, skills, suggestedSkills))
 	}
@@ -67,4 +70,8 @@ func CompileAgentContext(input AgentContextInput) AgentContextPacket {
 		ManifestSkillIDs:  skillIDs(manifestSkills),
 		ReadOnly:          SlashCommandIsReadOnly(input.Message),
 	}
+}
+
+func leanWebEditContext(profile *AgentProfile, isFirstGen bool) bool {
+	return !isFirstGen && profile != nil && profile.ID == AgentIDWebBuilder
 }

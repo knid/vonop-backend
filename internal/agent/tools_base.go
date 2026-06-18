@@ -897,6 +897,34 @@ func (MultiEditTool) Name() string { return "multi_edit" }
 func (MultiEditTool) Description() string {
 	return "Apply multiple surgical edits to a single file in one call. Each edit replaces one occurrence of old_string with new_string; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have ≥2 changes to the same file — same semantics, one round-trip."
 }
+
+func editReplacementSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"old_string": map[string]any{"type": "string"},
+			"new_string": map[string]any{"type": "string"},
+		},
+		"required": []string{"old_string", "new_string"},
+	}
+}
+
+func editReplacementsSchema(description string) map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{
+				"type":        "array",
+				"description": description,
+				"items":       editReplacementSchema(),
+			},
+			map[string]any{
+				"type":        "string",
+				"description": "JSON-encoded " + description,
+			},
+		},
+	}
+}
+
 func (MultiEditTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -905,35 +933,45 @@ func (MultiEditTool) Schema() map[string]any {
 				"type":        "string",
 				"description": "The project-relative path to the file.",
 			},
-			"edits": map[string]any{
-				"type":        "array",
-				"description": "Ordered list of edits. Each is applied to the file in turn; a later edit sees the content produced by earlier edits.",
-				"items": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"old_string": map[string]any{"type": "string"},
-						"new_string": map[string]any{"type": "string"},
-					},
-					"required": []string{"old_string", "new_string"},
-				},
-			},
+			"edits":       editReplacementsSchema("Ordered list of edits. Each is applied to the file in turn; a later edit sees the content produced by earlier edits."),
 			"description": map[string]any{"type": "string"},
 		},
 		"required": []string{"path", "edits"},
 	}
 }
 
+type editReplacement struct {
+	OldString string `json:"old_string"`
+	NewString string `json:"new_string"`
+}
+
+func decodeEditReplacements(raw json.RawMessage) ([]editReplacement, error) {
+	var edits []editReplacement
+	if err := json.Unmarshal(raw, &edits); err == nil {
+		return edits, nil
+	}
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(encoded), &edits); err != nil {
+		return nil, err
+	}
+	return edits, nil
+}
+
 func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
 	var args struct {
-		Path  string `json:"path"`
-		Edits []struct {
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
-		} `json:"edits"`
-		Description string `json:"description"`
+		Path        string          `json:"path"`
+		Edits       json.RawMessage `json:"edits"`
+		Description string          `json:"description"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	edits, err := decodeEditReplacements(args.Edits)
+	if err != nil {
+		return fmt.Sprintf("invalid edits: %v", err), true, nil
 	}
 	path, err := sanitizePath(args.Path)
 	if err != nil {
@@ -945,11 +983,11 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	if msg := enforceProjectPathScope(rc, path); msg != "" {
 		return msg, true, nil
 	}
-	if len(args.Edits) == 0 {
+	if len(edits) == 0 {
 		return "edits must contain at least one entry", true, nil
 	}
-	if len(args.Edits) > multiEditMaxEdits {
-		return fmt.Sprintf("too many edits: %d (max %d) — split into multiple calls", len(args.Edits), multiEditMaxEdits), true, nil
+	if len(edits) > multiEditMaxEdits {
+		return fmt.Sprintf("too many edits: %d (max %d) — split into multiple calls", len(edits), multiEditMaxEdits), true, nil
 	}
 	content, ok := rc.FileMap.Get(path)
 	if !ok {
@@ -957,7 +995,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	working := content
-	for i, e := range args.Edits {
+	for i, e := range edits {
 		if e.OldString == "" {
 			return fmt.Sprintf("edit %d: old_string must not be empty", i+1), true, nil
 		}
@@ -987,7 +1025,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Bytes:     len(working),
 		Content:   working,
 	})
-	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, len(args.Edits), len(working)), false, nil
+	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, len(edits), len(working)), false, nil
 }
 
 // ---------- patch_files ----------
@@ -1001,50 +1039,55 @@ func (PatchFilesTool) Description() string {
 	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit."
 }
 func (PatchFilesTool) Schema() map[string]any {
+	fileEntrySchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":        map[string]any{"type": "string"},
+			"edits":       editReplacementsSchema("Ordered list of exact-string edits for this file."),
+			"description": map[string]any{"type": "string"},
+		},
+		"required": []string{"path", "edits"},
+	}
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"files": map[string]any{
 				"type":        "array",
 				"description": "Files to patch in order.",
-				"items": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"path": map[string]any{"type": "string"},
-						"edits": map[string]any{
-							"type": "array",
-							"items": map[string]any{
-								"type": "object",
-								"properties": map[string]any{
-									"old_string": map[string]any{"type": "string"},
-									"new_string": map[string]any{"type": "string"},
-								},
-								"required": []string{"old_string", "new_string"},
-							},
-						},
-						"description": map[string]any{"type": "string"},
-					},
-					"required": []string{"path", "edits"},
-				},
+				"items":       fileEntrySchema,
 			},
+			"path":        map[string]any{"type": "string", "description": "Shorthand single-file path."},
+			"edits":       editReplacementsSchema("Ordered list of exact-string edits for the shorthand single-file patch."),
+			"description": map[string]any{"type": "string"},
 		},
-		"required": []string{"files"},
+		"anyOf": []any{
+			map[string]any{"required": []string{"files"}},
+			map[string]any{"required": []string{"path", "edits"}},
+		},
 	}
 }
 
 func (PatchFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	type patchFileInput struct {
+		Path        string          `json:"path"`
+		Edits       json.RawMessage `json:"edits"`
+		Description string          `json:"description"`
+	}
 	var args struct {
-		Files []struct {
-			Path  string `json:"path"`
-			Edits []struct {
-				OldString string `json:"old_string"`
-				NewString string `json:"new_string"`
-			} `json:"edits"`
-			Description string `json:"description"`
-		} `json:"files"`
+		Files       []patchFileInput `json:"files"`
+		Path        string           `json:"path"`
+		Edits       json.RawMessage  `json:"edits"`
+		Description string           `json:"description"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if len(args.Files) == 0 && args.Path != "" {
+		args.Files = []patchFileInput{{
+			Path:        args.Path,
+			Edits:       args.Edits,
+			Description: args.Description,
+		}}
 	}
 	if len(args.Files) == 0 {
 		return "files must contain at least one entry", true, nil
