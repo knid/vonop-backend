@@ -9,6 +9,27 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
+const (
+	editHistoryMessageLimit        = 6
+	firstGenHistoryMessageLimit    = 10
+	editHistoryToolResultLimit     = 4
+	firstGenHistoryToolResultLimit = 8
+)
+
+func historyLimitForRun(isFirstGen bool) int {
+	if isFirstGen {
+		return firstGenHistoryMessageLimit
+	}
+	return editHistoryMessageLimit
+}
+
+func historicalToolResultLimitForRun(isFirstGen bool) int {
+	if isFirstGen {
+		return firstGenHistoryToolResultLimit
+	}
+	return editHistoryToolResultLimit
+}
+
 // partsToContent flattens an ordered parts slice into the legacy plain-text
 // content string by concatenating every text part in order.
 func partsToContent(parts []models.ChatMessagePart) string {
@@ -41,8 +62,27 @@ func partsToToolCalls(parts []models.ChatMessagePart) []models.ChatMessageToolCa
 	return out
 }
 
+func convertHistoryForRun(history []models.AppChatMessage, isFirstGen bool) []utils.Message {
+	limit := historyLimitForRun(isFirstGen)
+	if limit > 0 && len(history) > limit {
+		history = history[len(history)-limit:]
+	}
+	return convertHistoryWithToolLimit(history, historicalToolResultLimitForRun(isFirstGen))
+}
+
 func convertHistory(history []models.AppChatMessage) []utils.Message {
+	return convertHistoryWithToolLimit(history, -1)
+}
+
+func convertHistoryWithToolLimit(history []models.AppChatMessage, maxToolResults int) []utils.Message {
 	var out []utils.Message
+	skipToolResults := 0
+	if maxToolResults >= 0 {
+		totalToolResults := countAssistantToolParts(history)
+		if totalToolResults > maxToolResults {
+			skipToolResults = totalToolResults - maxToolResults
+		}
+	}
 	for _, m := range history {
 		if m.ErrorKind != "" {
 			reason := strings.TrimSpace(m.Content)
@@ -73,7 +113,8 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 				out = append(out, utils.Message{Role: "assistant", Content: content})
 				continue
 			}
-			out = append(out, convertAssistantParts(parts)...)
+			msgs, _ := convertAssistantPartsWithToolLimit(parts, &skipToolResults)
+			out = append(out, msgs...)
 			continue
 		}
 
@@ -82,26 +123,48 @@ func convertHistory(history []models.AppChatMessage) []utils.Message {
 	return out
 }
 
+func countAssistantToolParts(history []models.AppChatMessage) int {
+	count := 0
+	for _, m := range history {
+		if m.Role != "assistant" || len(m.Parts) == 0 || string(m.Parts) == "[]" {
+			continue
+		}
+		var parts []models.ChatMessagePart
+		if err := json.Unmarshal(m.Parts, &parts); err != nil {
+			continue
+		}
+		for _, p := range parts {
+			if p.Type == "tool_call" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func convertAssistantParts(parts []models.ChatMessagePart) []utils.Message {
+	msgs, _ := convertAssistantPartsWithToolLimit(parts, nil)
+	return msgs
+}
+
+func convertAssistantPartsWithToolLimit(parts []models.ChatMessagePart, skipToolResults *int) ([]utils.Message, int) {
 	var out []utils.Message
 	var pendingText string
-	var pendingReasoning string
 	var pendingToolCalls []utils.ToolCall
 	var pendingToolResults []utils.Message
+	skippedToolResults := 0
 
 	flush := func() {
-		if pendingText == "" && pendingReasoning == "" && len(pendingToolCalls) == 0 {
+		if pendingText == "" && len(pendingToolCalls) == 0 {
 			return
 		}
 		out = append(out, utils.Message{
-			Role:             "assistant",
-			Content:          pendingText,
-			ReasoningContent: pendingReasoning,
-			ToolCalls:        pendingToolCalls,
+			Role:      "assistant",
+			Content:   pendingText,
+			ToolCalls: pendingToolCalls,
 		})
 		out = append(out, pendingToolResults...)
 		pendingText = ""
-		pendingReasoning = ""
 		pendingToolCalls = nil
 		pendingToolResults = nil
 	}
@@ -109,16 +172,18 @@ func convertAssistantParts(parts []models.ChatMessagePart) []utils.Message {
 	for _, p := range parts {
 		switch p.Type {
 		case "reasoning":
-			if len(pendingToolCalls) > 0 {
-				flush()
-			}
-			pendingReasoning += p.Text
+			continue
 		case "text":
 			if pendingText != "" || len(pendingToolCalls) > 0 {
 				flush()
 			}
 			pendingText = p.Text
 		case "tool_call":
+			if skipToolResults != nil && *skipToolResults > 0 {
+				*skipToolResults--
+				skippedToolResults++
+				continue
+			}
 			pendingToolCalls = append(pendingToolCalls, utils.ToolCall{
 				ID:   p.ToolCallID,
 				Type: "function",
@@ -136,7 +201,7 @@ func convertAssistantParts(parts []models.ChatMessagePart) []utils.Message {
 		}
 	}
 	flush()
-	return out
+	return out, skippedToolResults
 }
 
 // lastAssistantTurn returns the most recent non-error assistant message in

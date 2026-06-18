@@ -29,28 +29,10 @@ func depsWithoutLangfuse(deps *RunDependencies) *RunDependencies {
 // churn. The compact base prompt covers basic tool protocol; this block keeps
 // batching-specific guidance close to the registry's batch tool surface.
 const planningDiscipline = `## Planning Discipline
-Before calling tools, batch independent work into the fewest calls possible. Do
-not spend one model round per file or per small edit when the next actions are
-already known:
-- read_files (plural) for every file you need to inspect — one call, all paths.
-  If grep already identified all relevant files, read them together before
-  deciding edits.
-- create_design for DESIGN.md before broad first-generation UI work.
-- write_files for one or more new files or small full-file writes in ONE call.
-  Do not use it to rewrite large existing files; patch them instead.
-- For large new files, use smaller structured write_files calls instead of one
-  very large JSON payload.
-- patch_files for exact-string edits across 2+ existing files in ONE call.
-- multi_edit for 2+ changes to the SAME file. When the needed changes are clear,
-  batch them instead of editing one occurrence per round. Prefer this for large
-  existing files.
-- execute_sql with multiple semicolon-separated SQL statements in ONE call for
-  independent SELECTs, INSERTs, UPDATEs, or ALTERs. Only split into sequential
-  execute_sql calls when a later statement depends on the result of an earlier
-  one (e.g., an INSERT whose RETURNING id is needed by the next INSERT).
-
-Once you have enough context, write or patch in the same round where possible.
-Do not narrate your plan at length — act with tools immediately.`
+Read relevant code before editing. Prefer targeted patches over rewrites. Batch
+obvious independent edits when the next action is clear. If a broad edit fails,
+inspect current file state before retrying. Keep narration brief and act with
+tools.`
 
 const projectTypeBoundary = `## Project Type Boundary
 This project was created with project_type=%q (%s).
@@ -135,9 +117,11 @@ func BuildSystemMessagesForProfileWithLangfuse(ctx context.Context, profile *Age
 		msgs = append(msgs, utils.Message{Role: "system", Content: manifest})
 		promptParts = append(promptParts, link)
 	}
-	planning, planningLink := resolveLangfusePrompt(ctx, deps, observability.PromptAgentPlanningDiscipline, planningDiscipline, nil)
-	msgs = append(msgs, utils.Message{Role: "system", Content: planning})
-	promptParts = append(promptParts, planningLink)
+	if !leanWebEditContext(profile, isFirstGen) {
+		planning, planningLink := resolveLangfusePrompt(ctx, deps, observability.PromptAgentPlanningDiscipline, planningDiscipline, nil)
+		msgs = append(msgs, utils.Message{Role: "system", Content: planning})
+		promptParts = append(promptParts, planningLink)
+	}
 	return msgs, promptParts
 }
 

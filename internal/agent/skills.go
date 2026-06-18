@@ -120,6 +120,9 @@ func ResolveSkills(profile *AgentProfile, project *models.AppProject, message st
 	if err != nil {
 		return nil
 	}
+	if leanWebEditContext(profile, isFirstGen) {
+		return nil
+	}
 	return resolveRequiredSkillsFromCatalog(NewSkillCatalog(catalog), profile, project)
 }
 

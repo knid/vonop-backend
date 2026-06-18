@@ -234,3 +234,93 @@ func TestWriteFilesTool_ReturnsBatchSummary(t *testing.T) {
 		t.Fatalf("expected batch summary, got: %s", out)
 	}
 }
+
+func TestPatchFilesTool_AcceptsSingleFileShorthand(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+
+	out, isError, err := PatchFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","edits":[{"old_string":"old","new_string":"new"}],"description":"fix copy"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected shorthand patch_files success, got: %s", out)
+	}
+	got, _ := rc.FileMap.Get("app/page.tsx")
+	if got != "hello new" {
+		t.Fatalf("file content = %q, want %q", got, "hello new")
+	}
+}
+
+func TestPatchFilesTool_SchemaAdvertisesSingleFileShorthandAndStringEdits(t *testing.T) {
+	schema := PatchFilesTool{}.Schema()
+	if _, ok := schema["anyOf"]; !ok {
+		t.Fatalf("patch_files schema should allow files[] or shorthand path+edits: %#v", schema)
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("patch_files schema properties missing: %#v", schema)
+	}
+	if _, ok := props["path"]; !ok {
+		t.Fatalf("patch_files schema should advertise shorthand path: %#v", props)
+	}
+	edits, ok := props["edits"].(map[string]any)
+	if !ok {
+		t.Fatalf("patch_files schema should advertise shorthand edits: %#v", props)
+	}
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("patch_files edits schema should allow array or JSON string: %#v", edits)
+	}
+}
+
+func TestPatchFilesTool_AcceptsStringifiedEdits(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+
+	out, isError, err := PatchFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected stringified patch_files edits success, got: %s", out)
+	}
+	got, _ := rc.FileMap.Get("app/page.tsx")
+	if got != "hello new" {
+		t.Fatalf("file content = %q, want %q", got, "hello new")
+	}
+}
+
+func TestMultiEditTool_SchemaAdvertisesStringEdits(t *testing.T) {
+	schema := MultiEditTool{}.Schema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("multi_edit schema properties missing: %#v", schema)
+	}
+	edits, ok := props["edits"].(map[string]any)
+	if !ok {
+		t.Fatalf("multi_edit schema should advertise edits: %#v", props)
+	}
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("multi_edit edits schema should allow array or JSON string: %#v", edits)
+	}
+}
+
+func TestMultiEditTool_AcceptsStringifiedEdits(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "hello old")
+
+	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","edits":"[{\"old_string\":\"old\",\"new_string\":\"new\"}]"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected stringified multi_edit edits success, got: %s", out)
+	}
+	got, _ := rc.FileMap.Get("app/page.tsx")
+	if got != "hello new" {
+		t.Fatalf("file content = %q, want %q", got, "hello new")
+	}
+}

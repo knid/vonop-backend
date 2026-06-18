@@ -220,7 +220,41 @@ func TestConvertHistory_AssistantReasoningAndText(t *testing.T) {
 	require.Len(t, out, 1)
 	assert.Equal(t, "assistant", out[0].Role)
 	assert.Equal(t, "visible", out[0].Content)
-	assert.Equal(t, "hidden", out[0].ReasoningContent)
+	assert.Empty(t, out[0].ReasoningContent)
+}
+
+func TestConvertHistoryForRun_EditKeepsSixMessagesAndFourToolResults(t *testing.T) {
+	var history []models.AppChatMessage
+	for i := 0; i < 4; i++ {
+		history = append(history, models.AppChatMessage{Role: "user", Content: "old user"})
+	}
+	for i := 0; i < 6; i++ {
+		parts, _ := json.Marshal([]models.ChatMessagePart{
+			{Type: "text", Text: "assistant"},
+			{Type: "tool_call", ToolCallID: "tc" + string(rune('a'+i)), Name: "read_files", Input: []byte(`{"paths":["a.tsx"]}`), Result: "result"},
+		})
+		history = append(history, models.AppChatMessage{Role: "assistant", Content: "assistant", Parts: parts})
+	}
+
+	out := convertHistoryForRun(history, false)
+
+	userOrAssistant := 0
+	toolResults := 0
+	for _, msg := range out {
+		if msg.Role == "user" || msg.Role == "assistant" {
+			userOrAssistant++
+		}
+		if msg.Role == "tool" {
+			toolResults++
+		}
+	}
+	assert.LessOrEqual(t, userOrAssistant, 6)
+	assert.Equal(t, 4, toolResults)
+}
+
+func TestHistoryLimitForRun(t *testing.T) {
+	assert.Equal(t, 6, historyLimitForRun(false))
+	assert.Equal(t, 10, historyLimitForRun(true))
 }
 
 func TestConvertHistory_AssistantSingleToolRound(t *testing.T) {
