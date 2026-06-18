@@ -2220,7 +2220,9 @@ func StreamWithTools(
 						call.skipExec = true
 						interceptCount++
 						call.cacheKey = normalizeToolCacheKey(toolName, toolArgs)
-						toolCallHistory[call.cacheKey] = call.result
+						if shouldCacheToolResult(toolName, call.result) {
+							toolCallHistory[call.cacheKey] = call.result
+						}
 						slog.Info("Tool call intercepted", "tool", toolName, "round", round)
 						prepared = append(prepared, call)
 						continue
@@ -2252,7 +2254,9 @@ func StreamWithTools(
 					slog.Warn("Tool call has invalid JSON arguments", "tool", toolName, "round", round, "args_len", len(call.args))
 					call.result = fmt.Sprintf("Error: invalid JSON arguments for tool %s. Please provide valid JSON.", toolName)
 					call.skipExec = true
-					toolCallHistory[call.cacheKey] = call.result
+					if shouldCacheToolResult(toolName, call.result) {
+						toolCallHistory[call.cacheKey] = call.result
+					}
 					prepared = append(prepared, call)
 					continue
 				}
@@ -2283,10 +2287,13 @@ func StreamWithTools(
 					if results[i].err != nil {
 						return result, results[i].err
 					}
-					if !call.skipExec {
+					if !call.skipExec && shouldCacheToolResult(call.name, result) {
 						toolCallHistory[call.cacheKey] = result
 					}
 					finishToolResult(call.name, result, call.tc)
+					if instruction := exactStringEditRecoveryInstruction(call.name, result); instruction != "" {
+						appendToLastUserMsg(instruction)
+					}
 				}
 			} else {
 				for _, call := range prepared {
@@ -2300,9 +2307,14 @@ func StreamWithTools(
 						if tr.err != nil {
 							return result, tr.err
 						}
-						toolCallHistory[call.cacheKey] = result
+						if shouldCacheToolResult(call.name, result) {
+							toolCallHistory[call.cacheKey] = result
+						}
 					}
 					finishToolResult(call.name, result, call.tc)
+					if instruction := exactStringEditRecoveryInstruction(call.name, result); instruction != "" {
+						appendToLastUserMsg(instruction)
+					}
 				}
 			}
 

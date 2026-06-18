@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
@@ -25,8 +28,27 @@ func TestBuildRegistryFor_ExposesWriteFilesButNotWriteFile(t *testing.T) {
 	if !names["multi_edit"] {
 		t.Fatal("expected multi_edit to be exposed")
 	}
+	if !names["read_file_range"] {
+		t.Fatal("expected read_file_range to be exposed")
+	}
 	if names["update_todos"] {
 		t.Fatal("update_todos must not be exposed by default; failed todo calls waste agent rounds")
+	}
+}
+
+func TestRegistryExecuteRejectsInvalidInputBeforeToolExecution(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(GrepTool{})
+
+	out, isError, err := registry.Execute(context.Background(), newPathScopeTestRC(models.ProjectTypeApp), "grep", json.RawMessage(`{"glob":"app/**/*.tsx"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if !isError {
+		t.Fatalf("expected schema validation error, got: %s", out)
+	}
+	if !strings.Contains(out, "invalid grep input") || !strings.Contains(out, "pattern") {
+		t.Fatalf("expected schema validation detail, got: %s", out)
 	}
 }
 

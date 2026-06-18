@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -146,6 +149,40 @@ type RunContext struct {
 	ImageCache     map[string]string
 	ImageInflight  map[string]*imageInflightCall
 	skillMu        sync.Mutex
+	readMu         sync.Mutex
+	ReadHashes     map[string]string
+}
+
+func fileContentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
+}
+
+func (rc *RunContext) MarkFileRead(path, content string) {
+	if rc == nil {
+		return
+	}
+	rc.readMu.Lock()
+	defer rc.readMu.Unlock()
+	if rc.ReadHashes == nil {
+		rc.ReadHashes = make(map[string]string)
+	}
+	rc.ReadHashes[path] = fileContentHash(content)
+}
+
+func (rc *RunContext) requireCurrentFileRead(path, content string) string {
+	if rc == nil {
+		return ""
+	}
+	rc.readMu.Lock()
+	defer rc.readMu.Unlock()
+	if rc.ReadHashes == nil || rc.ReadHashes[path] == "" {
+		return fmt.Sprintf("must read current file before editing: %s", path)
+	}
+	if got := rc.ReadHashes[path]; got != fileContentHash(content) {
+		return fmt.Sprintf("file changed since last read: %s — call read_file_range or read_files to resync before editing", path)
+	}
+	return ""
 }
 
 type imageInflightCall struct {

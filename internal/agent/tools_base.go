@@ -203,9 +203,11 @@ func (ReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 		return fmt.Sprintf("file not found: %s", path), true, nil
 	}
 	if len(content) > maxReadBytes {
+		rc.MarkFileRead(path, content)
 		return fmt.Sprintf("<truncated: file is %d bytes, max %d>\n\n%s",
 			len(content), maxReadBytes, content[:maxReadBytes]), false, nil
 	}
+	rc.MarkFileRead(path, content)
 	return content, false, nil
 }
 
@@ -227,6 +229,8 @@ func (ReadFilesTool) Schema() map[string]any {
 				"type":        "array",
 				"description": "Project-relative file paths to read in one batch.",
 				"items":       map[string]any{"type": "string"},
+				"minItems":    1,
+				"maxItems":    readFilesMaxPaths,
 			},
 		},
 		"required": []string{"paths"},
@@ -272,12 +276,79 @@ func (ReadFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 			continue
 		}
 		if len(content) > maxReadBytes {
+			rc.MarkFileRead(path, content)
 			fmt.Fprintf(&sb, "<truncated: file is %d bytes, max %d>\n\n%s", len(content), maxReadBytes, content[:maxReadBytes])
 			continue
 		}
+		rc.MarkFileRead(path, content)
 		sb.WriteString(content)
 	}
 	return sb.String(), hadError, nil
+}
+
+// ---------- read_file_range ----------
+
+const readFileRangeMaxLines = 250
+
+type ReadFileRangeTool struct{}
+
+func (ReadFileRangeTool) Name() string { return "read_file_range" }
+func (ReadFileRangeTool) Description() string {
+	return "Read a bounded line range from one project file. Use this after grep and before exact-string edits to resync a specific region without loading a huge file."
+}
+func (ReadFileRangeTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path":       map[string]any{"type": "string", "description": "The project-relative path to the file."},
+			"start_line": map[string]any{"type": "integer", "minimum": 1, "description": "1-based first line to read."},
+			"end_line":   map[string]any{"type": "integer", "minimum": 1, "description": fmt.Sprintf("1-based final line to read. Maximum range is %d lines.", readFileRangeMaxLines)},
+		},
+		"required": []string{"path", "start_line", "end_line"},
+	}
+}
+
+func (ReadFileRangeTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	path, err := sanitizePath(args.Path)
+	if err != nil {
+		return err.Error(), true, nil
+	}
+	if isProtectedRead(path) {
+		return fmt.Sprintf("reading %s is not allowed (contains secrets or system files)", path), true, nil
+	}
+	if args.StartLine < 1 || args.EndLine < args.StartLine {
+		return "start_line and end_line must be valid 1-based line numbers", true, nil
+	}
+	if args.EndLine-args.StartLine+1 > readFileRangeMaxLines {
+		return fmt.Sprintf("line range too large: %d lines (max %d)", args.EndLine-args.StartLine+1, readFileRangeMaxLines), true, nil
+	}
+	content, ok := rc.FileMap.Get(path)
+	if !ok {
+		return fmt.Sprintf("file not found: %s", path), true, nil
+	}
+	rc.MarkFileRead(path, content)
+	lines := strings.Split(content, "\n")
+	if args.StartLine > len(lines) {
+		return fmt.Sprintf("start_line %d is beyond end of file (%d lines)", args.StartLine, len(lines)), true, nil
+	}
+	end := args.EndLine
+	if end > len(lines) {
+		end = len(lines)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "===== %s lines %d-%d =====\n", path, args.StartLine, end)
+	for i := args.StartLine; i <= end; i++ {
+		fmt.Fprintf(&sb, "%4d: %s\n", i, lines[i-1])
+	}
+	return strings.TrimRight(sb.String(), "\n"), false, nil
 }
 
 // ---------- list_files ----------
@@ -672,7 +743,7 @@ func (EditFileTool) Schema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"path":        map[string]any{"type": "string"},
-			"old_string":  map[string]any{"type": "string"},
+			"old_string":  map[string]any{"type": "string", "minLength": 1},
 			"new_string":  map[string]any{"type": "string"},
 			"description": map[string]any{"type": "string"},
 		},
@@ -704,24 +775,28 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	if !ok {
 		return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
 	}
+	if msg := rc.requireCurrentFileRead(path, content); msg != "" {
+		return structuredEditError(path, "stale_read", msg, "read_file_range", ""), true, nil
+	}
 	if args.OldString == "" {
-		return "old_string must not be empty", true, nil
+		return structuredEditError(path, "old_string_empty", "old_string must not be empty", "read_file_range", ""), true, nil
 	}
 
 	count := strings.Count(content, args.OldString)
 	switch count {
 	case 0:
-		return fmt.Sprintf("old_string not found in %s — the file content may have changed since your last view. Consider using grep to find the current text before retrying", path), true, nil
+		return structuredEditError(path, "old_string_not_found", fmt.Sprintf("old_string not found in %s — the file content may have changed since your last view", path), "read_file_range", args.OldString), true, nil
 	case 1:
 		// ok
 	default:
-		return fmt.Sprintf("old_string appears %d times in %s — add more surrounding context to disambiguate", count, path), true, nil
+		return structuredEditError(path, "old_string_ambiguous", fmt.Sprintf("old_string appears %d times in %s — add more surrounding context to disambiguate", count, path), "read_file_range", args.OldString), true, nil
 	}
 	newContent := strings.Replace(content, args.OldString, args.NewString, 1)
 	if len(newContent) > maxWriteBytes {
-		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(newContent), maxWriteBytes), true, nil
+		return structuredEditError(path, "result_too_large", fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(newContent), maxWriteBytes), "read_file_range", ""), true, nil
 	}
 	rc.FileMap.Set(path, newContent)
+	rc.MarkFileRead(path, newContent)
 	if rc.BuildState != nil {
 		rc.BuildState.RecordFileWrite(path, "update")
 	}
@@ -732,7 +807,11 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 		Bytes:     len(newContent),
 		Content:   newContent,
 	})
-	return fmt.Sprintf("edited %s (1 replacement, %d bytes)", path, len(newContent)), false, nil
+	summary := strings.TrimSpace(args.Description)
+	if summary == "" {
+		summary = fmt.Sprintf("edited %s (1 replacement, %d bytes)", path, len(newContent))
+	}
+	return structuredEditSuccess(path, summary, content, newContent, 1, changedLineNumbers(content, args.OldString)), false, nil
 }
 
 // ---------- grep ----------
@@ -757,6 +836,7 @@ func (GrepTool) Schema() map[string]any {
 			"pattern": map[string]any{
 				"type":        "string",
 				"description": "Regular expression (RE2 syntax). Use \\Q...\\E or escape special chars for literal search.",
+				"minLength":   1,
 			},
 			"glob": map[string]any{
 				"type":        "string",
@@ -770,6 +850,8 @@ func (GrepTool) Schema() map[string]any {
 				"type":        "integer",
 				"description": fmt.Sprintf("Number of lines to show before and after each match. Default %d. Recommended: 25 for normal code edits, 40-80 for JSX/component blocks or multi-line replacements.", grepDefaultContextLines),
 				"default":     grepDefaultContextLines,
+				"minimum":     0,
+				"maximum":     100,
 			},
 		},
 		"required": []string{"pattern"},
@@ -791,6 +873,9 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 	}
 	if args.ContextLines == 0 {
 		args.ContextLines = grepDefaultContextLines
+	}
+	if args.ContextLines < 0 || args.ContextLines > 100 {
+		return "context_lines must be between 0 and 100", true, nil
 	}
 
 	pattern := args.Pattern
@@ -910,7 +995,7 @@ func editReplacementSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"old_string":  map[string]any{"type": "string"},
+			"old_string":  map[string]any{"type": "string", "minLength": 1},
 			"new_string":  map[string]any{"type": "string"},
 			"replace_all": map[string]any{"type": "boolean", "description": "When true, replace every occurrence of old_string. Use only for simple exact tokens you intentionally want to change globally in this file."},
 		},
@@ -1049,12 +1134,15 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		if !ok {
 			return fmt.Sprintf("file not found: %s — use write_files to create it", path), true, nil
 		}
-		nextContent, replacements, toolErr := applyEditReplacements(content, edits)
+		if msg := rc.requireCurrentFileRead(path, content); msg != "" {
+			return structuredEditError(path, "stale_read", msg, "read_file_range", ""), true, nil
+		}
+		nextContent, replacements, toolErr, errorCode, suggestedGrep := applyEditReplacements(content, edits)
 		if toolErr != "" {
-			return fmt.Sprintf("%s: %s", path, toolErr), true, nil
+			return structuredEditError(path, errorCode, fmt.Sprintf("%s: %s", path, toolErr), "read_file_range", suggestedGrep), true, nil
 		}
 		if len(nextContent) > maxWriteBytes {
-			return fmt.Sprintf("resulting file too large: %s is %d bytes (max %d)", path, len(nextContent), maxWriteBytes), true, nil
+			return structuredEditError(path, "result_too_large", fmt.Sprintf("resulting file too large: %s is %d bytes (max %d)", path, len(nextContent), maxWriteBytes), "read_file_range", ""), true, nil
 		}
 		prepared = append(prepared, preparedEdit{
 			path:         path,
@@ -1067,6 +1155,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	var totalReplacements int
 	for _, p := range prepared {
 		rc.FileMap.Set(p.path, p.nextContent)
+		rc.MarkFileRead(p.path, p.nextContent)
 		if rc.BuildState != nil {
 			rc.BuildState.RecordFileWrite(p.path, "update")
 		}
@@ -1080,27 +1169,29 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		totalReplacements += p.replacements
 	}
 	if len(prepared) == 1 {
-		return fmt.Sprintf("edited %s (%d replacements, %d bytes)", prepared[0].path, totalReplacements, len(prepared[0].nextContent)), false, nil
+		summary := fmt.Sprintf("edited %s (%d replacements, %d bytes)", prepared[0].path, totalReplacements, len(prepared[0].nextContent))
+		return structuredEditSuccess(prepared[0].path, summary, "", prepared[0].nextContent, totalReplacements, nil), false, nil
 	}
-	return fmt.Sprintf("edited %d files (%d replacements)", len(prepared), totalReplacements), false, nil
+	summary := fmt.Sprintf("edited %d files (%d replacements)", len(prepared), totalReplacements)
+	return structuredEditSuccess("", summary, "", "", totalReplacements, nil), false, nil
 }
 
-func applyEditReplacements(content string, edits []editReplacement) (string, int, string) {
+func applyEditReplacements(content string, edits []editReplacement) (string, int, string, string, string) {
 	working := content
 	totalReplacements := 0
 	for i, e := range edits {
 		if e.OldString == "" {
-			return "", 0, fmt.Sprintf("edit %d: old_string must not be empty", i+1)
+			return "", 0, fmt.Sprintf("edit %d: old_string must not be empty", i+1), "old_string_empty", ""
 		}
 		count := strings.Count(working, e.OldString)
 		switch count {
 		case 0:
-			return "", 0, fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region or the content differs from your last view. Use grep first to inspect the current state if needed", i+1)
+			return "", 0, fmt.Sprintf("edit %d: old_string not found — earlier edits may have mutated this region or the content differs from your last view. Use read_file_range to inspect the current state before retrying", i+1), "old_string_not_found", e.OldString
 		case 1:
 			// ok
 		default:
 			if !e.ReplaceAll {
-				return "", 0, fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate, or set replace_all=true only when you intentionally want every exact match changed", i+1, count)
+				return "", 0, fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate, or set replace_all=true only when you intentionally want every exact match changed", i+1, count), "old_string_ambiguous", e.OldString
 			}
 		}
 		limit := 1
@@ -1110,7 +1201,69 @@ func applyEditReplacements(content string, edits []editReplacement) (string, int
 		working = strings.Replace(working, e.OldString, e.NewString, limit)
 		totalReplacements += count
 	}
-	return working, totalReplacements, ""
+	return working, totalReplacements, "", "", ""
+}
+
+type structuredEditResult struct {
+	Changed       bool   `json:"changed"`
+	Path          string `json:"path,omitempty"`
+	Replacements  int    `json:"replacements,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	OldHash       string `json:"old_hash,omitempty"`
+	NewHash       string `json:"new_hash,omitempty"`
+	ChangedLines  []int  `json:"changed_lines,omitempty"`
+	ErrorCode     string `json:"error_code,omitempty"`
+	Error         string `json:"error,omitempty"`
+	NextStep      string `json:"next_step,omitempty"`
+	SuggestedGrep string `json:"suggested_grep,omitempty"`
+}
+
+func structuredEditSuccess(path, summary, oldContent, newContent string, replacements int, changedLines []int) string {
+	result := structuredEditResult{
+		Changed:      true,
+		Path:         path,
+		Replacements: replacements,
+		Summary:      summary,
+		ChangedLines: changedLines,
+	}
+	if oldContent != "" {
+		result.OldHash = fileContentHash(oldContent)
+	}
+	if newContent != "" {
+		result.NewHash = fileContentHash(newContent)
+	}
+	b, _ := json.Marshal(result)
+	return string(b)
+}
+
+func structuredEditError(path, code, message, nextStep, suggestedGrep string) string {
+	result := structuredEditResult{
+		Changed:       false,
+		Path:          path,
+		ErrorCode:     code,
+		Error:         message,
+		NextStep:      nextStep,
+		SuggestedGrep: suggestedGrep,
+	}
+	b, _ := json.Marshal(result)
+	return string(b)
+}
+
+func changedLineNumbers(content, oldString string) []int {
+	if oldString == "" {
+		return nil
+	}
+	idx := strings.Index(content, oldString)
+	if idx < 0 {
+		return nil
+	}
+	start := strings.Count(content[:idx], "\n") + 1
+	lines := strings.Count(oldString, "\n") + 1
+	out := make([]int, 0, lines)
+	for i := 0; i < lines; i++ {
+		out = append(out, start+i)
+	}
+	return out
 }
 
 // ---------- generate_image ----------
