@@ -895,15 +895,16 @@ type MultiEditTool struct{}
 
 func (MultiEditTool) Name() string { return "multi_edit" }
 func (MultiEditTool) Description() string {
-	return "Apply multiple surgical edits to a single file in one call. Each edit replaces one occurrence of old_string with new_string; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have ≥2 changes to the same file — same semantics, one round-trip."
+	return "Apply multiple surgical edits to a single file in one call. Each edit replaces one occurrence of old_string with new_string unless replace_all=true is set for that edit; edits run sequentially against the running content, so a later edit sees the result of earlier ones. Prefer this over multiple edit_file calls whenever you have ≥2 changes to the same file — same semantics, one round-trip."
 }
 
 func editReplacementSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"old_string": map[string]any{"type": "string"},
-			"new_string": map[string]any{"type": "string"},
+			"old_string":  map[string]any{"type": "string"},
+			"new_string":  map[string]any{"type": "string"},
+			"replace_all": map[string]any{"type": "boolean", "description": "When true, replace every occurrence of old_string. Use only for simple exact tokens you intentionally want to change globally in this file."},
 		},
 		"required": []string{"old_string", "new_string"},
 	}
@@ -941,8 +942,9 @@ func (MultiEditTool) Schema() map[string]any {
 }
 
 type editReplacement struct {
-	OldString string `json:"old_string"`
-	NewString string `json:"new_string"`
+	OldString  string `json:"old_string"`
+	NewString  string `json:"new_string"`
+	ReplaceAll bool   `json:"replace_all"`
 }
 
 func decodeEditReplacements(raw json.RawMessage) ([]editReplacement, error) {
@@ -995,6 +997,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 	}
 
 	working := content
+	totalReplacements := 0
 	for i, e := range edits {
 		if e.OldString == "" {
 			return fmt.Sprintf("edit %d: old_string must not be empty", i+1), true, nil
@@ -1006,9 +1009,16 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		case 1:
 			// ok
 		default:
-			return fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate", i+1, count), true, nil
+			if !e.ReplaceAll {
+				return fmt.Sprintf("edit %d: old_string appears %d times — add more surrounding context to disambiguate, or set replace_all=true only when you intentionally want every exact match changed", i+1, count), true, nil
+			}
 		}
-		working = strings.Replace(working, e.OldString, e.NewString, 1)
+		limit := 1
+		if e.ReplaceAll {
+			limit = -1
+		}
+		working = strings.Replace(working, e.OldString, e.NewString, limit)
+		totalReplacements += count
 	}
 	if len(working) > maxWriteBytes {
 		return fmt.Sprintf("resulting file too large: %d bytes (max %d)", len(working), maxWriteBytes), true, nil
@@ -1025,7 +1035,7 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		Bytes:     len(working),
 		Content:   working,
 	})
-	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, len(edits), len(working)), false, nil
+	return fmt.Sprintf("edited %s (%d replacements, %d bytes)", path, totalReplacements, len(working)), false, nil
 }
 
 // ---------- patch_files ----------
@@ -1036,7 +1046,7 @@ type PatchFilesTool struct{}
 
 func (PatchFilesTool) Name() string { return "patch_files" }
 func (PatchFilesTool) Description() string {
-	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit."
+	return "Apply exact-string edit batches to multiple files in one call. Use this whenever the same next action edits 2+ files. Each file entry has the same semantics as multi_edit, including per-edit replace_all=true for intentional global replacements in that file."
 }
 func (PatchFilesTool) Schema() map[string]any {
 	fileEntrySchema := map[string]any{

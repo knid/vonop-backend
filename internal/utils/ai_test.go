@@ -678,3 +678,25 @@ func TestTrimToolRoundsOlderThanTrimsAllToolCallsInOldRound(t *testing.T) {
 		t.Fatalf("recent result was trimmed: %s", messages[4].Content)
 	}
 }
+
+func TestEnsureToolCallIDsSynthesizesBeforeHistoryTracking(t *testing.T) {
+	toolCallsMap := map[int]*ToolCall{
+		0: {Function: &FunctionCall{Name: "read_files", Arguments: `{"paths":["a.tsx"]}`}},
+		1: {ID: "provider_id", Function: &FunctionCall{Name: "grep", Arguments: `{"pattern":"needle"}`}},
+	}
+
+	toolCalls := sortedToolCallsWithIDs(toolCallsMap, 3, "openrouter", "qwen")
+
+	if len(toolCalls) != 2 {
+		t.Fatalf("tool calls = %d, want 2", len(toolCalls))
+	}
+	if toolCalls[0].ID != "call_synth_3_0" {
+		t.Fatalf("synthetic id = %q, want call_synth_3_0", toolCalls[0].ID)
+	}
+	if toolCallsMap[0].ID != "call_synth_3_0" {
+		t.Fatalf("toolCallsMap id was not updated: %q", toolCallsMap[0].ID)
+	}
+	if toolCalls[1].ID != "provider_id" {
+		t.Fatalf("provider id changed: %q", toolCalls[1].ID)
+	}
+}

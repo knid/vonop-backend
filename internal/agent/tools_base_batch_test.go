@@ -307,6 +307,38 @@ func TestMultiEditTool_SchemaAdvertisesStringEdits(t *testing.T) {
 	}
 }
 
+func TestMultiEditTool_ReplaceAllReplacesEveryMatch(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("app/page.tsx", "text-gray-400 text-gray-400 text-gray-700")
+
+	out, isError, err := MultiEditTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"app/page.tsx","edits":[{"old_string":"text-gray-400","new_string":"text-foreground-muted","replace_all":true}]}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected replace_all multi_edit success, got: %s", out)
+	}
+	got, _ := rc.FileMap.Get("app/page.tsx")
+	if got != "text-foreground-muted text-foreground-muted text-gray-700" {
+		t.Fatalf("file content = %q", got)
+	}
+	if !strings.Contains(out, "2 replacements") {
+		t.Fatalf("expected replacement count in output, got: %s", out)
+	}
+}
+
+func TestMultiEditTool_SchemaAdvertisesReplaceAll(t *testing.T) {
+	schema := editReplacementSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("edit replacement schema properties missing: %#v", schema)
+	}
+	if _, ok := props["replace_all"]; !ok {
+		t.Fatalf("edit replacement schema should advertise replace_all: %#v", props)
+	}
+}
+
 func TestMultiEditTool_AcceptsStringifiedEdits(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "hello old")
