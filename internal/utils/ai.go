@@ -1173,7 +1173,40 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, er
 		req.MaxTokens = 0
 	}
 
+	req.Tools = toolsWithProviderCompatibleSchemas(req.Tools)
+
 	return req, nil
+}
+
+func toolsWithProviderCompatibleSchemas(tools []Tool) []Tool {
+	if len(tools) == 0 {
+		return tools
+	}
+	out := make([]Tool, len(tools))
+	copy(out, tools)
+	for i := range out {
+		if out[i].Type != "function" || len(out[i].Function.Parameters) == 0 {
+			continue
+		}
+		out[i].Function.Parameters = schemaWithoutRootCombinators(out[i].Function.Parameters)
+	}
+	return out
+}
+
+func schemaWithoutRootCombinators(schema map[string]any) map[string]any {
+	if len(schema) == 0 {
+		return schema
+	}
+	out := make(map[string]any, len(schema))
+	for k, v := range schema {
+		switch k {
+		case "oneOf", "allOf", "anyOf":
+			continue
+		default:
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // GetJSONFromLLM sends a system+user message to the LLM and returns the raw response text.

@@ -69,6 +69,96 @@ func TestLangfuseGenerationNameUsesProductStepNames(t *testing.T) {
 	}
 }
 
+func TestBuildLLMRequestBodyStripsRootCombinatorsForOpenRouterTools(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5:online",
+		Messages: []Message{{Role: "user", Content: "edit"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "multi_edit",
+				Parameters: map[string]any{
+					"type": "object",
+					"anyOf": []any{
+						map[string]any{"required": []any{"path", "edits"}},
+						map[string]any{"required": []any{"files"}},
+					},
+					"properties": map[string]any{
+						"edits": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "array"},
+								map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	params := function["parameters"].(map[string]any)
+	if _, ok := params["anyOf"]; ok {
+		t.Fatalf("root anyOf should be stripped: %#v", params)
+	}
+	props := params["properties"].(map[string]any)
+	edits := props["edits"].(map[string]any)
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("nested property anyOf should be preserved: %#v", edits)
+	}
+}
+
+func TestBuildLLMRequestBodyStripsRootCombinatorsForAnthropicTools(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5",
+		Messages: []Message{{Role: "user", Content: "edit"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "multi_edit",
+				Parameters: map[string]any{
+					"type":  "object",
+					"oneOf": []any{map[string]any{"required": []any{"path"}}},
+					"properties": map[string]any{
+						"edits": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "array"},
+								map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	inputSchema := tools[0].(map[string]any)["input_schema"].(map[string]any)
+	if _, ok := inputSchema["oneOf"]; ok {
+		t.Fatalf("root oneOf should be stripped: %#v", inputSchema)
+	}
+	props := inputSchema["properties"].(map[string]any)
+	edits := props["edits"].(map[string]any)
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("nested property anyOf should be preserved: %#v", edits)
+	}
+}
+
 func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	messages := make([]Message, 0, 12)
 	history := make([]toolRoundTrimState, 0, 6)
