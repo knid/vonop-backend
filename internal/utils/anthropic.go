@@ -272,7 +272,7 @@ func convertToAnthropicRequest(req ChatRequest, provider *LLMProvider) Anthropic
 			anthropicTools = append(anthropicTools, AnthropicTool{
 				Name:        t.Function.Name,
 				Description: t.Function.Description,
-				InputSchema: t.Function.Parameters,
+				InputSchema: schemaWithoutUnsupportedRootCombinators(t.Function.Parameters),
 			})
 		} else if t.ServerTool != nil {
 			st := map[string]any{

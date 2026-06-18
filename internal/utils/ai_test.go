@@ -69,6 +69,215 @@ func TestLangfuseGenerationNameUsesProductStepNames(t *testing.T) {
 	}
 }
 
+func TestBuildLLMRequestBodyStripsRootCombinatorsForOpenRouterTools(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5:online",
+		Messages: []Message{{Role: "user", Content: "edit"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "multi_edit",
+				Parameters: map[string]any{
+					"type": "object",
+					"anyOf": []any{
+						map[string]any{"required": []any{"path", "edits"}},
+						map[string]any{"required": []any{"files"}},
+					},
+					"properties": map[string]any{
+						"edits": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "array"},
+								map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	params := function["parameters"].(map[string]any)
+	if _, ok := params["anyOf"]; ok {
+		t.Fatalf("root anyOf should be stripped: %#v", params)
+	}
+	props := params["properties"].(map[string]any)
+	edits := props["edits"].(map[string]any)
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("nested property anyOf should be preserved: %#v", edits)
+	}
+}
+
+func TestBuildLLMRequestBodyStripsRootCombinatorsForAnthropicTools(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5",
+		Messages: []Message{{Role: "user", Content: "edit"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "multi_edit",
+				Parameters: map[string]any{
+					"type":  "object",
+					"oneOf": []any{map[string]any{"required": []any{"path"}}},
+					"properties": map[string]any{
+						"edits": map[string]any{
+							"anyOf": []any{
+								map[string]any{"type": "array"},
+								map[string]any{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	inputSchema := tools[0].(map[string]any)["input_schema"].(map[string]any)
+	if _, ok := inputSchema["oneOf"]; ok {
+		t.Fatalf("root oneOf should be stripped: %#v", inputSchema)
+	}
+	props := inputSchema["properties"].(map[string]any)
+	edits := props["edits"].(map[string]any)
+	if _, ok := edits["anyOf"]; !ok {
+		t.Fatalf("nested property anyOf should be preserved: %#v", edits)
+	}
+}
+
+func TestBuildLLMRequestBodyMergesRootOnlyUnionToolSchema(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5:online",
+		Messages: []Message{{Role: "user", Content: "search"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "mcp_search",
+				Parameters: map[string]any{
+					"anyOf": []any{
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"query": map[string]any{"type": "string"},
+								"limit": map[string]any{"type": "integer"},
+							},
+							"required": []any{"query"},
+						},
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"url":   map[string]any{"type": "string"},
+								"limit": map[string]any{"type": "integer"},
+							},
+							"required": []any{"url"},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	params := function["parameters"].(map[string]any)
+	if _, ok := params["anyOf"]; ok {
+		t.Fatalf("root anyOf should be stripped: %#v", params)
+	}
+	if got := params["type"]; got != "object" {
+		t.Fatalf("merged schema type = %#v, want object", got)
+	}
+	props := params["properties"].(map[string]any)
+	for _, name := range []string{"query", "url", "limit"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("merged schema missing property %q: %#v", name, props)
+		}
+	}
+	if _, ok := params["required"]; ok {
+		t.Fatalf("anyOf-only alternatives should not force variant-specific required fields: %#v", params["required"])
+	}
+}
+
+func TestBuildLLMRequestBodyMergesRootAllOfRequiredFields(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "anthropic/claude-haiku-4.5:online",
+		Messages: []Message{{Role: "user", Content: "search"}},
+		Tools: []Tool{{
+			Type: "function",
+			Function: ToolFunction{
+				Name: "mcp_search",
+				Parameters: map[string]any{
+					"allOf": []any{
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"query": map[string]any{"type": "string"},
+							},
+							"required": []any{"query"},
+						},
+						map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"limit": map[string]any{"type": "integer"},
+							},
+							"required": []any{"limit"},
+						},
+					},
+				},
+			},
+		}},
+	}, &LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1"})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	tools := payload["tools"].([]any)
+	function := tools[0].(map[string]any)["function"].(map[string]any)
+	params := function["parameters"].(map[string]any)
+	if _, ok := params["allOf"]; ok {
+		t.Fatalf("root allOf should be stripped: %#v", params)
+	}
+	props := params["properties"].(map[string]any)
+	for _, name := range []string{"query", "limit"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("merged schema missing property %q: %#v", name, props)
+		}
+	}
+	required := map[string]bool{}
+	for _, raw := range params["required"].([]any) {
+		required[raw.(string)] = true
+	}
+	for _, name := range []string{"query", "limit"} {
+		if !required[name] {
+			t.Fatalf("merged allOf required missing %q: %#v", name, params["required"])
+		}
+	}
+}
+
 func TestTrimToolRoundsOlderThanKeepsRecentRoundsUntrimmed(t *testing.T) {
 	messages := make([]Message, 0, 12)
 	history := make([]toolRoundTrimState, 0, 6)
