@@ -588,7 +588,7 @@ func TestStreamWithToolsCompactsBeforeMaxMessageTrim(t *testing.T) {
 		{Role: "assistant", Content: "old assistant 1"},
 		{Role: "user", Content: "old user 2"},
 		{Role: "assistant", Content: "old assistant 2"},
-		{Role: "user", Content: "CURRENT RUN CONTEXT\n===================\n\nfiles\n\nUSER REQUEST\n============\n\nfinish"},
+		{Role: "user", Content: "finish"},
 	}
 
 	_, err := StreamWithTools(
@@ -622,6 +622,65 @@ func TestStreamWithToolsCompactsBeforeMaxMessageTrim(t *testing.T) {
 	}
 	if compactSawMessages != len(messages) {
 		t.Fatalf("CompactHistory saw %d messages, want untrimmed %d", compactSawMessages, len(messages))
+	}
+}
+
+func TestStreamWithToolsSecondRoundPreservesCurrentUserMessage(t *testing.T) {
+	const userRequest = "i want to be able to manage and add main tasks like sleep, work etc"
+	var secondRoundBody string
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests == 1 {
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"I'll inspect first."}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"list_files","arguments":"{\"glob\":\"frontend/src/**/*\"}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}`)
+			fmt.Fprintln(w, "data: [DONE]")
+			return
+		}
+		secondRoundBody = string(body)
+		fmt.Fprintln(w, `data: {"choices":[{"delta":{"content":"Done."}}]}`)
+		fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"stop","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}`)
+		fmt.Fprintln(w, "data: [DONE]")
+	}))
+	defer server.Close()
+
+	oldClient := llmStreamingClient
+	llmStreamingClient = server.Client()
+	t.Cleanup(func() {
+		llmStreamingClient = oldClient
+	})
+
+	_, err := StreamWithTools(
+		context.Background(),
+		"test-model",
+		[]Message{{Role: "user", Content: userRequest}},
+		[]Tool{{Type: "function", Function: ToolFunction{Name: "list_files"}}},
+		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
+		nil,
+		nil,
+		func(name, arguments string) (string, error) {
+			return "frontend/src/App.tsx", nil
+		},
+		nil,
+		nil,
+		nil,
+		ToolCallConfig{MaxRounds: 2},
+	)
+
+	if err != nil {
+		t.Fatalf("StreamWithTools returned error: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if !strings.Contains(secondRoundBody, userRequest) {
+		t.Fatalf("second round request lost user message: %s", secondRoundBody)
+	}
+	if strings.Contains(secondRoundBody, "CURRENT RUN CONTEXT") || strings.Contains(secondRoundBody, "USER REQUEST") {
+		t.Fatalf("second round request contains synthetic context markers: %s", secondRoundBody)
 	}
 }
 
@@ -674,6 +733,62 @@ func TestTrimToolRoundsOlderThanTrimsAllToolCallsInOldRound(t *testing.T) {
 	}
 	if messages[4].Content != "full write result" {
 		t.Fatalf("recent result was trimmed: %s", messages[4].Content)
+	}
+}
+
+func TestTrimToolCallsForWindowKeepsFullTruncatedAndDropsOlderCalls(t *testing.T) {
+	messages := []Message{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{ID: "tc1", Function: &FunctionCall{Name: "read_files", Arguments: `{"paths":["a.tsx"]}`}},
+				{ID: "tc2", Function: &FunctionCall{Name: "grep", Arguments: `{"pattern":"needle"}`}},
+			},
+		},
+		{Role: "tool", ToolCallID: "tc1", Name: "read_files", Content: "result 1"},
+		{Role: "tool", ToolCallID: "tc2", Name: "grep", Content: "result 2"},
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{ID: "tc3", Function: &FunctionCall{Name: "read_files", Arguments: `{"paths":["b.tsx"]}`}},
+				{ID: "tc4", Function: &FunctionCall{Name: "edit_file", Arguments: `{"path":"c.tsx","old_string":"a","new_string":"b"}`}},
+			},
+		},
+		{Role: "tool", ToolCallID: "tc3", Name: "read_files", Content: "result 3"},
+		{Role: "tool", ToolCallID: "tc4", Name: "edit_file", Content: "result 4"},
+	}
+
+	out := trimToolCallsForWindow(
+		messages,
+		1,
+		2,
+		func(toolName, args string) string { return "trimmed args " + toolName },
+		func(toolName, result string) string { return "trimmed result " + toolName },
+	)
+
+	var body strings.Builder
+	for _, msg := range out {
+		body.WriteString(msg.Content)
+		body.WriteString("\n")
+		for _, tc := range msg.ToolCalls {
+			body.WriteString(tc.ID)
+			body.WriteString(":")
+			body.WriteString(tc.Function.Arguments)
+			body.WriteString("\n")
+		}
+	}
+	got := body.String()
+	if strings.Contains(got, "tc1") || strings.Contains(got, "result 1") {
+		t.Fatalf("oldest tool call was not dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "tc2:trimmed args grep") || !strings.Contains(got, "trimmed result grep") {
+		t.Fatalf("first retained older call was not truncated:\n%s", got)
+	}
+	if !strings.Contains(got, "tc3:trimmed args read_files") || !strings.Contains(got, "trimmed result read_files") {
+		t.Fatalf("second retained older call was not truncated:\n%s", got)
+	}
+	if !strings.Contains(got, `tc4:{"path":"c.tsx","old_string":"a","new_string":"b"}`) || !strings.Contains(got, "result 4") {
+		t.Fatalf("latest call was not kept full:\n%s", got)
 	}
 }
 

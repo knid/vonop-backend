@@ -85,6 +85,7 @@ func Run(
 		provider   *utils.LLMProvider
 		model      string
 		isFirstGen bool
+		historyCfg HistoryWindowConfig
 		preCommit  string
 		todos      *TodoList
 		memory     *AgentRunMemory
@@ -133,6 +134,7 @@ func Run(
 		provider = deps.LLMProvider
 		model = resolveModel(deps.SecretManager, project, provider)
 		isFirstGen = project != nil && project.Status == "draft"
+		historyCfg = historyWindowConfigForRun(isFirstGen, deps.RemoteConfig)
 		todos = NewTodoList(message)
 		memory = NewAgentRunMemory(message)
 		run = &models.AppAgentRun{
@@ -155,7 +157,7 @@ func Run(
 		}
 
 		// --- Step 7: load conversation history (BEFORE inserting the current turn) ---
-		h, err := deps.DB.GetRecentChatMessages(project.ID, historyLimitForRun(project != nil && project.Status == "draft"))
+		h, err := deps.DB.GetAgentHistoryMessages(project.ID, historyCfg.KeepLastMessages, historyToolMessageLimitForRun(historyCfg))
 		if err != nil {
 			slog.Warn("failed to load history, starting fresh", "error", err, "project_id", project.ID)
 			h = nil
@@ -243,7 +245,7 @@ func Run(
 		return err
 	}
 
-	llmMessages = append(llmMessages, convertHistoryForRun(history, isFirstGen)...)
+	llmMessages = append(llmMessages, convertHistoryForRun(history, historyCfg)...)
 
 	// Append the current turn explicitly — we don't rely on history reload
 	// to round-trip images, and we want the turn to land even if history
@@ -437,57 +439,15 @@ func Run(
 			maxTokensPerRun = rcTokens
 		}
 	}
-	compactAfterTokens := 250_000
-	compactIntervalTokens := 150_000
 	trimToolResultChars := 4_000
 	trimToolArgChars := 1_200
-	keepRecentToolRounds := 2
-	if project.Status == "draft" {
-		keepRecentToolRounds = 5
-	}
 	if deps.RemoteConfig != nil {
-		compactAfterTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactAfterTokens, remoteconfig.Global)
-		compactIntervalTokens = deps.RemoteConfig.GetInt(remoteconfig.AICompactIntervalTokens, remoteconfig.Global)
 		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolResultChars, remoteconfig.Global); rcTrim > 0 {
 			trimToolResultChars = rcTrim
 		}
 		if rcTrim := deps.RemoteConfig.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global); rcTrim > 0 {
 			trimToolArgChars = rcTrim
 		}
-		if project.Status == "draft" {
-			if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIGenerationKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
-				keepRecentToolRounds = rcKeep
-			}
-		} else {
-			if rcKeep := deps.RemoteConfig.GetInt(remoteconfig.AIBuilderKeepRecentToolRounds, remoteconfig.Global); rcKeep > 0 {
-				keepRecentToolRounds = rcKeep
-			}
-		}
-	}
-	if compactIntervalTokens <= 0 {
-		compactIntervalTokens = compactAfterTokens
-	}
-
-	// Define refreshRunPrefix here so it can access tracker and maxTokensPerRun
-	refreshRunPrefix := func(msg *utils.Message) {
-		prefix := renderRunPrefix(fileMap, buildState, todos)
-		if prefix == "" {
-			return
-		}
-
-		// Proactive budget guardrail: warn the LLM when approaching the token limit
-		budgetWarning := ""
-		if tracker != nil {
-			if _, _, total, _ := tracker.Totals(); total > (maxTokensPerRun * 8 / 10) {
-				budgetWarning = "\n\n⚠️ BUDGET WARNING: You are approaching the token limit for this run. Please conclude your current task, summarize your findings, and ask the user for the next step. Do not start new large file reads or complex refactors.\n"
-			}
-		}
-
-		refreshRunContextMessage(msg, prefix, budgetWarning, false)
-	}
-	initialPrefix := renderRunPrefix(fileMap, buildState, todos)
-	if initialPrefix != "" {
-		refreshRunContextMessage(&userTurn, initialPrefix, "", true)
 	}
 
 	rc := &RunContext{
@@ -606,7 +566,6 @@ func Run(
 	}
 
 	repetition := newRepetitionDetector()
-	lastCompactedTokens := 0
 
 	narrationSink := func(chunk string) {
 		if chunk == "" {
@@ -685,38 +644,14 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:            64000,
-			MaxMessages:          25,
-			KeepRecentToolRounds: keepRecentToolRounds,
-			RefreshPrefix:        refreshRunPrefix,
+			MaxTokens:              64000,
+			KeepRecentToolCalls:    historyCfg.KeepLastToolResults,
+			KeepTruncatedToolCalls: historyCfg.KeepLastTruncatedToolResults,
 			TrimResults: func(toolName, result string) string {
 				return trimToolResultForLLM(toolName, result, trimToolResultChars)
 			},
 			TrimArgs: func(toolName, args string) string {
 				return trimToolArgsForLLM(toolName, args, trimToolArgChars)
-			},
-			CompactHistory: func(messages []utils.Message) ([]utils.Message, bool) {
-				if compactAfterTokens <= 0 {
-					return messages, false
-				}
-				_, _, total, _ := tracker.Totals()
-				if total < compactAfterTokens {
-					return messages, false
-				}
-				if lastCompactedTokens > 0 && total-lastCompactedTokens < compactIntervalTokens {
-					return messages, false
-				}
-				compacted := compactLLMHistory(messages, memory, todos, 12)
-				lastCompactedTokens = total
-				if llmMessagesEqual(compacted, messages) {
-					return messages, false
-				}
-				memory.Persist(ctx, deps.DB, runID)
-				slog.Info("agent compacted LLM history",
-					"project_id", project.ID, "run_id", runID,
-					"tokens", total, "compact_after", compactAfterTokens,
-					"messages_before", len(messages), "messages_after", len(compacted))
-				return compacted, true
 			},
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
@@ -1527,27 +1462,6 @@ func failureDisplayMessage(message string, wrapped error) string {
 		return msg
 	}
 	return msg + ": " + detail
-}
-
-const userRequestMarker = "\n\nUSER REQUEST\n============\n\n"
-
-func refreshRunContextMessage(msg *utils.Message, prefix, budgetWarning string, includeUserRequest bool) {
-	if msg == nil || prefix == "" {
-		return
-	}
-	content := msg.Content
-	if strings.HasPrefix(content, "CURRENT RUN CONTEXT\n") {
-		if idx := strings.Index(content, userRequestMarker); idx >= 0 {
-			content = content[idx+len(userRequestMarker):]
-		} else {
-			content = ""
-		}
-	}
-	next := "CURRENT RUN CONTEXT\n===================\n\n" + prefix + budgetWarning
-	if includeUserRequest {
-		next += userRequestMarker + content
-	}
-	msg.Content = next
 }
 
 // isUniqueViolation returns true if err is a Postgres unique-constraint

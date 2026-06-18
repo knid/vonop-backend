@@ -219,14 +219,6 @@ func compactLLMHistory(messages []utils.Message, memory *AgentRunMemory, todos *
 		systemCount++
 	}
 
-	pinnedIdx := -1
-	for i := systemCount; i < len(filtered); i++ {
-		if filtered[i].Role == "user" && strings.HasPrefix(filtered[i].Content, "CURRENT RUN CONTEXT\n") {
-			pinnedIdx = i
-			break
-		}
-	}
-
 	tailStart := len(filtered) - keepTail
 	if tailStart < systemCount {
 		tailStart = systemCount
@@ -238,9 +230,6 @@ func compactLLMHistory(messages []utils.Message, memory *AgentRunMemory, todos *
 	out := make([]utils.Message, 0, systemCount+keepTail+2)
 	out = append(out, filtered[:systemCount]...)
 	out = append(out, utils.Message{Role: "user", Content: memory.Render(todos)})
-	if pinnedIdx >= systemCount && pinnedIdx < tailStart {
-		out = append(out, filtered[pinnedIdx])
-	}
 	out = append(out, filtered[tailStart:]...)
 	if llmMessagesEqual(out, messages) {
 		return messages

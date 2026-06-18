@@ -100,6 +100,12 @@ var AITrimToolArgChars = Key{Flag: "rc-ai-trim-tool-arg-chars", Fallback: 1000}
 var AIKeepRecentToolRounds = Key{Flag: "rc-ai-keep-recent-tool-rounds", Fallback: 5}
 var AIBuilderKeepRecentToolRounds = Key{Flag: "rc-ai-builder-keep-recent-tool-rounds", Fallback: 2}
 var AIGenerationKeepRecentToolRounds = Key{Flag: "rc-ai-generation-keep-recent-tool-rounds", Fallback: 5}
+var AIBuilderKeepLastMessages = Key{Flag: "rc-ai-builder-keep-last-messages", Fallback: 15}
+var AIBuilderKeepLastToolResults = Key{Flag: "rc-ai-builder-keep-last-tool-results", Fallback: 5}
+var AIBuilderKeepLastTruncatedToolResults = Key{Flag: "rc-ai-builder-keep-last-truncated-tool-results", Fallback: 10}
+var AIGenerationKeepLastMessages = Key{Flag: "rc-ai-generation-keep-last-messages", Fallback: 15}
+var AIGenerationKeepLastToolResults = Key{Flag: "rc-ai-generation-keep-last-tool-results", Fallback: 5}
+var AIGenerationKeepLastTruncatedToolResults = Key{Flag: "rc-ai-generation-keep-last-truncated-tool-results", Fallback: 10}
 var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
 // Nudge/Strip thresholds per project type. Draft (new project) gets more lenient

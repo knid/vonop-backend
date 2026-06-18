@@ -53,24 +53,6 @@ func TestToolRoundLimitClassificationTellsUserToContinue(t *testing.T) {
 	assert.Contains(t, humanizeErrorKind("tool_rounds_exceeded"), "continue")
 }
 
-func TestRefreshRunContextMessageDoesNotRepeatUserRequest(t *testing.T) {
-	msg := utils.Message{Role: "user", Content: "remove that limit feature"}
-
-	refreshRunContextMessage(&msg, "FILE TREE\nfirst\n", "", true)
-
-	assert.Contains(t, msg.Content, "CURRENT RUN CONTEXT")
-	assert.Contains(t, msg.Content, "USER REQUEST")
-	assert.Contains(t, msg.Content, "remove that limit feature")
-
-	refreshRunContextMessage(&msg, "FILE TREE\nsecond\n", "", false)
-
-	assert.Contains(t, msg.Content, "CURRENT RUN CONTEXT")
-	assert.Contains(t, msg.Content, "FILE TREE\nsecond")
-	assert.NotContains(t, msg.Content, "FILE TREE\nfirst")
-	assert.NotContains(t, msg.Content, "USER REQUEST")
-	assert.NotContains(t, msg.Content, "remove that limit feature")
-}
-
 func TestLangfuseSessionIDUsesConversationID(t *testing.T) {
 	conversationID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	projectID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
@@ -107,6 +89,15 @@ func TestRunExecutionHasEmptyRunIDStringWhenUnset(t *testing.T) {
 	exec := &RunExecution{}
 
 	assert.Equal(t, "", exec.RunIDString())
+}
+
+func concatUtilsMessages(msgs []utils.Message) string {
+	var b strings.Builder
+	for _, msg := range msgs {
+		b.WriteString(msg.Content)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func TestNewAgentRunWorkflowUsesDefaultLoop(t *testing.T) {
@@ -241,38 +232,90 @@ func TestConvertHistory_AssistantReasoningAndText(t *testing.T) {
 	assert.Empty(t, out[0].ReasoningContent)
 }
 
-func TestConvertHistoryForRun_EditKeepsSixMessagesAndFourToolResults(t *testing.T) {
+func TestConvertHistoryForRun_KeepsMessagesFullAndTruncatedToolResults(t *testing.T) {
 	var history []models.AppChatMessage
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 20; i++ {
 		history = append(history, models.AppChatMessage{Role: "user", Content: "old user"})
 	}
-	for i := 0; i < 6; i++ {
+	for i := 0; i < 18; i++ {
 		parts, _ := json.Marshal([]models.ChatMessagePart{
 			{Type: "text", Text: "assistant"},
-			{Type: "tool_call", ToolCallID: "tc" + string(rune('a'+i)), Name: "read_files", Input: []byte(`{"paths":["a.tsx"]}`), Result: "result"},
+			{Type: "tool_call", ToolCallID: "tc" + string(rune('a'+i)), Name: "read_files", Input: []byte(`{"paths":["a.tsx"]}`), Result: "result " + string(rune('a'+i))},
 		})
 		history = append(history, models.AppChatMessage{Role: "assistant", Content: "assistant", Parts: parts})
 	}
 
-	out := convertHistoryForRun(history, false)
+	out := convertHistoryForRun(history, defaultHistoryWindowConfig())
 
 	userOrAssistant := 0
 	toolResults := 0
+	truncatedToolResults := 0
 	for _, msg := range out {
 		if msg.Role == "user" || msg.Role == "assistant" {
 			userOrAssistant++
 		}
 		if msg.Role == "tool" {
 			toolResults++
+			if strings.Contains(msg.Content, "Tool result truncated") {
+				truncatedToolResults++
+			}
 		}
 	}
-	assert.LessOrEqual(t, userOrAssistant, 6)
-	assert.Equal(t, 4, toolResults)
+	assert.LessOrEqual(t, userOrAssistant, KeepLastMessages)
+	assert.Equal(t, KeepLastToolResults+KeepLastTruncatedToolResults, toolResults)
+	assert.Equal(t, KeepLastTruncatedToolResults, truncatedToolResults)
 }
 
 func TestHistoryLimitForRun(t *testing.T) {
-	assert.Equal(t, 6, historyLimitForRun(false))
-	assert.Equal(t, 10, historyLimitForRun(true))
+	assert.Equal(t, 15, historyToolMessageLimitForRun(defaultHistoryWindowConfig()))
+}
+
+func TestConvertHistoryForRun_KeepsToolUsageOutsideTranscriptWindow(t *testing.T) {
+	var history []models.AppChatMessage
+	for i := 0; i < KeepLastMessages; i++ {
+		history = append(history, models.AppChatMessage{Role: "user", Content: "recent text"})
+	}
+	parts, _ := json.Marshal([]models.ChatMessagePart{
+		{Type: "text", Text: "old assistant"},
+		{Type: "tool_call", ToolCallID: "tc-old", Name: "read_files", Input: []byte(`{"paths":["old.tsx"]}`), Result: "old tool result"},
+	})
+	history = append([]models.AppChatMessage{{Role: "assistant", Content: "old assistant", Parts: parts}}, history...)
+
+	out := convertHistoryForRun(history, defaultHistoryWindowConfig())
+
+	joined := concatUtilsMessages(out)
+	assert.NotContains(t, joined, "old assistant")
+	assert.Contains(t, joined, "old tool result")
+}
+
+func TestHistoryWindowKeysForRunUsesBuilderKeysForEdits(t *testing.T) {
+	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(false)
+
+	assert.Equal(t, "rc-ai-builder-keep-last-messages", messageKey.Flag)
+	assert.Equal(t, "rc-ai-builder-keep-last-tool-results", fullToolKey.Flag)
+	assert.Equal(t, "rc-ai-builder-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+}
+
+func TestHistoryWindowKeysForRunUsesGenerationKeysForFirstGen(t *testing.T) {
+	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(true)
+
+	assert.Equal(t, "rc-ai-generation-keep-last-messages", messageKey.Flag)
+	assert.Equal(t, "rc-ai-generation-keep-last-tool-results", fullToolKey.Flag)
+	assert.Equal(t, "rc-ai-generation-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+}
+
+func TestConvertHistoryForRunDoesNotInjectRunContextMarkers(t *testing.T) {
+	history := []models.AppChatMessage{
+		{Role: "user", Content: "i want to be able to manage and add main tasks like sleep, work etc"},
+		{Role: "assistant", Content: "I will inspect the app."},
+	}
+
+	out := convertHistoryForRun(history, defaultHistoryWindowConfig())
+
+	joined := concatUtilsMessages(out)
+	assert.Contains(t, joined, "i want to be able to manage and add main tasks like sleep, work etc")
+	assert.NotContains(t, joined, "CURRENT RUN CONTEXT")
+	assert.NotContains(t, joined, "USER REQUEST")
 }
 
 func TestConvertHistory_AssistantSingleToolRound(t *testing.T) {
