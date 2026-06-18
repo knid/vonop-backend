@@ -474,13 +474,6 @@ func Run(
 		if prefix == "" {
 			return
 		}
-		c := msg.Content
-		const requestMarker = "\n\nUSER REQUEST\n============\n\n"
-		if strings.HasPrefix(c, "CURRENT RUN CONTEXT\n") {
-			if idx := strings.Index(c, requestMarker); idx >= 0 {
-				c = c[idx+len(requestMarker):]
-			}
-		}
 
 		// Proactive budget guardrail: warn the LLM when approaching the token limit
 		budgetWarning := ""
@@ -490,9 +483,12 @@ func Run(
 			}
 		}
 
-		msg.Content = "CURRENT RUN CONTEXT\n===================\n\n" + prefix + budgetWarning + requestMarker + c
+		refreshRunContextMessage(msg, prefix, budgetWarning, false)
 	}
-	refreshRunPrefix(&userTurn)
+	initialPrefix := renderRunPrefix(fileMap, buildState, todos)
+	if initialPrefix != "" {
+		refreshRunContextMessage(&userTurn, initialPrefix, "", true)
+	}
 
 	rc := &RunContext{
 		RunID:          runID,
@@ -1531,6 +1527,27 @@ func failureDisplayMessage(message string, wrapped error) string {
 		return msg
 	}
 	return msg + ": " + detail
+}
+
+const userRequestMarker = "\n\nUSER REQUEST\n============\n\n"
+
+func refreshRunContextMessage(msg *utils.Message, prefix, budgetWarning string, includeUserRequest bool) {
+	if msg == nil || prefix == "" {
+		return
+	}
+	content := msg.Content
+	if strings.HasPrefix(content, "CURRENT RUN CONTEXT\n") {
+		if idx := strings.Index(content, userRequestMarker); idx >= 0 {
+			content = content[idx+len(userRequestMarker):]
+		} else {
+			content = ""
+		}
+	}
+	next := "CURRENT RUN CONTEXT\n===================\n\n" + prefix + budgetWarning
+	if includeUserRequest {
+		next += userRequestMarker + content
+	}
+	msg.Content = next
 }
 
 // isUniqueViolation returns true if err is a Postgres unique-constraint
