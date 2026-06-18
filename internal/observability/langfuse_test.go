@@ -1,6 +1,8 @@
 package observability
 
 import (
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -257,12 +259,17 @@ func TestGenerationAttributesLinkPrompt(t *testing.T) {
 }
 
 func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
-	attrs := attrsByKey(ToolAttributes("write_files", `{"path":"app/page.tsx"}`, true, 250))
+	output := "old_string not found"
+	outputHash := sha256.Sum256([]byte(output))
+	attrs := attrsByKey(ToolAttributes("write_files", `{"path":"app/page.tsx"}`, output, true, 250))
 
 	assertStringAttr(t, attrs, "langfuse.observation.type", "tool")
 	assertStringAttr(t, attrs, "langfuse.observation.level", "ERROR")
 	assertStringAttr(t, attrs, "langfuse.observation.metadata.tool_name", "write_files")
 	assertStringAttr(t, attrs, "langfuse.observation.input", `{"path":"app/page.tsx"}`)
+	assertStringAttr(t, attrs, "langfuse.observation.output", output)
+	assertIntAttr(t, attrs, "langfuse.observation.metadata.output_bytes", int64(len(output)))
+	assertStringAttr(t, attrs, "langfuse.observation.metadata.output_sha256", fmt.Sprintf("%x", outputHash[:]))
 	assertBoolAttr(t, attrs, "langfuse.observation.metadata.is_error", true)
 	assertIntAttr(t, attrs, "langfuse.observation.metadata.duration_ms", 250)
 }
@@ -279,7 +286,7 @@ func TestTruncateLangfusePayload(t *testing.T) {
 
 func TestToolAttributesCapInputPayload(t *testing.T) {
 	input := strings.Repeat("a", maxToolInputPayload+1)
-	attrs := attrsByKey(ToolAttributes("write_files", input, false, 1))
+	attrs := attrsByKey(ToolAttributes("write_files", input, "", false, 1))
 
 	got := attrs["langfuse.observation.input"].AsString()
 	if len(got) <= maxToolInputPayload {

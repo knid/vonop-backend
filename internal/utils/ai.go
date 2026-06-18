@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/knid/wemob/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -867,7 +869,7 @@ type FunctionCall struct {
 
 // ToolExecutor is called when the LLM wants to use a tool.
 // Returns the tool result as a string.
-type ToolExecutor func(name string, arguments string) (string, error)
+type ToolExecutor func(ctx context.Context, name string, arguments string) (string, error)
 
 // ReasoningConfig controls thinking/reasoning mode on OpenRouter.
 // See https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
@@ -1569,6 +1571,30 @@ func StreamWithTools(
 		if len(opts) > 0 && opts[0].OnRoundStart != nil {
 			opts[0].OnRoundStart(round)
 		}
+		roundCtx, roundSpan := observability.Tracer().Start(ctx,
+			fmt.Sprintf("agent.round.%d", round),
+			trace.WithAttributes(
+				attribute.String("langfuse.observation.type", "agent"),
+				attribute.Int("langfuse.observation.metadata.round", round),
+				attribute.Int("langfuse.observation.metadata.max_rounds", maxRounds),
+				attribute.Int("langfuse.observation.metadata.history_messages", len(currentMessages)),
+			),
+		)
+		roundEnded := false
+		endRound := func(err error) {
+			if roundEnded {
+				return
+			}
+			roundEnded = true
+			if err != nil {
+				roundSpan.SetStatus(codes.Error, err.Error())
+				roundSpan.SetAttributes(
+					attribute.String("langfuse.observation.level", "ERROR"),
+					attribute.String("langfuse.observation.status_message", err.Error()),
+				)
+			}
+			roundSpan.End()
+		}
 		if len(opts) > 0 {
 			if keepRecentToolCalls > 0 || keepTruncatedToolCalls > 0 {
 				currentMessages = trimToolCallsForWindow(
@@ -1596,7 +1622,9 @@ func StreamWithTools(
 			roundTools = filterToolsByDeniedNames(roundTools, recoveryToolDenylist)
 		}
 		if ctx.Err() != nil {
-			return "", ctx.Err()
+			err := ctx.Err()
+			endRound(err)
+			return "", err
 		}
 
 		// Refresh the user-turn prefix before each round so the model sees
@@ -1695,12 +1723,16 @@ func StreamWithTools(
 			SessionID:      sessionID,
 		}, provider)
 		if err != nil {
-			return "", fmt.Errorf("round %d: error building request: %w", round, err)
+			err = fmt.Errorf("round %d: error building request: %w", round, err)
+			endRound(err)
+			return "", err
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", provider.Endpoint(), bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(roundCtx, "POST", provider.Endpoint(), bytes.NewReader(body))
 		if err != nil {
-			return "", fmt.Errorf("round %d: error creating LLM request: %w", round, err)
+			err = fmt.Errorf("round %d: error creating LLM request: %w", round, err)
+			endRound(err)
+			return "", err
 		}
 		SetLLMHeaders(req, provider)
 
@@ -1715,13 +1747,18 @@ func StreamWithTools(
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
-					return "", ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return "", err
 				}
+				endRound(nil)
 				round-- // retry same round
 				continue
 			}
 			slog.Error("Error making streaming request to LLM:", "error", err, "round", round)
-			return "", fmt.Errorf("round %d: error generating content: %w", round, err)
+			err = fmt.Errorf("round %d: error generating content: %w", round, err)
+			endRound(err)
+			return "", err
 		}
 
 		if resp.StatusCode != http.StatusOK {
@@ -1733,6 +1770,7 @@ func StreamWithTools(
 					provider = newProvider
 					model = newModel
 					fallbackAttempted = true
+					endRound(nil)
 					round-- // retry same round with fallback provider
 					continue
 				}
@@ -1746,21 +1784,28 @@ func StreamWithTools(
 				}
 				if deadline, ok := ctx.Deadline(); ok {
 					if time.Until(deadline) < wait {
-						return "", fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+						err := fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+						endRound(err)
+						return "", err
 					}
 				}
 				slog.Warn("LLM rate limited, retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
-					return "", ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return "", err
 				}
+				endRound(nil)
 				round-- // retry same round
 				continue
 			}
 			// OpenRouter 402 = insufficient credits — permanent error, do not retry
 			if resp.StatusCode == 402 {
-				return "", &ErrPermanentLLM{ErrorType: "payment_required", Message: "OpenRouter account has insufficient credits"}
+				err := &ErrPermanentLLM{ErrorType: "payment_required", Message: "OpenRouter account has insufficient credits"}
+				endRound(err)
+				return "", err
 			}
 			// Retry transient server errors (500, 502, 503) up to 3 times
 			if resp.StatusCode >= 500 && resp.StatusCode != 529 && transientRetries < 3 {
@@ -1770,16 +1815,22 @@ func StreamWithTools(
 				select {
 				case <-time.After(wait):
 				case <-ctx.Done():
-					return "", ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return "", err
 				}
+				endRound(nil)
 				round-- // retry same round
 				continue
 			}
 			slog.Error("LLM streaming returned non-200", "status", resp.StatusCode, "body", string(respBody), "round", round)
 			if rlErr := parseRateLimitError(resp, respBody); rlErr != nil {
+				endRound(rlErr)
 				return "", rlErr
 			}
-			return "", fmt.Errorf("round %d: LLM returned status %d", round, resp.StatusCode)
+			err := fmt.Errorf("round %d: LLM returned status %d", round, resp.StatusCode)
+			endRound(err)
+			return "", err
 		}
 		rateLimitRetries = 0 // reset after successful request
 		transientRetries = 0
@@ -1812,11 +1863,14 @@ func StreamWithTools(
 
 			if parseErr != nil {
 				if ctx.Err() != nil {
-					return "", ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return "", err
 				}
 				// Permanent errors — never retry
 				if IsPermanentError(parseErr) {
 					slog.Error("LLM permanent error in tool round", "error", parseErr, "round", round)
+					endRound(parseErr)
 					return "", parseErr
 				}
 				// One-shot fallback to secondary provider on overload (before backoff)
@@ -1825,6 +1879,7 @@ func StreamWithTools(
 						provider = newProvider
 						model = newModel
 						fallbackAttempted = true
+						endRound(nil)
 						round-- // retry same round with fallback provider
 						continue
 					}
@@ -1838,23 +1893,31 @@ func StreamWithTools(
 					}
 					if deadline, ok := ctx.Deadline(); ok {
 						if time.Until(deadline) < wait {
-							return "", fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+							err := fmt.Errorf("context deadline too short for rate-limit backoff (%s remaining, need %s)", time.Until(deadline), wait)
+							endRound(err)
+							return "", err
 						}
 					}
 					slog.Warn("LLM rate limited (SSE), retrying", "retry_after", wait, "attempt", rateLimitRetries, "round", round)
 					select {
 					case <-time.After(wait):
 					case <-ctx.Done():
-						return "", ctx.Err()
+						err := ctx.Err()
+						endRound(err)
+						return "", err
 					}
+					endRound(nil)
 					round-- // retry same round
 					continue
 				}
 				slog.Error("error parsing Anthropic SSE stream", "error", parseErr, "round", round)
 				if rlErr, ok := IsRateLimited(parseErr); ok {
+					endRound(rlErr)
 					return "", rlErr
 				}
-				return "", fmt.Errorf("round %d: error reading streaming response: %w", round, parseErr)
+				err := fmt.Errorf("round %d: error reading streaming response: %w", round, parseErr)
+				endRound(err)
+				return "", err
 			}
 
 			if len(result.Text) > maxResponseBufferSize {
@@ -1883,7 +1946,9 @@ func StreamWithTools(
 			for scanner.Scan() {
 				if ctx.Err() != nil {
 					resp.Body.Close()
-					return fullText.String(), ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return fullText.String(), err
 				}
 
 				line := scanner.Text()
@@ -1990,10 +2055,14 @@ func StreamWithTools(
 
 			if scanErr != nil {
 				if ctx.Err() != nil {
-					return fullText.String(), ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return fullText.String(), err
 				}
 				slog.Error("scanner error during LLM streaming with tools", "error", scanErr, "round", round)
-				return "", fmt.Errorf("round %d: error reading streaming response: %w", round, scanErr)
+				err := fmt.Errorf("round %d: error reading streaming response: %w", round, scanErr)
+				endRound(err)
+				return "", err
 			}
 		}
 
@@ -2008,7 +2077,7 @@ func StreamWithTools(
 				"latency_ms", roundLatency,
 				"tool_calls", len(toolCallsMap),
 				"history_msgs", len(currentMessages),
-			}, trackerAttrs(ctx)...)...)
+			}, trackerAttrs(roundCtx)...)...)
 			outputForTracking := fullText.String()
 			if outputForTracking == "" && len(toolCallsMap) > 0 {
 				var toolSummary []string
@@ -2022,7 +2091,7 @@ func StreamWithTools(
 				outputForTracking = strings.Join(toolSummary, " ")
 			}
 			toolNames := toolCallNamesFromMap(toolCallsMap)
-			if tracker := TokenTrackerFromContext(ctx); tracker != nil {
+			if tracker := TokenTrackerFromContext(roundCtx); tracker != nil {
 				if tracker.TrackContent {
 					// When the round produced tool calls instead of text, record a
 					// summary of the tool calls so PostHog $ai_output_choices is not null.
@@ -2055,7 +2124,7 @@ func StreamWithTools(
 					}
 				}
 			}
-			recordLangfuseGeneration(ctx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, fullReasoning.String(), toolNames)
+			recordLangfuseGeneration(roundCtx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, fullReasoning.String(), toolNames)
 		}
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)
@@ -2066,14 +2135,18 @@ func StreamWithTools(
 				slog.Warn("LLM returned tool_calls after tools were stripped, using accumulated text as response",
 					"round", round, "text_length", fullText.Len())
 				if fullText.Len() > 0 {
+					endRound(nil)
 					return fullText.String(), nil
 				}
 				consecutiveEmptyResponses++
 				if consecutiveEmptyResponses >= 3 {
-					return "", fmt.Errorf("LLM returned empty content %d consecutive times", consecutiveEmptyResponses)
+					err := fmt.Errorf("LLM returned empty content %d consecutive times", consecutiveEmptyResponses)
+					endRound(err)
+					return "", err
 				}
 				// No text content either — retry one more round with an explicit instruction
 				appendToLastUserMsg("Your previous response was empty. Please generate your final response as plain text now.")
+				endRound(nil)
 				continue
 			}
 			roundChunks = nil // discard intermediate reasoning chunks
@@ -2094,10 +2167,13 @@ func StreamWithTools(
 			}
 			if hasInvalidToolArgs {
 				if recoverIncompleteToolCall(round, lastFinishReason, toolCallsMap) {
+					endRound(nil)
 					round-- // retry the same logical round with recovery context
 					continue
 				}
-				return fullText.String(), NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
+				err := NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
+				endRound(err)
+				return fullText.String(), err
 			}
 
 			// Append assistant message with tool calls. Older rounds are later
@@ -2131,7 +2207,7 @@ func StreamWithTools(
 				}
 
 				// Execute with per-tool timeout to prevent a single slow tool from blocking the loop
-				toolCtx, toolCancel := context.WithTimeout(ctx, toolExecTimeout)
+				toolCtx, toolCancel := context.WithTimeout(roundCtx, toolExecTimeout)
 				ch := make(chan executedToolCall, 1)
 				go func() {
 					defer func() {
@@ -2140,7 +2216,7 @@ func StreamWithTools(
 							ch <- executedToolCall{"", fmt.Errorf("tool %s panicked: %v", toolName, r)}
 						}
 					}()
-					r, e := executor(toolName, toolArgs)
+					r, e := executor(toolCtx, toolName, toolArgs)
 					ch <- executedToolCall{r, e}
 				}()
 				select {
@@ -2192,7 +2268,9 @@ func StreamWithTools(
 			allParallelSafe := len(opts) == 0 || opts[0].InterceptToolCall == nil
 			for _, tc := range toolCalls {
 				if ctx.Err() != nil {
-					return "", ctx.Err()
+					err := ctx.Err()
+					endRound(err)
+					return "", err
 				}
 
 				toolName := ""
@@ -2276,10 +2354,13 @@ func StreamWithTools(
 				wg.Wait()
 				for i, call := range prepared {
 					if ctx.Err() != nil {
-						return "", ctx.Err()
+						err := ctx.Err()
+						endRound(err)
+						return "", err
 					}
 					result := results[i].result
 					if results[i].err != nil {
+						endRound(results[i].err)
 						return result, results[i].err
 					}
 					if !call.skipExec && shouldCacheToolResult(call.name, result) {
@@ -2293,13 +2374,16 @@ func StreamWithTools(
 			} else {
 				for _, call := range prepared {
 					if ctx.Err() != nil {
-						return "", ctx.Err()
+						err := ctx.Err()
+						endRound(err)
+						return "", err
 					}
 					result := call.result
 					if !call.skipExec {
 						tr := runTool(call.name, call.args)
 						result = tr.result
 						if tr.err != nil {
+							endRound(tr.err)
 							return result, tr.err
 						}
 						if shouldCacheToolResult(call.name, result) {
@@ -2329,6 +2413,7 @@ func StreamWithTools(
 			}
 
 			// Continue the loop — re-call LLM with tool results
+			endRound(nil)
 			continue
 		} else {
 			consecutiveEmptyResponses = 0
@@ -2336,10 +2421,13 @@ func StreamWithTools(
 
 		if len(toolCallsMap) > 0 {
 			if recoverIncompleteToolCall(round, lastFinishReason, toolCallsMap) {
+				endRound(nil)
 				round-- // retry the same logical round with recovery context
 				continue
 			}
-			return fullText.String(), NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
+			err := NewIncompleteToolCallError(lastFinishReason, toolCallsMap)
+			endRound(err)
+			return fullText.String(), err
 		}
 
 		// Chunks were already streamed in real-time via onChunk above.
@@ -2348,16 +2436,19 @@ func StreamWithTools(
 			// Check caller abort signal before continuing
 			if len(opts) > 0 && opts[0].ShouldContinue != nil && !opts[0].ShouldContinue() {
 				slog.Info("Caller aborted continuation via ShouldContinue", "round", round, "response_length", fullText.Len())
+				endRound(nil)
 				return fullText.String(), nil
 			}
 			// Check continuation limit
 			if maxContinuations < 0 || continuationCount >= maxContinuations {
 				slog.Warn("LLM response truncated, continuation limit reached",
 					"continuations", continuationCount, "max", maxContinuations, "response_length", fullText.Len())
+				endRound(ErrResponseTruncated)
 				return fullText.String(), ErrResponseTruncated
 			}
 			if fullText.Len() > maxResponseBufferSize {
 				slog.Warn("response exceeded max size during continuation, returning partial", "size", fullText.Len())
+				endRound(nil)
 				return fullText.String(), nil
 			}
 			// Response was truncated — request continuation by appending the partial
@@ -2373,6 +2464,7 @@ func StreamWithTools(
 				Role:    "user",
 				Content: "Your response was cut off. Continue EXACTLY where you left off. Do not repeat any content.",
 			})
+			endRound(nil)
 			continue
 		}
 
@@ -2380,6 +2472,7 @@ func StreamWithTools(
 			slog.Warn("LLM response truncated (finish_reason=length), no rounds left", "response_length", fullText.Len(), "round", round)
 		}
 
+		endRound(nil)
 		return fullText.String(), nil
 	}
 

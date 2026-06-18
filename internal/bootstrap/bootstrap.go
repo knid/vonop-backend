@@ -132,6 +132,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 
 	sqldb := sql.OpenDB(pgdriver.NewConnector(
 		pgdriver.WithDSN(dsn),
+		pgdriver.WithTracing(false),
 		pgdriver.WithTLSConfig(&tls.Config{InsecureSkipVerify: true}),
 		pgdriver.WithDialTimeout(5*time.Second),
 		pgdriver.WithReadTimeout(30*time.Second),

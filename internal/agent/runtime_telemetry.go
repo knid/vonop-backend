@@ -16,7 +16,7 @@ const (
 	RuntimePhaseCompileRuntimeContext RuntimePhase = "compile-runtime-context"
 	RuntimePhaseBuildRuntimeTools     RuntimePhase = "build-runtime-tools"
 	RuntimePhaseExecuteAgentLoop      RuntimePhase = "execute-agent-loop"
-	RuntimePhasePersistAssistantTurn  RuntimePhase = "persist-assistant-turn"
+	RuntimePhasePersistUserTurn       RuntimePhase = "persist-user-turn"
 	RuntimePhaseFinalizeRun           RuntimePhase = "finalize-run"
 	RuntimePhaseRecordUsageAndScores  RuntimePhase = "record-usage-and-scores"
 )

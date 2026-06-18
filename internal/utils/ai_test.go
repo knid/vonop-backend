@@ -12,6 +12,9 @@ import (
 	"testing"
 
 	"github.com/knid/wemob/internal/observability"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 )
 
 func TestTokenTrackerLangfuseContextSnapshotsSlices(t *testing.T) {
@@ -258,7 +261,7 @@ func TestStreamWithToolsErrorsOnIncompleteStreamedToolCall(t *testing.T) {
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
-		func(name, arguments string) (string, error) {
+		func(ctx context.Context, name, arguments string) (string, error) {
 			executed = true
 			return "unexpected", nil
 		},
@@ -334,6 +337,11 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	t.Cleanup(func() {
 		llmStreamingClient = oldClient
 	})
+	provider := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(sdktrace.NewTracerProvider())
+	})
 
 	var executedArgs string
 	got, err := StreamWithTools(
@@ -347,7 +355,10 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
-		func(name, arguments string) (string, error) {
+		func(ctx context.Context, name, arguments string) (string, error) {
+			if ctx == nil || !trace.SpanFromContext(ctx).SpanContext().IsValid() {
+				t.Fatal("executor did not receive an active tracing context")
+			}
 			if name != "multi_edit" {
 				t.Fatalf("executor tool = %s, want multi_edit after write_files recovery", name)
 			}
@@ -446,7 +457,7 @@ func TestStreamWithToolsRetriesSecondIncompleteToolCallRecovery(t *testing.T) {
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
-		func(name, arguments string) (string, error) {
+		func(ctx context.Context, name, arguments string) (string, error) {
 			executed = append(executed, name)
 			if !json.Valid([]byte(arguments)) {
 				t.Fatalf("executor received invalid JSON args for %s: %s", name, arguments)
@@ -533,7 +544,7 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
-		func(name, arguments string) (string, error) {
+		func(ctx context.Context, name, arguments string) (string, error) {
 			executed = append(executed, name)
 			if !json.Valid([]byte(arguments)) {
 				t.Fatalf("executor received invalid JSON args for %s: %s", name, arguments)
@@ -661,7 +672,7 @@ func TestStreamWithToolsSecondRoundPreservesCurrentUserMessage(t *testing.T) {
 		&LLMProvider{Name: "openrouter", BaseURL: server.URL, APIKey: "test-key"},
 		nil,
 		nil,
-		func(name, arguments string) (string, error) {
+		func(ctx context.Context, name, arguments string) (string, error) {
 			return "frontend/src/App.tsx", nil
 		},
 		nil,
