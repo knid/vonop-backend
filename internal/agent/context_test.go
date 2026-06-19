@@ -40,6 +40,29 @@ func TestBuildSystemMessages_AppTypeUsesWebPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildSystemMessages_IncludesSandboxRuntimeGuidance(t *testing.T) {
+	project := &models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{},
+	}
+	msgs := BuildSystemMessages(project, nil, nil, false)
+	joined := concatMessages(msgs)
+
+	for _, want := range []string{
+		"/home/user/project",
+		"/home/user/backend",
+		"/home/user/artifacts",
+		"sandbox_status",
+		"sandbox_exec",
+		"Set cwd",
+		"Do not retry the exact same failing command",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected sandbox runtime guidance to contain %q", want)
+		}
+	}
+}
+
 func TestBuildSystemMessages_BackendOnlyIncludesBackendOnlyAddendum(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType:     models.ProjectTypeApp,

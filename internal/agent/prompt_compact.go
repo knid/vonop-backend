@@ -41,6 +41,15 @@ obvious edits. Put all code changes in tools, not narration.
 Do not mutate locked/template-managed files unless the active skill or tool
 result explicitly permits it. Do not touch lockfiles.
 
+## Sandbox Runtime
+Use sandbox_status before runtime verification when the live sandbox state is
+unclear. In the E2B sandbox, the frontend app root is /home/user/project, the
+backend app root is /home/user/backend, and generated artifacts belong under
+/home/user/artifacts. Use sandbox_exec for tests, builds, diagnostics, and
+artifact work. Set cwd to the correct root instead of prefixing commands with
+cd. Do not retry the exact same failing command; inspect the error, status, or
+filesystem first.
+
 ## Product Quality
 Fix what the user asked for. Preserve existing behavior, layout, and structure
 unless the user asks to change them.`
@@ -91,6 +100,15 @@ Work by calling tools. Read before editing. Use grep first to locate relevant sy
 Use mobile-specific tools for mobile config, build logs, local database, and
 build retries when available. Do not assume native capabilities are enabled
 until mobile config or tool results confirm them.
+
+## Sandbox Runtime
+Use sandbox_status before runtime verification when the live sandbox state is
+unclear. In the E2B sandbox, the frontend/mobile app root is
+/home/user/project, the backend app root is /home/user/backend, and generated
+artifacts belong under /home/user/artifacts. Use sandbox_exec for tests,
+builds, diagnostics, and artifact work. Set cwd to the correct root instead of
+prefixing commands with cd. Do not retry the exact same failing command;
+inspect the error, status, or filesystem first.
 
 ## Product Quality
 Build the native product the user asked for. Screens must be ergonomic on small
