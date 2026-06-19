@@ -1151,12 +1151,13 @@ func main() {
 					// Preview bundle (WebContainer-based, client-side)
 					r.Get("/preview-bundle", httpViews.GetPreviewBundle)
 
-					// Sandbox ID persistence for E2B preview
+					// Sandbox lifecycle for live Daytona previews
 					r.Get("/sandbox", httpViews.GetAppSandbox)
 					r.Put("/sandbox", httpViews.SetAppSandbox)
-					// Sandbox lifecycle for mobile preview
 					r.Post("/sandbox/start", httpViews.StartAppSandbox)
 					r.Get("/sandbox/status", httpViews.GetAppSandboxStatus)
+					r.Post("/sandbox/sync", httpViews.SyncSandbox)
+					r.Post("/sandbox/open-route", httpViews.OpenSandboxRoute)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
@@ -1482,8 +1483,6 @@ func main() {
 			r.Delete("/auth/github", httpViews.DisconnectGitHub)
 			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
-
-		r.Post("/internal/e2b/agent/authorize", httpViews.AuthorizeE2BAgentSandbox)
 
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
 		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot

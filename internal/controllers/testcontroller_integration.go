@@ -39,7 +39,7 @@ type TestFakes struct {
 //   - UserApiKeysStorage, AssetsStorage, AndroidKeysStorage (legacy *S3Storage)
 //   - SlackService, TaskService, AsynqInspector
 //   - FlyService, GiteaService, NeonService, GitRepoService
-//   - CodemagicService, RemoteConfig, E2BService, PostHog, CaddyAdmin, EdgeIPs
+//   - CodemagicService, RemoteConfig, SandboxManager, PostHog, CaddyAdmin, EdgeIPs
 //
 // Tests that touch S3 directly (presigned URL generation, RedeemKeystoreDownload's
 // S3 read, the encryptAndStoreCredential staging-bucket read used by Create/Update
