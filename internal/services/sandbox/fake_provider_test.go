@@ -6,10 +6,17 @@ import (
 )
 
 type fakeProvider struct {
-	sandboxID string
-	files     []FileDelta
-	started   []ProcessName
-	previews  map[int]string
+	sandboxID        string
+	createErr        error
+	files            []FileDelta
+	startCalls       int
+	startErr         error
+	writeErr         error
+	started          []ProcessName
+	startProcessErr  error
+	previews         map[int]string
+	previewErr       error
+	processStatesErr error
 }
 
 func newFakeProvider() *fakeProvider {
@@ -17,14 +24,17 @@ func newFakeProvider() *fakeProvider {
 }
 
 func (f *fakeProvider) Create(ctx context.Context, plan RuntimePlan) (string, error) {
-	return f.sandboxID, nil
+	return f.sandboxID, f.createErr
 }
 
 func (f *fakeProvider) GetStatus(ctx context.Context, sandboxID string, plan RuntimePlan) (*Status, error) {
 	return &Status{Provider: ProviderDaytona, SandboxID: sandboxID, State: StateReady, PreviewURLs: map[PreviewKind]string{}}, nil
 }
 
-func (f *fakeProvider) Start(ctx context.Context, sandboxID string) error { return nil }
+func (f *fakeProvider) Start(ctx context.Context, sandboxID string) error {
+	f.startCalls++
+	return f.startErr
+}
 
 func (f *fakeProvider) Stop(ctx context.Context, sandboxID string) error { return nil }
 
@@ -33,6 +43,9 @@ func (f *fakeProvider) Archive(ctx context.Context, sandboxID string) error { re
 func (f *fakeProvider) Delete(ctx context.Context, sandboxID string) error { return nil }
 
 func (f *fakeProvider) WriteFiles(ctx context.Context, sandboxID string, files []FileDelta, plan RuntimePlan) error {
+	if f.writeErr != nil {
+		return f.writeErr
+	}
 	f.files = append(f.files, files...)
 	return nil
 }
@@ -42,6 +55,9 @@ func (f *fakeProvider) Execute(ctx context.Context, sandboxID, command, cwd stri
 }
 
 func (f *fakeProvider) StartProcess(ctx context.Context, sandboxID string, spec ProcessSpec) error {
+	if f.startProcessErr != nil {
+		return f.startProcessErr
+	}
 	f.started = append(f.started, spec.Name)
 	return nil
 }
@@ -55,6 +71,9 @@ func (f *fakeProvider) ProcessLogs(ctx context.Context, sandboxID string, spec P
 }
 
 func (f *fakeProvider) ProcessStates(ctx context.Context, sandboxID string, plan RuntimePlan) (map[ProcessName]ProcessState, error) {
+	if f.processStatesErr != nil {
+		return nil, f.processStatesErr
+	}
 	out := map[ProcessName]ProcessState{}
 	for _, spec := range plan.Processes {
 		out[spec.Name] = ProcessState{Name: spec.Name, Status: ProcessReady, Port: spec.Port}
@@ -63,6 +82,9 @@ func (f *fakeProvider) ProcessStates(ctx context.Context, sandboxID string, plan
 }
 
 func (f *fakeProvider) PreviewURL(ctx context.Context, sandboxID string, port int) (string, error) {
+	if f.previewErr != nil {
+		return "", f.previewErr
+	}
 	if f.previews[port] == "" {
 		f.previews[port] = fmt.Sprintf("https://provider-%d.example.test", port)
 	}

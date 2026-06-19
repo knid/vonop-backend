@@ -2,10 +2,13 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
+	"reflect"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/knid/wemob/internal/models"
@@ -20,41 +23,65 @@ func NewManager(provider ProviderClient) *Manager {
 }
 
 func (m *Manager) Start(ctx context.Context, project *models.AppProject, files map[string]string, env map[string]string) (*Status, error) {
+	provider, err := m.providerClient()
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project is nil")
+	}
 	plan := BuildRuntimePlan(project)
 	sandboxID := project.SandboxID
-	var err error
+	newSandbox := sandboxID == ""
 	if sandboxID == "" {
-		sandboxID, err = m.provider.Create(ctx, plan)
+		sandboxID, err = provider.Create(ctx, plan)
 		if err != nil {
 			return nil, fmt.Errorf("create sandbox: %w", err)
 		}
-		project.SandboxID = sandboxID
-	} else if err := m.provider.Start(ctx, sandboxID); err != nil {
+		if sandboxID == "" {
+			return nil, errors.New("create sandbox: empty sandbox id")
+		}
+	}
+	if err := provider.Start(ctx, sandboxID); err != nil {
 		return nil, fmt.Errorf("start sandbox: %w", err)
 	}
-	if err := m.Sync(ctx, project, files); err != nil {
+	if err := m.syncFiles(ctx, sandboxID, plan, files); err != nil {
 		return nil, err
 	}
 	for _, spec := range plan.Processes {
 		if spec.Name == ProcessArtifacts {
 			continue
 		}
-		if err := m.provider.StartProcess(ctx, sandboxID, spec); err != nil {
+		if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
 			return nil, fmt.Errorf("start process %s: %w", spec.Name, err)
 		}
+	}
+	if newSandbox {
+		project.SandboxID = sandboxID
 	}
 	return m.Status(ctx, project)
 }
 
 func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Status, error) {
+	provider, err := m.providerClient()
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project is nil")
+	}
 	if project.SandboxID == "" {
 		return &Status{Provider: ProviderDaytona, State: StateMissing}, nil
 	}
 	plan := BuildRuntimePlan(project)
-	st, err := m.provider.GetStatus(ctx, project.SandboxID, plan)
+	st, err := provider.GetStatus(ctx, project.SandboxID, plan)
 	if err != nil {
 		return nil, err
 	}
+	if st == nil {
+		return nil, errors.New("provider returned nil status")
+	}
+	var enrichmentErrs []string
 	st.PreviewURLs = map[PreviewKind]string{}
 	kinds := make([]PreviewKind, 0, len(plan.Previews))
 	for kind := range plan.Previews {
@@ -62,34 +89,68 @@ func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Stat
 	}
 	sort.Slice(kinds, func(i, j int) bool { return kinds[i] < kinds[j] })
 	for _, kind := range kinds {
-		u, err := m.provider.PreviewURL(ctx, project.SandboxID, plan.Previews[kind])
+		u, err := provider.PreviewURL(ctx, project.SandboxID, plan.Previews[kind])
 		if err == nil {
 			st.PreviewURLs[kind] = u
+		} else {
+			enrichmentErrs = append(enrichmentErrs, fmt.Sprintf("preview %s: %v", kind, err))
 		}
 	}
-	processes, err := m.provider.ProcessStates(ctx, project.SandboxID, plan)
+	processes, err := provider.ProcessStates(ctx, project.SandboxID, plan)
 	if err == nil {
 		st.Processes = processes
+	} else {
+		enrichmentErrs = append(enrichmentErrs, fmt.Sprintf("process states: %v", err))
+	}
+	if len(enrichmentErrs) > 0 {
+		st.State = StateDegraded
+		st.LastError = strings.Join(enrichmentErrs, "; ")
+		st.RecommendedAction = "retry status refresh or run diagnostics"
 	}
 	return st, nil
 }
 
 func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files map[string]string) error {
+	if _, err := m.providerClient(); err != nil {
+		return err
+	}
+	if project == nil {
+		return errors.New("project is nil")
+	}
 	if project.SandboxID == "" {
 		return fmt.Errorf("sandbox is not started")
 	}
+	return m.syncFiles(ctx, project.SandboxID, BuildRuntimePlan(project), files)
+}
+
+func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimePlan, files map[string]string) error {
 	deltas := make([]FileDelta, 0, len(files))
 	for p, content := range files {
-		deltas = append(deltas, FileDelta{Path: p, Content: content})
+		cleanPath, err := cleanFilePath(p)
+		if err != nil {
+			return err
+		}
+		deltas = append(deltas, FileDelta{Path: cleanPath, Content: content})
 	}
 	sort.Slice(deltas, func(i, j int) bool { return deltas[i].Path < deltas[j].Path })
-	if err := m.provider.WriteFiles(ctx, project.SandboxID, deltas, BuildRuntimePlan(project)); err != nil {
+	provider, err := m.providerClient()
+	if err != nil {
+		return err
+	}
+	if err := provider.WriteFiles(ctx, sandboxID, deltas, plan); err != nil {
 		return fmt.Errorf("sync sandbox files: %w", err)
 	}
 	return nil
 }
 
 func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, route, setBy string) (*PreviewTarget, error) {
+	provider, err := m.providerClient()
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project is nil")
+	}
 	if project.SandboxID == "" {
 		return nil, fmt.Errorf("sandbox is not started")
 	}
@@ -104,7 +165,7 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	if !ok {
 		return nil, fmt.Errorf("default preview is unavailable")
 	}
-	base, err := m.provider.PreviewURL(ctx, project.SandboxID, port)
+	base, err := provider.PreviewURL(ctx, project.SandboxID, port)
 	if err != nil {
 		return nil, err
 	}
@@ -112,9 +173,17 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	if err != nil {
 		return nil, err
 	}
-	u.Path = path.Clean(route)
-	if route == "/" {
-		u.Path = "/"
+	basePath := strings.TrimRight(u.Path, "/")
+	routePath := path.Clean(route)
+	if routePath == "." {
+		routePath = "/"
+	}
+	if basePath == "" {
+		u.Path = routePath
+	} else if routePath == "/" {
+		u.Path = basePath + "/"
+	} else {
+		u.Path = path.Join(basePath, routePath)
 	}
 	u.RawQuery = ""
 	u.Fragment = ""
@@ -125,4 +194,43 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 		SetBy:     setBy,
 		UpdatedAt: time.Now().UTC(),
 	}, nil
+}
+
+func (m *Manager) providerClient() (ProviderClient, error) {
+	if m == nil || isNilProvider(m.provider) {
+		return nil, errors.New("provider is nil")
+	}
+	return m.provider, nil
+}
+
+func isNilProvider(provider ProviderClient) bool {
+	if provider == nil {
+		return true
+	}
+	v := reflect.ValueOf(provider)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
+func cleanFilePath(filePath string) (string, error) {
+	normalized := strings.ReplaceAll(filePath, "\\", "/")
+	if normalized == "" ||
+		strings.ContainsRune(normalized, '\x00') ||
+		path.IsAbs(normalized) {
+		return "", fmt.Errorf("unsafe file path %q", filePath)
+	}
+	for _, part := range strings.Split(normalized, "/") {
+		if part == ".." {
+			return "", fmt.Errorf("unsafe file path %q", filePath)
+		}
+	}
+	cleaned := path.Clean(normalized)
+	if cleaned == "." || path.IsAbs(cleaned) {
+		return "", fmt.Errorf("unsafe file path %q", filePath)
+	}
+	return cleaned, nil
 }
