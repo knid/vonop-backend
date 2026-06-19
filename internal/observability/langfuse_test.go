@@ -258,6 +258,37 @@ func TestGenerationAttributesLinkPrompt(t *testing.T) {
 	assertIntAttr(t, attrs, "langfuse.observation.prompt.version", 3)
 }
 
+func TestGenerationAttributesRecordToolDefinitions(t *testing.T) {
+	attrs := attrsByKey(GenerationAttributes(GenerationAttributeInput{
+		Model: "claude-sonnet-4-6",
+		ToolDefinitions: []ToolDefinitionSnapshot{
+			{
+				Name:        "grep",
+				Type:        "function",
+				Description: "Search files",
+				InputSchema: map[string]any{
+					"type":     "object",
+					"required": []string{"pattern"},
+					"properties": map[string]any{
+						"mode": map[string]any{"type": "string", "enum": []string{"context", "matches"}},
+					},
+				},
+			},
+			{Name: "web_search", Type: "server_tool"},
+		},
+	}, 1))
+
+	raw := attrs["langfuse.observation.metadata.tool_definitions"].AsString()
+	if raw == "" {
+		t.Fatal("missing tool definition metadata")
+	}
+	if !strings.Contains(raw, `"name":"grep"`) ||
+		!strings.Contains(raw, `"name":"web_search"`) ||
+		!strings.Contains(raw, `"enum":["context","matches"]`) {
+		t.Fatalf("unexpected tool definitions JSON: %s", raw)
+	}
+}
+
 func TestToolAttributesMapErrorsAsLangfuseObservationLevel(t *testing.T) {
 	output := "old_string not found"
 	outputHash := sha256.Sum256([]byte(output))

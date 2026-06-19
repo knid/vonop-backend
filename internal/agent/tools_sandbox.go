@@ -29,9 +29,6 @@ var blockedSandboxCommandPatterns = []*regexp.Regexp{
 func registerSandboxTools(r *Registry, deps *RunDependencies) {
 	r.Register(SandboxStatusTool{Deps: deps})
 	r.Register(SandboxExecTool{Deps: deps})
-	r.Register(SandboxReadFileTool{Deps: deps})
-	r.Register(SandboxWriteFileTool{Deps: deps})
-	r.Register(SandboxListFilesTool{Deps: deps})
 	r.Register(SandboxReadLogsTool{Deps: deps})
 	r.Register(SandboxServeArtifactTool{Deps: deps})
 	r.Register(PreviewSetURLTool{Deps: deps})
@@ -126,7 +123,7 @@ func validateSandboxWritePath(raw string) (string, error) {
 		return "", err
 	}
 	if !sandboxPathInRoots(p, sandboxRootArtifacts, sandboxRootTmp) {
-		return "", fmt.Errorf("sandbox_write_file is only allowed under %s or %s; use Git-backed app file tools for source files", sandboxRootArtifacts, sandboxRootTmp)
+		return "", fmt.Errorf("sandbox writes are only allowed under %s or %s; use Git-backed app file tools for source files", sandboxRootArtifacts, sandboxRootTmp)
 	}
 	if sandboxPathExposesSecret(p) {
 		return "", fmt.Errorf("writing %q is blocked because it may affect secrets", p)
@@ -251,86 +248,6 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 		return err.Error(), true, nil
 	}
 	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "exec", Command: strings.TrimSpace(args.Command), Cwd: cwd, TimeoutMs: args.TimeoutMs})
-	return renderSandboxResult(out), isErr, execErr
-}
-
-type SandboxReadFileTool struct{ Deps *RunDependencies }
-
-func (SandboxReadFileTool) Name() string { return "sandbox_read_file" }
-func (SandboxReadFileTool) Description() string {
-	return "Read a non-secret file from approved E2B sandbox roots. This reads live sandbox state, not the canonical Git-backed app file map."
-}
-func (SandboxReadFileTool) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}
-}
-func (t SandboxReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	p, err := validateSandboxReadPath(args.Path)
-	if err != nil {
-		return err.Error(), true, nil
-	}
-	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "files/read", Path: p})
-	return renderSandboxResult(out), isErr, execErr
-}
-
-type SandboxWriteFileTool struct{ Deps *RunDependencies }
-
-func (SandboxWriteFileTool) Name() string { return "sandbox_write_file" }
-func (SandboxWriteFileTool) Description() string {
-	return "Write a sandbox-only artifact or temporary file. Allowed only under /home/user/artifacts or /tmp; use Git-backed app file tools for source files."
-}
-func (SandboxWriteFileTool) Schema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path":    map[string]any{"type": "string"},
-			"content": map[string]any{"type": "string"},
-		},
-		"required": []string{"path", "content"},
-	}
-}
-func (t SandboxWriteFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
-		Path    string `json:"path"`
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	p, err := validateSandboxWritePath(args.Path)
-	if err != nil {
-		return err.Error(), true, nil
-	}
-	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "files/write", Path: p, Content: args.Content})
-	return renderSandboxResult(out), isErr, execErr
-}
-
-type SandboxListFilesTool struct{ Deps *RunDependencies }
-
-func (SandboxListFilesTool) Name() string { return "sandbox_list_files" }
-func (SandboxListFilesTool) Description() string {
-	return "List files under an approved E2B sandbox root without exposing secret paths."
-}
-func (SandboxListFilesTool) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}
-}
-func (t SandboxListFilesTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	p, err := validateSandboxReadPath(args.Path)
-	if err != nil {
-		return err.Error(), true, nil
-	}
-	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "files/list", Path: p})
 	return renderSandboxResult(out), isErr, execErr
 }
 
@@ -557,9 +474,6 @@ func sandboxToolNames() []string {
 	names := []string{
 		"sandbox_status",
 		"sandbox_exec",
-		"sandbox_read_file",
-		"sandbox_write_file",
-		"sandbox_list_files",
 		"sandbox_read_logs",
 		"sandbox_serve_artifact",
 		"preview_set_url",
