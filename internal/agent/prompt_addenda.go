@@ -27,7 +27,30 @@ This project uses the split web architecture.
 ## Backend rules
 - If the user asks for AI, database, auth, payments, uploads, webhooks, or private integrations, create backend/app/api/**/route.ts handlers.
 - Backend route handlers may import backend/lib/db.ts or backend/lib/wemob-ai.ts after the matching setup tool creates them.
-- The frontend talks to backend routes through /api/*; it never imports backend files.`
+- The frontend talks to backend routes through /api/*; it never imports backend files.
+
+## Backend Selection Rule
+
+Do not treat backend as optional when the requested product includes any feature
+that must work across devices, users, browser sessions, or deployments.
+
+Create backend/app/api/** route handlers and persistent storage when the user asks for:
+- editing, creating, deleting, or publishing content
+- admin panels, dashboards, login, roles, or protected areas
+- contact forms, lead capture, bookings, applications, submissions, or messages
+- user accounts, authentication, profiles, saved data, or private data
+- payments, uploads, AI, email sending, webhooks, integrations, or secrets
+- "all functions work", "real app", "production", "I can manage it", or similar wording
+
+Frontend-only localStorage is allowed only for demos, prototypes, mockups, or when
+the user explicitly asks for a static/client-only app.
+
+If the request says the owner/admin can manage content, default to:
+- backend API routes
+- persistent database/storage
+- server-side validation
+- frontend calling /api/*
+- no hardcoded admin password in frontend`
 
 const BackendOnlyAddendum = `# BACKEND/API-ONLY ADDENDUM
 This project starts without a frontend. Build only the backend API unless the
