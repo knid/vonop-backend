@@ -221,14 +221,14 @@ type SandboxExecTool struct{ Deps *RunDependencies }
 
 func (SandboxExecTool) Name() string { return "sandbox_exec" }
 func (SandboxExecTool) Description() string {
-	return "Run a non-interactive shell command in the E2B sandbox from an approved cwd. Use Git-backed tools for app source edits; use this for tests, diagnostics, conversions, and artifact work."
+	return "Run a non-interactive shell command in the E2B sandbox from an approved cwd. Use /home/user/project for frontend/mobile work and /home/user/backend for backend work. Use Git-backed tools for app source edits; use this for tests, diagnostics, conversions, and artifact work."
 }
 func (SandboxExecTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"command":    map[string]any{"type": "string", "description": "Shell command to run."},
-			"cwd":        map[string]any{"type": "string", "description": "Absolute sandbox cwd. Defaults to /home/user/project."},
+			"command":    map[string]any{"type": "string", "description": "Shell command to run. Set cwd for the target app root; do not use cd prefixes."},
+			"cwd":        map[string]any{"type": "string", "description": "Absolute sandbox cwd. Defaults to /home/user/project. Use /home/user/project for frontend/mobile commands, /home/user/backend for backend commands, /home/user/artifacts for artifact work, or /tmp for temporary work."},
 			"timeout_ms": map[string]any{"type": "integer", "description": "Optional command timeout in milliseconds."},
 		},
 		"required": []string{"command"},

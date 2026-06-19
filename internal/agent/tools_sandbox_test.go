@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
@@ -85,6 +87,22 @@ func TestSandboxExecAllowedByDefault(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("SandboxControl was not called")
+	}
+}
+
+func TestSandboxExecSchemaDocumentsRuntimeLayout(t *testing.T) {
+	schema := (SandboxExecTool{}).Schema()
+	joined := fmt.Sprint(schema)
+
+	for _, want := range []string{
+		"/home/user/project",
+		"/home/user/backend",
+		"Set cwd",
+		"do not use cd",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected sandbox_exec schema to document %q", want)
+		}
 	}
 }
 
