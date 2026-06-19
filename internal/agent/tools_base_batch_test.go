@@ -227,6 +227,56 @@ func TestGrepTool_RespectsCallerMaxMatchesAndBytes(t *testing.T) {
 	}
 }
 
+func TestGrepTool_FilesModeScansLaterFilesAfterNoisyFile(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/a.tsx", strings.Join([]string{
+		"target one",
+		"target two",
+		"target three",
+	}, "\n"))
+	rc.FileMap.Set("frontend/src/b.tsx", "target only")
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target","glob":"frontend/src/*.tsx","mode":"files","max_matches":2}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if !strings.Contains(out, "frontend/src/a.tsx") || !strings.Contains(out, "frontend/src/b.tsx") {
+		t.Fatalf("expected files mode to list both matching files despite noisy first file, got: %s", out)
+	}
+	if strings.Contains(out, "truncated") {
+		t.Fatalf("did not expect files mode to truncate by per-line max_matches, got: %s", out)
+	}
+}
+
+func TestGrepTool_CountModeScansLaterFilesAfterNoisyFile(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/a.tsx", strings.Join([]string{
+		"target one",
+		"target two",
+		"target three",
+	}, "\n"))
+	rc.FileMap.Set("frontend/src/b.tsx", "target only")
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target","glob":"frontend/src/*.tsx","mode":"count","max_matches":2}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if !strings.Contains(out, "frontend/src/a.tsx:3") || !strings.Contains(out, "frontend/src/b.tsx:1") {
+		t.Fatalf("expected count mode to count both files despite noisy first file, got: %s", out)
+	}
+	if strings.Contains(out, "truncated") {
+		t.Fatalf("did not expect count mode to truncate by per-line max_matches, got: %s", out)
+	}
+}
+
 func TestGrepTool_SchemaAdvertisesContextDefaultAndRecommendation(t *testing.T) {
 	schema := GrepTool{}.Schema()
 	props, ok := schema["properties"].(map[string]any)

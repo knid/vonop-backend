@@ -867,7 +867,7 @@ func (GrepTool) Schema() map[string]any {
 			},
 			"max_matches": map[string]any{
 				"type":        "integer",
-				"description": fmt.Sprintf("Maximum matching lines to return before truncating. Default %d, hard max %d.", grepDefaultMaxMatches, grepHardMaxMatches),
+				"description": fmt.Sprintf("Maximum matching lines to return before truncating in context/matches modes. File discovery modes scan by file instead. Default %d, hard max %d.", grepDefaultMaxMatches, grepHardMaxMatches),
 				"default":     grepDefaultMaxMatches,
 				"minimum":     1,
 				"maximum":     grepHardMaxMatches,
@@ -980,13 +980,16 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 			if !re.MatchString(line) {
 				continue
 			}
-			if matches >= maxMatches || sb.Len() >= maxBytes {
+			if mode != "files" && mode != "count" && (matches >= maxMatches || sb.Len() >= maxBytes) {
 				truncated = true
 				break
 			}
 			fileHit = true
 			matches++
 			fileMatches = append(fileMatches, i)
+			if mode == "files" {
+				break
+			}
 		}
 		if fileHit {
 			filesHit++
