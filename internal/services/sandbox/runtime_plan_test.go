@@ -25,6 +25,7 @@ func processNames(plan RuntimePlan) map[ProcessName]bool {
 func TestRuntimePlanNextJS(t *testing.T) {
 	p := testProject()
 	p.ProjectType = models.ProjectTypeApp
+	p.FrontendRuntime = models.FrontendRuntimeNextJSLegacy
 	plan := BuildRuntimePlan(p)
 	if plan.DefaultPreview != PreviewApp {
 		t.Fatalf("default preview = %q", plan.DefaultPreview)
@@ -76,5 +77,19 @@ func TestRuntimePlanBackendOnly(t *testing.T) {
 	}
 	if !processNames(plan)[ProcessBackend] {
 		t.Fatalf("backend process missing")
+	}
+}
+
+func TestRuntimePlanBackendOnlyUnsupportedRuntime(t *testing.T) {
+	p := testProject()
+	p.FrontendRuntime = models.FrontendRuntimeNone
+	p.BackendEnabled = true
+	p.BackendRuntime = models.BackendRuntimeNone
+	plan := BuildRuntimePlan(p)
+	if processNames(plan)[ProcessBackend] {
+		t.Fatalf("backend process present")
+	}
+	if _, ok := plan.Previews[PreviewBackend]; ok {
+		t.Fatalf("backend preview present: %#v", plan.Previews)
 	}
 }

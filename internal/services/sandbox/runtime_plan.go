@@ -50,7 +50,9 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 				AutoRestart: true,
 			},
 		)
-	case project.FrontendRuntime == models.FrontendRuntimeNone && project.BackendEnabled:
+	case project.FrontendRuntime == models.FrontendRuntimeNone &&
+		project.BackendEnabled &&
+		project.BackendRuntime == models.BackendRuntimeNextJSAPI:
 		plan.DefaultPreview = PreviewBackend
 		plan.Previews[PreviewBackend] = 3001
 		plan.Processes = append(plan.Processes, backendProcess())
