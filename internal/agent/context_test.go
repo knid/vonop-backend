@@ -360,6 +360,25 @@ func TestBuildSystemMessages_ChatWebIncludesSmallEditPrompt(t *testing.T) {
 	if !strings.Contains(joined, "Do not update DESIGN.md for targeted bug fixes") {
 		t.Error("expected chat web to avoid DESIGN.md updates for bug fixes")
 	}
+	for _, forbidden := range []string{
+		"Batch obvious independent edits when the next action is clear.",
+		"Verify the change when possible.",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("chat web prompt still includes weak loop-prone guidance %q", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"Plan briefly, then work in this order: inspect impacted files, apply batched edits, recover once if needed, verify once, then stop.",
+		"Batch reads and edits aggressively.",
+		"Do not make speculative secondary updates",
+		"After one successful verification pass, stop calling tools",
+		"Do not re-read code only to gain confidence",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("expected chat web prompt to include %q", required)
+		}
+	}
 }
 
 func TestBuildSystemMessages_FirstGenMobileIncludesWorkOrders(t *testing.T) {
