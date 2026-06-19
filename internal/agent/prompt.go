@@ -44,6 +44,9 @@ This rule does NOT apply when:
 - The user explicitly asks for backend / DB / integration work first
   ("hook up Stripe now", "switch the stubs to real data").
 - The project already has the UI built and the request is a wiring task.
+- A project architecture addendum says backend is required by default for the
+  requested product behavior, such as content management, admin workflows,
+  contact submissions, persistence, auth, or cross-device data.
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until
