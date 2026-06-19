@@ -24,14 +24,15 @@ Environment variables override Infisical-backed `SecretManager` values. This app
 | --- | --- | --- | --- |
 | `wemob-agent-web-base` | `internal/agent/prompt_compact.go` | Web builder profile | Base web builder identity and tool protocol. |
 | `wemob-agent-mobile-base` | `internal/agent/prompt_compact.go` | Mobile builder profile | Base native mobile builder identity and tool protocol. |
-| `wemob-agent-mode-first-gen` / `wemob-agent-mode-edit` | `internal/agent/context.go`, `internal/agent/prompt.go`, `internal/agent/prompt_mobile_native.go` | Builder mode prompts | Shared first-generation and edit-mode prompts compiled with web/mobile variables. |
+| `wemob-agent-web-first-gen` / `wemob-agent-web-edit` | `internal/agent/prompt.go` | Web builder mode prompts | Concrete first-generation and edit-mode work orders. |
+| `wemob-agent-mobile-first-gen` / `wemob-agent-mobile-edit` | `internal/agent/prompt_mobile_native.go` | Mobile builder mode prompts | Concrete native first-generation and edit-mode work orders. |
 | `wemob-agent-project-type-boundary` | `internal/agent/context.go` | Agent context compiler | Uses Langfuse variables for project type labels. |
 | `wemob-agent-planning-discipline` | `internal/agent/context.go` | Agent context compiler | Final batching/tool-use system block. |
-| `wemob-agent-architecture-addendum` | `internal/agent/prompt_addenda.go` | Web architecture addenda | Shared architecture prompt compiled with split-runtime or backend-only variables. |
+| `wemob-agent-architecture-split-web` / `wemob-agent-architecture-backend-only` | `internal/agent/prompt_addenda.go` | Web architecture addenda | Concrete split runtime and backend-only constraints. |
 | `wemob-agent-ecommerce-addendum` | `internal/agent/prompt_addenda.go` | Ecommerce projects | Storefront/schema/checkout rules. |
 | `wemob-agent-auth-addendum` | `internal/agent/prompt_addenda.go` | Auth-enabled projects | Session/auth implementation constraints. |
-| `wemob-agent-capability-database` | `internal/agent/prompt_addenda.go` | Database-enabled projects | Shared database prompt compiled with web, native, split-web, or on-device database variables. |
-| `wemob-agent-capability-ai` | `internal/agent/prompt_addenda.go` | AI-enabled projects | Shared AI prompt compiled with runtime, allowed chat/image model lists, and default model variables. |
+| `wemob-agent-database-nextjs` / `wemob-agent-database-split-web` / `wemob-agent-database-native-backend` / `wemob-agent-database-mobile-local` | `internal/agent/prompt_addenda.go` | Database-enabled projects | Concrete web, split-web/backend-only, native backend, and on-device database rules. |
+| `wemob-agent-ai-nextjs` / `wemob-agent-ai-split-web` | `internal/agent/prompt_addenda.go` | AI-enabled projects | Concrete AI rules; only model lists/default model are variable-driven. |
 | `wemob-agent-mobile-config-addendum` | `internal/agent/context.go` | Native mobile projects | Uses Langfuse variables for current mobile config. |
 | `wemob-agent-attachments-addendum` | `internal/agent/prompt_addenda.go` | Projects with uploaded assets | Uses a Langfuse variable for sanitized asset table rows. |
 | `wemob-project-classify` | `internal/controllers/project_classify.go` | Project creation classifier | Fast LLM system prompt that classifies the initial user prompt into `ecommerce`, `app`, or `mobile_app_native`. |
