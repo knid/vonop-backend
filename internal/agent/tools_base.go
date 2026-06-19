@@ -818,8 +818,10 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 
 const (
 	grepDefaultContextLines = 25
-	grepMaxMatches          = 200
-	grepMaxBytes            = 64 * 1024
+	grepDefaultMaxMatches   = 200
+	grepHardMaxMatches      = 200
+	grepDefaultMaxBytes     = 16 * 1024
+	grepHardMaxBytes        = 64 * 1024
 	grepMaxLineLen          = 400
 )
 
@@ -827,7 +829,7 @@ type GrepTool struct{}
 
 func (GrepTool) Name() string { return "grep" }
 func (GrepTool) Description() string {
-	return "Search file contents for a regex pattern across the project. Returns matching lines with surrounding context. Use this BEFORE read_files / edit_file when you need to locate a string or symbol. For JSX/component edits, use the default context or more, then read the full file if the edit spans a larger block."
+	return "Search file contents across the project. Defaults to regex search with 25 surrounding context lines, but supports CLI-grep style controls: context_lines=0 for path:line matches, literal=true for fixed-string search, mode=files/count for compact discovery, and max_matches/max_bytes to bound noisy results. Use this BEFORE read_files / edit_file when you need to locate a string or symbol."
 }
 func (GrepTool) Schema() map[string]any {
 	return map[string]any{
@@ -846,12 +848,36 @@ func (GrepTool) Schema() map[string]any {
 				"type":        "boolean",
 				"description": "If true, match regardless of case.",
 			},
+			"literal": map[string]any{
+				"type":        "boolean",
+				"description": "If true, treat pattern as a fixed string instead of a regex, similar to grep -F.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"description": "Output mode. 'context' returns matching lines with context, 'matches' returns path:line matches only, 'files' lists matching files, and 'count' returns match counts by file.",
+				"enum":        []string{"context", "matches", "files", "count"},
+				"default":     "context",
+			},
 			"context_lines": map[string]any{
 				"type":        "integer",
-				"description": fmt.Sprintf("Number of lines to show before and after each match. Default %d. Recommended: 25 for normal code edits, 40-80 for JSX/component blocks or multi-line replacements.", grepDefaultContextLines),
+				"description": fmt.Sprintf("Number of lines to show before and after each match. Default %d. Set to 0 for compact grep -n style output. Use higher values only after narrowing the pattern or glob.", grepDefaultContextLines),
 				"default":     grepDefaultContextLines,
 				"minimum":     0,
 				"maximum":     100,
+			},
+			"max_matches": map[string]any{
+				"type":        "integer",
+				"description": fmt.Sprintf("Maximum matching lines to return before truncating. Default %d, hard max %d.", grepDefaultMaxMatches, grepHardMaxMatches),
+				"default":     grepDefaultMaxMatches,
+				"minimum":     1,
+				"maximum":     grepHardMaxMatches,
+			},
+			"max_bytes": map[string]any{
+				"type":        "integer",
+				"description": fmt.Sprintf("Approximate maximum output bytes before truncating. Default %d, hard max %d.", grepDefaultMaxBytes, grepHardMaxBytes),
+				"default":     grepDefaultMaxBytes,
+				"minimum":     1024,
+				"maximum":     grepHardMaxBytes,
 			},
 		},
 		"required": []string{"pattern"},
@@ -863,7 +889,11 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 		Pattern         string `json:"pattern"`
 		Glob            string `json:"glob"`
 		CaseInsensitive bool   `json:"case_insensitive"`
-		ContextLines    int    `json:"context_lines"`
+		Literal         bool   `json:"literal"`
+		Mode            string `json:"mode"`
+		ContextLines    *int   `json:"context_lines"`
+		MaxMatches      int    `json:"max_matches"`
+		MaxBytes        int    `json:"max_bytes"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
@@ -871,14 +901,42 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 	if args.Pattern == "" {
 		return "pattern is required", true, nil
 	}
-	if args.ContextLines == 0 {
-		args.ContextLines = grepDefaultContextLines
+	contextLines := grepDefaultContextLines
+	if args.ContextLines != nil {
+		contextLines = *args.ContextLines
 	}
-	if args.ContextLines < 0 || args.ContextLines > 100 {
+	if contextLines < 0 || contextLines > 100 {
 		return "context_lines must be between 0 and 100", true, nil
+	}
+	maxMatches := args.MaxMatches
+	if maxMatches == 0 {
+		maxMatches = grepDefaultMaxMatches
+	}
+	if maxMatches < 1 || maxMatches > grepHardMaxMatches {
+		return fmt.Sprintf("max_matches must be between 1 and %d", grepHardMaxMatches), true, nil
+	}
+	maxBytes := args.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = grepDefaultMaxBytes
+	}
+	if maxBytes < 1024 || maxBytes > grepHardMaxBytes {
+		return fmt.Sprintf("max_bytes must be between 1024 and %d", grepHardMaxBytes), true, nil
+	}
+	mode := args.Mode
+	if mode == "" {
+		mode = "context"
+	}
+	if mode != "context" && mode != "matches" && mode != "files" && mode != "count" {
+		return "mode must be one of: context, matches, files, count", true, nil
+	}
+	if mode == "matches" {
+		contextLines = 0
 	}
 
 	pattern := args.Pattern
+	if args.Literal {
+		pattern = regexp.QuoteMeta(pattern)
+	}
 	if args.CaseInsensitive {
 		pattern = "(?i)" + pattern
 	}
@@ -897,12 +955,16 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 	}
 	sort.Strings(paths)
 
-	var (
-		sb        strings.Builder
-		matches   int
-		truncated bool
-		filesHit  int
-	)
+	type matchRange struct {
+		start int
+		end   int
+		hits  map[int]bool
+	}
+
+	var sb strings.Builder
+	matches := 0
+	truncated := false
+	filesHit := 0
 	for _, p := range paths {
 		if isProtectedRead(p) {
 			continue
@@ -913,54 +975,89 @@ func (GrepTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessa
 		}
 		fileHit := false
 		lines := strings.Split(content, "\n")
+		var fileMatches []int
 		for i, line := range lines {
 			if !re.MatchString(line) {
 				continue
 			}
-			if matches >= grepMaxMatches || sb.Len() >= grepMaxBytes {
+			if matches >= maxMatches || sb.Len() >= maxBytes {
 				truncated = true
 				break
 			}
 			fileHit = true
 			matches++
-
-			if args.ContextLines > 0 {
-				start := i - args.ContextLines
-				if start < 0 {
-					start = 0
-				}
-				end := i + args.ContextLines + 1
-				if end > len(lines) {
-					end = len(lines)
-				}
-				fmt.Fprintf(&sb, "--- %s (lines %d-%d) ---\n", p, start+1, end)
-				for j := start; j < end; j++ {
-					prefix := "  "
-					if j == i {
-						prefix = "> "
-					}
-					displayLine := lines[j]
-					if len(displayLine) > grepMaxLineLen {
-						displayLine = displayLine[:grepMaxLineLen] + "…"
-					}
-					fmt.Fprintf(&sb, "%s%4d: %s\n", prefix, j+1, displayLine)
-				}
-				fmt.Fprintln(&sb)
-			} else {
-				displayLine := line
-				if len(displayLine) > grepMaxLineLen {
-					displayLine = displayLine[:grepMaxLineLen] + "…"
-				}
-				fmt.Fprintf(&sb, "%s:%d:%s\n", p, i+1, displayLine)
-			}
-
-			if matches >= grepMaxMatches || sb.Len() >= grepMaxBytes {
-				truncated = true
-				break
-			}
+			fileMatches = append(fileMatches, i)
 		}
 		if fileHit {
 			filesHit++
+		}
+		if len(fileMatches) > 0 {
+			switch mode {
+			case "files":
+				fmt.Fprintf(&sb, "%s\n", p)
+			case "count":
+				fmt.Fprintf(&sb, "%s:%d\n", p, len(fileMatches))
+			default:
+				if contextLines == 0 {
+					for _, i := range fileMatches {
+						displayLine := lines[i]
+						if len(displayLine) > grepMaxLineLen {
+							displayLine = displayLine[:grepMaxLineLen] + "…"
+						}
+						fmt.Fprintf(&sb, "%s:%d:%s\n", p, i+1, displayLine)
+						if sb.Len() >= maxBytes {
+							truncated = true
+							break
+						}
+					}
+				} else {
+					var ranges []matchRange
+					for _, i := range fileMatches {
+						start := i - contextLines
+						if start < 0 {
+							start = 0
+						}
+						end := i + contextLines + 1
+						if end > len(lines) {
+							end = len(lines)
+						}
+						if len(ranges) > 0 && start <= ranges[len(ranges)-1].end {
+							last := &ranges[len(ranges)-1]
+							if end > last.end {
+								last.end = end
+							}
+							last.hits[i] = true
+						} else {
+							ranges = append(ranges, matchRange{start: start, end: end, hits: map[int]bool{i: true}})
+						}
+					}
+					for _, r := range ranges {
+						fmt.Fprintf(&sb, "--- %s (lines %d-%d) ---\n", p, r.start+1, r.end)
+						for j := r.start; j < r.end; j++ {
+							prefix := "  "
+							if r.hits[j] {
+								prefix = "> "
+							}
+							displayLine := lines[j]
+							if len(displayLine) > grepMaxLineLen {
+								displayLine = displayLine[:grepMaxLineLen] + "…"
+							}
+							fmt.Fprintf(&sb, "%s%4d: %s\n", prefix, j+1, displayLine)
+							if sb.Len() >= maxBytes {
+								truncated = true
+								break
+							}
+						}
+						fmt.Fprintln(&sb)
+						if truncated {
+							break
+						}
+					}
+				}
+			}
+		}
+		if sb.Len() >= maxBytes {
+			truncated = true
 		}
 		if truncated {
 			break

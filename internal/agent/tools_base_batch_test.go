@@ -154,6 +154,79 @@ func TestGrepTool_DefaultsToTwentyFiveContextLines(t *testing.T) {
 	}
 }
 
+func TestGrepTool_AllowsExplicitZeroContextLines(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/App.tsx", "before\ntarget-marker\nafter")
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target-marker","glob":"frontend/src/App.tsx","context_lines":0}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if !strings.Contains(out, "frontend/src/App.tsx:2:target-marker") {
+		t.Fatalf("expected grep -n style output, got: %s", out)
+	}
+	if strings.Contains(out, "before") || strings.Contains(out, "after") || strings.Contains(out, "--- frontend/src/App.tsx") {
+		t.Fatalf("expected no surrounding context when context_lines=0, got: %s", out)
+	}
+}
+
+func TestGrepTool_CoalescesOverlappingContextWindows(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/App.tsx", strings.Join([]string{
+		"one",
+		"target first",
+		"between",
+		"target second",
+		"five",
+	}, "\n"))
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target","glob":"frontend/src/App.tsx","context_lines":1}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if got := strings.Count(out, "   3: between"); got != 1 {
+		t.Fatalf("expected overlapping context line to appear once, got %d in: %s", got, out)
+	}
+	if got := strings.Count(out, "--- frontend/src/App.tsx"); got != 1 {
+		t.Fatalf("expected one merged context block, got %d in: %s", got, out)
+	}
+	if !strings.Contains(out, "— 2 match(es) across 1 file(s)") {
+		t.Fatalf("expected both matches counted, got: %s", out)
+	}
+}
+
+func TestGrepTool_RespectsCallerMaxMatchesAndBytes(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/App.tsx", strings.Join([]string{
+		"target one",
+		"target two",
+		"target three",
+	}, "\n"))
+
+	out, isError, err := GrepTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"pattern":"target","glob":"frontend/src/App.tsx","context_lines":0,"max_matches":2,"max_bytes":1024}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected isError=false, got: %s", out)
+	}
+	if strings.Contains(out, "target three") {
+		t.Fatalf("expected max_matches to stop before third match, got: %s", out)
+	}
+	if !strings.Contains(out, "truncated") {
+		t.Fatalf("expected truncation hint, got: %s", out)
+	}
+}
+
 func TestGrepTool_SchemaAdvertisesContextDefaultAndRecommendation(t *testing.T) {
 	schema := GrepTool{}.Schema()
 	props, ok := schema["properties"].(map[string]any)
@@ -168,8 +241,13 @@ func TestGrepTool_SchemaAdvertisesContextDefaultAndRecommendation(t *testing.T) 
 		t.Fatalf("context_lines default = %#v, want %d", got, grepDefaultContextLines)
 	}
 	desc, _ := contextLines["description"].(string)
-	if !strings.Contains(desc, "Default 25") || !strings.Contains(desc, "40-80") {
+	if !strings.Contains(desc, "Default 25") || !strings.Contains(desc, "Set to 0") {
 		t.Fatalf("context_lines description should guide larger code-edit context, got: %q", desc)
+	}
+	for _, name := range []string{"literal", "mode", "max_matches", "max_bytes"} {
+		if _, ok := props[name].(map[string]any); !ok {
+			t.Fatalf("grep schema missing %s: %#v", name, props)
+		}
 	}
 }
 
@@ -185,6 +263,14 @@ func TestGrepTool_SchemaRequiresNonEmptyPatternAndBoundsContext(t *testing.T) {
 	}
 	if got := contextLines["maximum"]; got != 100 {
 		t.Fatalf("context_lines maximum = %#v, want 100", got)
+	}
+	maxMatches := props["max_matches"].(map[string]any)
+	if got := maxMatches["maximum"]; got != grepHardMaxMatches {
+		t.Fatalf("max_matches maximum = %#v, want %d", got, grepHardMaxMatches)
+	}
+	maxBytes := props["max_bytes"].(map[string]any)
+	if got := maxBytes["maximum"]; got != grepHardMaxBytes {
+		t.Fatalf("max_bytes maximum = %#v, want %d", got, grepHardMaxBytes)
 	}
 }
 
