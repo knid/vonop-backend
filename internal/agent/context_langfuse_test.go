@@ -37,7 +37,7 @@ func TestCompileAgentContextUsesLangfusePromptResolver(t *testing.T) {
 	if packet.SystemMessages[0].Content != "remote:wemob-agent-web-base" {
 		t.Fatalf("base prompt = %q", packet.SystemMessages[0].Content)
 	}
-	if packet.SystemMessages[1].Content != "remote:wemob-agent-web-first-gen" {
+	if packet.SystemMessages[1].Content != "remote:wemob-agent-mode-first-gen" {
 		t.Fatalf("mode prompt = %q", packet.SystemMessages[1].Content)
 	}
 	if len(packet.PromptParts) < 2 {
