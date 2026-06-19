@@ -165,52 +165,6 @@ func enforceProjectPathScope(rc *RunContext, path string) string {
 	)
 }
 
-// ---------- read_file ----------
-
-type ReadFileTool struct{}
-
-func (ReadFileTool) Name() string        { return "read_file" }
-func (ReadFileTool) Description() string { return "Read a file from the project by path." }
-func (ReadFileTool) Schema() map[string]any {
-	return map[string]any{
-		"type": "object",
-		"properties": map[string]any{
-			"path": map[string]any{
-				"type":        "string",
-				"description": "The project-relative path to the file.",
-			},
-		},
-		"required": []string{"path"},
-	}
-}
-
-func (ReadFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	var args struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal(input, &args); err != nil {
-		return fmt.Sprintf("invalid input: %v", err), true, nil
-	}
-	path, err := sanitizePath(args.Path)
-	if err != nil {
-		return err.Error(), true, nil
-	}
-	if isProtectedRead(path) {
-		return fmt.Sprintf("reading %s is not allowed (contains secrets or system files)", path), true, nil
-	}
-	content, ok := rc.FileMap.Get(path)
-	if !ok {
-		return fmt.Sprintf("file not found: %s", path), true, nil
-	}
-	if len(content) > maxReadBytes {
-		rc.MarkFileRead(path, content)
-		return fmt.Sprintf("<truncated: file is %d bytes, max %d>\n\n%s",
-			len(content), maxReadBytes, content[:maxReadBytes]), false, nil
-	}
-	rc.MarkFileRead(path, content)
-	return content, false, nil
-}
-
 // ---------- read_files ----------
 
 const readFilesMaxPaths = 20

@@ -434,7 +434,7 @@ func resolveCostUSD(model string, usage UsageInfo) (float64, string) {
 	return estimateCostUSD(model, usage.PromptTokens, usage.CompletionTokens, usage.CacheCreationInputTokens, usage.CacheReadInputTokens), "catalog_estimate"
 }
 
-func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, reasoningText string, toolNames []string) {
+func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo, latencyMs int64, streaming bool, spanName string, round int, startedAt time.Time, inputMessages []Message, outputText string, reasoningText string, toolNames []string, toolDefs []Tool) {
 	cost, costSource := resolveCostUSD(model, usage)
 	var prompt observability.PromptLink
 	if tracker := TokenTrackerFromContext(ctx); tracker != nil {
@@ -456,6 +456,7 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		OutputText:               outputText,
 		ReasoningText:            reasoningText,
 		ToolNames:                toolNames,
+		ToolDefinitions:          toolDefinitionSnapshots(toolDefs),
 		PromptName:               prompt.Name,
 		PromptVersion:            prompt.Version,
 	}, round, startedAt)
@@ -472,6 +473,41 @@ func recordLangfuseGeneration(ctx context.Context, model string, usage UsageInfo
 		endOpts = append(endOpts, trace.WithTimestamp(startedAt.Add(time.Duration(latencyMs)*time.Millisecond)))
 	}
 	span.End(endOpts...)
+}
+
+func toolDefinitionSnapshots(tools []Tool) []observability.ToolDefinitionSnapshot {
+	if len(tools) == 0 {
+		return nil
+	}
+	out := make([]observability.ToolDefinitionSnapshot, 0, len(tools))
+	for _, tool := range tools {
+		switch {
+		case tool.ServerTool != nil:
+			name := tool.ServerTool.Name
+			if name == "" {
+				name = tool.ServerTool.Type
+			}
+			out = append(out, observability.ToolDefinitionSnapshot{
+				Name: name,
+				Type: fallbackString(tool.Type, "server_tool"),
+			})
+		case tool.Function.Name != "":
+			out = append(out, observability.ToolDefinitionSnapshot{
+				Name:        tool.Function.Name,
+				Type:        fallbackString(tool.Type, "function"),
+				Description: tool.Function.Description,
+				InputSchema: tool.Function.Parameters,
+			})
+		}
+	}
+	return out
+}
+
+func fallbackString(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func langfuseGenerationName(spanName string) string {
@@ -1380,7 +1416,7 @@ func getJSONFromLLMOnce(ctx context.Context, model, system, message string, prov
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_json")
 			}
 		}
-		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_json", 1, start, msgs, content, "", nil)
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_json", 1, start, msgs, content, "", nil, nil)
 	}
 
 	return content, nil
@@ -1493,7 +1529,7 @@ func getTextFromLLMOnce(ctx context.Context, model, system, message string, prov
 				tracker.Record(model, parsed.Usage, latencyMs, false, "get_text")
 			}
 		}
-		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_text", 1, start, msgs, content, "", nil)
+		recordLangfuseGeneration(ctx, model, parsed.Usage, latencyMs, false, "get_text", 1, start, msgs, content, "", nil, nil)
 	}
 
 	// Detect truncated responses — the model hit max_tokens before finishing.
@@ -2249,7 +2285,7 @@ func StreamWithTools(
 					}
 				}
 			}
-			recordLangfuseGeneration(roundCtx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, fullReasoning.String(), toolNames)
+			recordLangfuseGeneration(roundCtx, model, roundUsage, roundLatency, true, "stream_with_tools", round, roundStart, currentMessages, outputForTracking, fullReasoning.String(), toolNames, roundTools)
 		}
 
 		// If LLM wants to call tools — discard buffered chunks (they're reasoning, not code)

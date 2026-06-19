@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	defaultLangfuseBaseURL = "https://cloud.langfuse.com"
-	langfuseOTELPath       = "/api/public/otel/v1/traces"
-	maxObservationPayload  = 200_000
-	maxToolInputPayload    = 50_000
+	defaultLangfuseBaseURL    = "https://cloud.langfuse.com"
+	langfuseOTELPath          = "/api/public/otel/v1/traces"
+	maxObservationPayload     = 200_000
+	maxToolInputPayload       = 50_000
+	maxToolDefinitionsPayload = 100_000
 )
 
 type LangfuseConfig struct {
@@ -129,8 +130,16 @@ type GenerationAttributeInput struct {
 	OutputText               string
 	ReasoningText            string
 	ToolNames                []string
+	ToolDefinitions          []ToolDefinitionSnapshot
 	PromptName               string
 	PromptVersion            int
+}
+
+type ToolDefinitionSnapshot struct {
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
 }
 
 func LangfuseConfigFromEnv() LangfuseConfig {
@@ -310,7 +319,20 @@ func GenerationAttributes(entry GenerationAttributeInput, round int) []attribute
 	if len(entry.ToolNames) > 0 {
 		attrs = append(attrs, attribute.StringSlice("langfuse.observation.metadata.tools", dedupeOrdered(entry.ToolNames)))
 	}
+	if len(entry.ToolDefinitions) > 0 {
+		if raw := toolDefinitionsJSON(entry.ToolDefinitions); raw != "" {
+			attrs = append(attrs, attribute.String("langfuse.observation.metadata.tool_definitions", truncateLangfusePayload(raw, maxToolDefinitionsPayload)))
+		}
+	}
 	return attrs
+}
+
+func toolDefinitionsJSON(defs []ToolDefinitionSnapshot) string {
+	raw, err := json.Marshal(defs)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func ToolAttributes(toolName, input string, output string, isError bool, durationMs int) []attribute.KeyValue {

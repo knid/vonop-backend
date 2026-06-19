@@ -110,8 +110,6 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 			m.SkillIDs = appendUniqueLimited(m.SkillIDs, []string{id}, 40)
 			m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Loaded skill %s.", id), 30)
 		}
-	case "update_todos":
-		m.Decisions = appendLimited(m.Decisions, "Updated structured TODO state.", 30)
 	case "trigger_build_after_fix", "trigger_web_deploy":
 		m.Completed = appendLimited(m.Completed, firstNonEmpty(firstLine(result, 180), name+" completed"), 40)
 	}
