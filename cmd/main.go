@@ -1498,6 +1498,11 @@ func main() {
 				r.Get("/upstream", httpViews.HandleEdgeUpstream)
 			})
 		})
+		r.Route("/internal/preview", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/resolve", httpViews.ResolvePreviewHost)
+			r.HandleFunc("/proxy", httpViews.HandlePreviewProxy)
+		})
 
 		r.Route("/internal/health", func(r chi.Router) {
 			r.Use(appMiddleware.InternalOnly(edgeToken))
