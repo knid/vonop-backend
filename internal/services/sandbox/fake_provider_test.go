@@ -8,11 +8,14 @@ import (
 type fakeProvider struct {
 	sandboxID        string
 	createErr        error
+	statusState      State
+	statusLastError  string
 	files            []FileDelta
 	startCalls       int
 	startErr         error
 	writeErr         error
 	started          []ProcessName
+	stopped          []ProcessName
 	startProcessErr  error
 	previews         map[int]string
 	previewErr       error
@@ -28,7 +31,11 @@ func (f *fakeProvider) Create(ctx context.Context, plan RuntimePlan) (string, er
 }
 
 func (f *fakeProvider) GetStatus(ctx context.Context, sandboxID string, plan RuntimePlan) (*Status, error) {
-	return &Status{Provider: ProviderDaytona, SandboxID: sandboxID, State: StateReady, PreviewURLs: map[PreviewKind]string{}}, nil
+	state := f.statusState
+	if state == "" {
+		state = StateReady
+	}
+	return &Status{Provider: ProviderDaytona, SandboxID: sandboxID, State: state, LastError: f.statusLastError, PreviewURLs: map[PreviewKind]string{}}, nil
 }
 
 func (f *fakeProvider) Start(ctx context.Context, sandboxID string) error {
@@ -63,6 +70,7 @@ func (f *fakeProvider) StartProcess(ctx context.Context, sandboxID string, spec 
 }
 
 func (f *fakeProvider) StopProcess(ctx context.Context, sandboxID string, name ProcessName) error {
+	f.stopped = append(f.stopped, name)
 	return nil
 }
 

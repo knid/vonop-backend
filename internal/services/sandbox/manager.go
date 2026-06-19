@@ -103,22 +103,18 @@ func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Stat
 		enrichmentErrs = append(enrichmentErrs, fmt.Sprintf("process states: %v", err))
 	}
 	if len(enrichmentErrs) > 0 {
-		st.State = StateDegraded
-		st.LastError = strings.Join(enrichmentErrs, "; ")
+		if st.State == StateReady {
+			st.State = StateDegraded
+		}
+		st.LastError = appendLastError(st.LastError, strings.Join(enrichmentErrs, "; "))
 		st.RecommendedAction = "retry status refresh or run diagnostics"
 	}
 	return st, nil
 }
 
 func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files map[string]string) error {
-	if _, err := m.providerClient(); err != nil {
+	if _, _, err := m.startedProject(project); err != nil {
 		return err
-	}
-	if project == nil {
-		return errors.New("project is nil")
-	}
-	if project.SandboxID == "" {
-		return fmt.Errorf("sandbox is not started")
 	}
 	return m.syncFiles(ctx, project.SandboxID, BuildRuntimePlan(project), files)
 }
@@ -144,15 +140,9 @@ func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimeP
 }
 
 func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, route, setBy string) (*PreviewTarget, error) {
-	provider, err := m.providerClient()
+	provider, sandboxID, err := m.startedProject(project)
 	if err != nil {
 		return nil, err
-	}
-	if project == nil {
-		return nil, errors.New("project is nil")
-	}
-	if project.SandboxID == "" {
-		return nil, fmt.Errorf("sandbox is not started")
 	}
 	if route == "" {
 		route = "/"
@@ -165,7 +155,7 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	if !ok {
 		return nil, fmt.Errorf("default preview is unavailable")
 	}
-	base, err := provider.PreviewURL(ctx, project.SandboxID, port)
+	base, err := provider.PreviewURL(ctx, sandboxID, port)
 	if err != nil {
 		return nil, err
 	}
@@ -196,6 +186,119 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	}, nil
 }
 
+func (m *Manager) Stop(ctx context.Context, project *models.AppProject) error {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return err
+	}
+	return provider.Stop(ctx, sandboxID)
+}
+
+func (m *Manager) RestartProcess(ctx context.Context, project *models.AppProject, name ProcessName) error {
+	provider, sandboxID, spec, err := m.processSpec(project, name)
+	if err != nil {
+		return err
+	}
+	if err := provider.StopProcess(ctx, sandboxID, name); err != nil {
+		return fmt.Errorf("stop process %s: %w", name, err)
+	}
+	if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
+		return fmt.Errorf("start process %s: %w", name, err)
+	}
+	return nil
+}
+
+func (m *Manager) ProcessLogs(ctx context.Context, project *models.AppProject, name ProcessName, lines int) (*LogsResult, error) {
+	provider, sandboxID, spec, err := m.processSpec(project, name)
+	if err != nil {
+		return nil, err
+	}
+	return provider.ProcessLogs(ctx, sandboxID, spec, lines)
+}
+
+func (m *Manager) Execute(ctx context.Context, project *models.AppProject, command, cwd string, timeoutMs int) (string, string, int, error) {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return "", "", 0, err
+	}
+	return provider.Execute(ctx, sandboxID, command, cwd, timeoutMs)
+}
+
+func (m *Manager) CreateTerminal(ctx context.Context, project *models.AppProject, cols, rows int) (*Terminal, error) {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return nil, err
+	}
+	return provider.CreateTerminal(ctx, sandboxID, cols, rows)
+}
+
+func (m *Manager) SendTerminalInput(ctx context.Context, project *models.AppProject, terminalID, input string) error {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return err
+	}
+	return provider.SendTerminalInput(ctx, sandboxID, terminalID, input)
+}
+
+func (m *Manager) CloseTerminal(ctx context.Context, project *models.AppProject, terminalID string) error {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return err
+	}
+	return provider.CloseTerminal(ctx, sandboxID, terminalID)
+}
+
+func (m *Manager) CreateSnapshot(ctx context.Context, project *models.AppProject) (*Snapshot, error) {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return nil, err
+	}
+	return provider.CreateSnapshot(ctx, sandboxID)
+}
+
+func (m *Manager) RestoreSnapshot(ctx context.Context, project *models.AppProject, snapshotID string) error {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return err
+	}
+	return provider.RestoreSnapshot(ctx, sandboxID, snapshotID)
+}
+
+func (m *Manager) RunDiagnostics(ctx context.Context, project *models.AppProject) (*DiagnosticsResult, error) {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return nil, err
+	}
+	return provider.RunDiagnostics(ctx, sandboxID, BuildRuntimePlan(project))
+}
+
+func (m *Manager) startedProject(project *models.AppProject) (ProviderClient, string, error) {
+	provider, err := m.providerClient()
+	if err != nil {
+		return nil, "", err
+	}
+	if project == nil {
+		return nil, "", errors.New("project is nil")
+	}
+	if project.SandboxID == "" {
+		return nil, "", fmt.Errorf("sandbox is not started")
+	}
+	return provider, project.SandboxID, nil
+}
+
+func (m *Manager) processSpec(project *models.AppProject, name ProcessName) (ProviderClient, string, ProcessSpec, error) {
+	provider, sandboxID, err := m.startedProject(project)
+	if err != nil {
+		return nil, "", ProcessSpec{}, err
+	}
+	for _, spec := range BuildRuntimePlan(project).Processes {
+		if spec.Name == name {
+			return provider, sandboxID, spec, nil
+		}
+	}
+	return nil, "", ProcessSpec{}, fmt.Errorf("process %s not found in runtime plan", name)
+}
+
 func (m *Manager) providerClient() (ProviderClient, error) {
 	if m == nil || isNilProvider(m.provider) {
 		return nil, errors.New("provider is nil")
@@ -214,6 +317,16 @@ func isNilProvider(provider ProviderClient) bool {
 	default:
 		return false
 	}
+}
+
+func appendLastError(existing, next string) string {
+	if existing == "" {
+		return next
+	}
+	if next == "" {
+		return existing
+	}
+	return existing + "; " + next
 }
 
 func cleanFilePath(filePath string) (string, error) {

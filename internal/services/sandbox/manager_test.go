@@ -293,6 +293,33 @@ func TestManagerStatusDegradesOnProcessStateFailure(t *testing.T) {
 	}
 }
 
+func TestManagerStatusPreservesStoppedStateOnEnrichmentFailure(t *testing.T) {
+	fp := newFakeProvider()
+	fp.statusState = StateStopped
+	fp.statusLastError = "sandbox stopped"
+	fp.previewErr = errors.New("preview unavailable")
+	fp.processStatesErr = errors.New("process states unavailable")
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	status, err := m.Status(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateStopped {
+		t.Fatalf("state = %q", status.State)
+	}
+	if !strings.Contains(status.LastError, "sandbox stopped") ||
+		!strings.Contains(status.LastError, "preview unavailable") ||
+		!strings.Contains(status.LastError, "process states unavailable") {
+		t.Fatalf("last error = %q", status.LastError)
+	}
+	if status.RecommendedAction == "" {
+		t.Fatalf("recommended action is empty")
+	}
+}
+
 func TestManagerOpenRoutePreservesProviderBasePath(t *testing.T) {
 	fp := newFakeProvider()
 	fp.previews[3000] = "https://host.example.test/sandbox/abc"
@@ -306,5 +333,68 @@ func TestManagerOpenRoutePreservesProviderBasePath(t *testing.T) {
 	}
 	if target.URL != "https://host.example.test/sandbox/abc/checkout" {
 		t.Fatalf("url = %q", target.URL)
+	}
+}
+
+func TestManagerRestartProcessStopsAndStartsKnownProcess(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	err := m.RestartProcess(context.Background(), project, ProcessFrontend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fp.stopped) != 1 || fp.stopped[0] != ProcessFrontend {
+		t.Fatalf("stopped = %#v", fp.stopped)
+	}
+	if len(fp.started) != 1 || fp.started[0] != ProcessFrontend {
+		t.Fatalf("started = %#v", fp.started)
+	}
+}
+
+func TestManagerRestartProcessRejectsUnknownProcess(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	err := m.RestartProcess(context.Background(), project, ProcessName("missing"))
+	if err == nil || !strings.Contains(err.Error(), "process missing not found") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(fp.stopped) != 0 || len(fp.started) != 0 {
+		t.Fatalf("stopped = %#v started = %#v", fp.stopped, fp.started)
+	}
+}
+
+func TestManagerProcessLogsReturnsLogsForKnownProcess(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	logs, err := m.ProcessLogs(context.Background(), project, ProcessFrontend, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logs.Process != ProcessFrontend || logs.Content != "ok" {
+		t.Fatalf("logs = %#v", logs)
+	}
+}
+
+func TestManagerProcessLogsRejectsUnknownProcess(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	logs, err := m.ProcessLogs(context.Background(), project, ProcessName("missing"), 50)
+	if err == nil || !strings.Contains(err.Error(), "process missing not found") {
+		t.Fatalf("err = %v", err)
+	}
+	if logs != nil {
+		t.Fatalf("logs = %#v", logs)
 	}
 }
