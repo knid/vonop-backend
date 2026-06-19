@@ -49,9 +49,9 @@ func TestBuildSystemMessages_IncludesSandboxRuntimeGuidance(t *testing.T) {
 	joined := concatMessages(msgs)
 
 	for _, want := range []string{
-		"/home/user/project",
-		"/home/user/backend",
-		"/home/user/artifacts",
+		"/workspace/project",
+		"/workspace/backend",
+		"/workspace/artifacts",
 		"sandbox_status",
 		"sandbox_exec",
 		"Set cwd",

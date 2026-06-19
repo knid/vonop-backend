@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -158,10 +159,13 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	switch req.Action {
 	case "status":
 		status, err := c.SandboxManager.Status(ctx, project)
-		if err != nil {
-			return nil, err
-		}
-		return map[string]any{"status": status, "sandbox_id": project.SandboxID}, nil
+		return structToMap(status), err
+	case "start":
+		status, err := c.StartSandbox(ctx, project)
+		return structToMap(status), err
+	case "sync":
+		err := c.SyncSandbox(ctx, project)
+		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
 	case "exec":
 		stdout, stderr, exitCode, err := c.SandboxManager.Execute(ctx, project, req.Command, req.Cwd, req.TimeoutMs)
 		out := map[string]any{
@@ -171,26 +175,29 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 			"sandbox_id": project.SandboxID,
 		}
 		return out, err
-	case "logs":
-		logs, err := c.SandboxManager.ProcessLogs(ctx, project, sandboxProcessName(req.Target), 200)
+	case "logs", "process_logs":
+		logs, err := c.SandboxManager.ProcessLogs(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)), 200)
 		if err != nil {
 			return nil, err
 		}
 		return map[string]any{"logs": logs, "sandbox_id": project.SandboxID}, nil
-	case "restart_process":
-		err := c.SandboxManager.RestartProcess(ctx, project, sandboxProcessName(req.Target))
+	case "restart_process", "process_restart":
+		err := c.SandboxManager.RestartProcess(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)))
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
-	case "open_route":
+	case "open_route", "preview_open_route":
 		target, err := c.SandboxManager.OpenRoute(ctx, project, req.Route, "agent")
-		return map[string]any{"preview": target, "sandbox_id": project.SandboxID}, err
+		return structToMap(target), err
+	case "serve_artifact", "serve-artifact":
+		target, err := c.SandboxManager.OpenArtifact(ctx, project, req.Path, "agent")
+		return structToMap(target), err
 	case "diagnostics":
 		diagnostics, err := c.SandboxManager.RunDiagnostics(ctx, project)
-		return map[string]any{"diagnostics": diagnostics, "sandbox_id": project.SandboxID}, err
+		return structToMap(diagnostics), err
 	case "terminal_create":
-		terminal, err := c.SandboxManager.CreateTerminal(ctx, project, 80, 24)
-		return map[string]any{"terminal": terminal, "sandbox_id": project.SandboxID}, err
+		terminal, err := c.SandboxManager.CreateTerminal(ctx, project, req.Cols, req.Rows)
+		return structToMap(terminal), err
 	case "terminal_input":
-		err := c.SandboxManager.SendTerminalInput(ctx, project, req.Target, req.Content)
+		err := c.SandboxManager.SendTerminalInput(ctx, project, req.Target, firstNonEmptySandboxValue(req.Input, req.Content))
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
 	case "terminal_close":
 		err := c.SandboxManager.CloseTerminal(ctx, project, req.Target)
@@ -202,12 +209,33 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	}
 }
 
+func structToMap(v any) map[string]any {
+	if v == nil {
+		return map[string]any{}
+	}
+	b, _ := json.Marshal(v)
+	out := map[string]any{}
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+func firstNonEmptySandboxValue(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
 func sandboxProcessName(target string) sandboxService.ProcessName {
 	switch target {
-	case "backend":
+	case string(sandboxService.ProcessBackend):
 		return sandboxService.ProcessBackend
-	case "expo_go":
+	case string(sandboxService.ProcessExpoGo):
 		return sandboxService.ProcessExpoGo
+	case string(sandboxService.ProcessExpoWeb):
+		return sandboxService.ProcessExpoWeb
 	case "artifacts", "artifact":
 		return sandboxService.ProcessArtifacts
 	default:

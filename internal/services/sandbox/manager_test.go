@@ -63,6 +63,33 @@ func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	}
 }
 
+func TestManagerOpenArtifactStartsServerAndBuildsPreviewTarget(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+
+	target, err := m.OpenArtifact(context.Background(), project, "/workspace/artifacts/reports/summary.html", "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Kind != PreviewArtifacts {
+		t.Fatalf("kind = %q", target.Kind)
+	}
+	if target.Label != "summary.html" {
+		t.Fatalf("label = %q", target.Label)
+	}
+	if target.SetBy != "agent" {
+		t.Fatalf("set_by = %q", target.SetBy)
+	}
+	if target.URL != "https://provider-7000.example.test/reports/summary.html" {
+		t.Fatalf("url = %q", target.URL)
+	}
+	if len(fp.started) != 1 || fp.started[0] != ProcessArtifacts {
+		t.Fatalf("started = %#v", fp.started)
+	}
+}
+
 func TestManagerMethodsRejectNilProject(t *testing.T) {
 	m := NewManager(newFakeProvider())
 	methods := map[string]func() error{
@@ -79,6 +106,10 @@ func TestManagerMethodsRejectNilProject(t *testing.T) {
 		},
 		"OpenRoute": func() error {
 			_, err := m.OpenRoute(context.Background(), nil, "/", "test")
+			return err
+		},
+		"OpenArtifact": func() error {
+			_, err := m.OpenArtifact(context.Background(), nil, "/workspace/artifacts/a.html", "test")
 			return err
 		},
 	}
@@ -120,6 +151,12 @@ func TestManagerMethodsRejectNilProvider(t *testing.T) {
 			_, err := NewManager(nil).OpenRoute(context.Background(), project, "/", "test")
 			return err
 		},
+		"OpenArtifact": func() error {
+			project := managerProject()
+			project.SandboxID = "sandbox-1"
+			_, err := NewManager(nil).OpenArtifact(context.Background(), project, "/workspace/artifacts/a.html", "test")
+			return err
+		},
 		"NilManager": func() error {
 			var m *Manager
 			_, err := m.Start(context.Background(), managerProject(), nil, nil)
@@ -137,6 +174,11 @@ func TestManagerMethodsRejectNilProvider(t *testing.T) {
 		"NilManagerOpenRoute": func() error {
 			var m *Manager
 			_, err := m.OpenRoute(context.Background(), managerProject(), "/", "test")
+			return err
+		},
+		"NilManagerOpenArtifact": func() error {
+			var m *Manager
+			_, err := m.OpenArtifact(context.Background(), managerProject(), "/workspace/artifacts/a.html", "test")
 			return err
 		},
 	}

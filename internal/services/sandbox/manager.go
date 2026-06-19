@@ -186,6 +186,44 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	}, nil
 }
 
+func (m *Manager) OpenArtifact(ctx context.Context, project *models.AppProject, artifactPath, setBy string) (*PreviewTarget, error) {
+	provider, sandboxID, spec, err := m.processSpec(project, ProcessArtifacts)
+	if err != nil {
+		return nil, err
+	}
+	cleanPath := path.Clean(strings.TrimSpace(artifactPath))
+	if cleanPath == "." || cleanPath == "/" || !strings.HasPrefix(cleanPath, ArtifactsRoot+"/") {
+		return nil, fmt.Errorf("artifact path must be under %s", ArtifactsRoot)
+	}
+	if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
+		return nil, fmt.Errorf("start artifact server: %w", err)
+	}
+	base, err := provider.PreviewURL(ctx, sandboxID, spec.Port)
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return nil, err
+	}
+	rel := strings.TrimPrefix(cleanPath, ArtifactsRoot+"/")
+	basePath := strings.TrimRight(u.Path, "/")
+	if basePath == "" {
+		u.Path = "/" + rel
+	} else {
+		u.Path = path.Join(basePath, rel)
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return &PreviewTarget{
+		URL:       u.String(),
+		Label:     path.Base(cleanPath),
+		Kind:      PreviewArtifacts,
+		SetBy:     setBy,
+		UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (m *Manager) Stop(ctx context.Context, project *models.AppProject) error {
 	provider, sandboxID, err := m.startedProject(project)
 	if err != nil {

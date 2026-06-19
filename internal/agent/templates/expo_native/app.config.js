@@ -8,8 +8,8 @@
 // account API and fail with "Input is required, but 'npx expo' is in
 // non-interactive mode" because the sandbox runs without an EXPO_TOKEN.
 //
-// Triggered by EXPO_GO_MODE=1 — set only by `startExpoGoMetro` in the
-// dashboard's /api/e2b/start route. The web Metro on port 8081 and
+// Triggered by EXPO_GO_MODE=1 — set only by the managed sandbox preview
+// runtime. The web Metro on port 8081 and
 // Codemagic production builds do NOT set this env var, so they get the
 // unmodified app.json (real EAS projectId, fingerprint policy intact for
 // OTA matching).
