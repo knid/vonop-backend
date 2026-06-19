@@ -11,22 +11,34 @@ import (
 )
 
 const (
-	KeepLastMessages             = 15
-	KeepLastToolResults          = 5
-	KeepLastTruncatedToolResults = 10
+	KeepLastMessages               = 15
+	KeepLastToolResults            = 5
+	KeepLastTruncatedToolResults   = 10
+	KeepLastSummarizedToolResults  = 10
+	TrimmedToolResultChars         = 4000
+	TrimmedToolArgChars            = 1200
+	SummarizedToolResultPreviewLen = 240
 )
 
 type HistoryWindowConfig struct {
-	KeepLastMessages             int
-	KeepLastToolResults          int
-	KeepLastTruncatedToolResults int
+	KeepLastMessages               int
+	KeepLastToolResults            int
+	KeepLastTruncatedToolResults   int
+	KeepLastSummarizedToolResults  int
+	TrimmedToolResultChars         int
+	TrimmedToolArgChars            int
+	SummarizedToolResultPreviewLen int
 }
 
 func defaultHistoryWindowConfig() HistoryWindowConfig {
 	return HistoryWindowConfig{
-		KeepLastMessages:             KeepLastMessages,
-		KeepLastToolResults:          KeepLastToolResults,
-		KeepLastTruncatedToolResults: KeepLastTruncatedToolResults,
+		KeepLastMessages:               KeepLastMessages,
+		KeepLastToolResults:            KeepLastToolResults,
+		KeepLastTruncatedToolResults:   KeepLastTruncatedToolResults,
+		KeepLastSummarizedToolResults:  KeepLastSummarizedToolResults,
+		TrimmedToolResultChars:         TrimmedToolResultChars,
+		TrimmedToolArgChars:            TrimmedToolArgChars,
+		SummarizedToolResultPreviewLen: SummarizedToolResultPreviewLen,
 	}
 }
 
@@ -35,22 +47,39 @@ func historyWindowConfigForRun(isFirstGen bool, rc *remoteconfig.Service) Histor
 	if rc == nil {
 		return cfg
 	}
-	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(isFirstGen)
+	messageKey, fullToolKey, truncatedToolKey, summarizedToolKey := historyWindowKeysForRun(isFirstGen)
 	cfg.KeepLastMessages = positiveOrDefault(rc.GetInt(messageKey, remoteconfig.Global), cfg.KeepLastMessages)
 	cfg.KeepLastToolResults = positiveOrDefault(rc.GetInt(fullToolKey, remoteconfig.Global), cfg.KeepLastToolResults)
 	cfg.KeepLastTruncatedToolResults = positiveOrDefault(rc.GetInt(truncatedToolKey, remoteconfig.Global), cfg.KeepLastTruncatedToolResults)
+	cfg.KeepLastSummarizedToolResults = positiveOrDefault(rc.GetInt(summarizedToolKey, remoteconfig.Global), cfg.KeepLastSummarizedToolResults)
+	cfg.TrimmedToolResultChars = positiveOrDefault(rc.GetInt(remoteconfig.AITrimToolResultChars, remoteconfig.Global), cfg.TrimmedToolResultChars)
+	cfg.TrimmedToolArgChars = positiveOrDefault(rc.GetInt(remoteconfig.AITrimToolArgChars, remoteconfig.Global), cfg.TrimmedToolArgChars)
 	return cfg
 }
 
-func historyWindowKeysForRun(isFirstGen bool) (remoteconfig.Key, remoteconfig.Key, remoteconfig.Key) {
-	if isFirstGen {
-		return remoteconfig.AIGenerationKeepLastMessages,
-			remoteconfig.AIGenerationKeepLastToolResults,
-			remoteconfig.AIGenerationKeepLastTruncatedToolResults
+func historyWindowKeysForRun(isFirstGen bool) (remoteconfig.Key, remoteconfig.Key, remoteconfig.Key, remoteconfig.Key) {
+	return remoteconfig.AIKeepLastMessages,
+		remoteconfig.AIKeepLastToolResults,
+		remoteconfig.AIKeepLastTruncatedToolResults,
+		remoteconfig.AIKeepLastSummarizedToolResults
+}
+
+func liveToolWindowKeysForRun(isFirstGen bool) (remoteconfig.Key, remoteconfig.Key, remoteconfig.Key) {
+	return remoteconfig.AIProcessKeepLastToolResults,
+		remoteconfig.AIProcessKeepLastTruncatedToolResults,
+		remoteconfig.AIProcessKeepLastSummarizedToolResults
+}
+
+func liveToolWindowConfigForRun(isFirstGen bool, historyCfg HistoryWindowConfig, rc *remoteconfig.Service) HistoryWindowConfig {
+	cfg := historyCfg
+	if rc == nil {
+		return cfg
 	}
-	return remoteconfig.AIBuilderKeepLastMessages,
-		remoteconfig.AIBuilderKeepLastToolResults,
-		remoteconfig.AIBuilderKeepLastTruncatedToolResults
+	fullToolKey, truncatedToolKey, summarizedToolKey := liveToolWindowKeysForRun(isFirstGen)
+	cfg.KeepLastToolResults = positiveOrDefault(rc.GetInt(fullToolKey, remoteconfig.Global), cfg.KeepLastToolResults)
+	cfg.KeepLastTruncatedToolResults = positiveOrDefault(rc.GetInt(truncatedToolKey, remoteconfig.Global), cfg.KeepLastTruncatedToolResults)
+	cfg.KeepLastSummarizedToolResults = positiveOrDefault(rc.GetInt(summarizedToolKey, remoteconfig.Global), cfg.KeepLastSummarizedToolResults)
+	return cfg
 }
 
 func positiveOrDefault(v, fallback int) int {
@@ -61,7 +90,7 @@ func positiveOrDefault(v, fallback int) int {
 }
 
 func historyToolMessageLimitForRun(cfg HistoryWindowConfig) int {
-	limit := cfg.KeepLastToolResults + cfg.KeepLastTruncatedToolResults
+	limit := cfg.KeepLastToolResults + cfg.KeepLastTruncatedToolResults + cfg.KeepLastSummarizedToolResults
 	if limit < 0 {
 		return 0
 	}
@@ -106,18 +135,26 @@ func convertHistoryForRun(history []models.AppChatMessage, cfg HistoryWindowConf
 
 func convertHistory(history []models.AppChatMessage) []utils.Message {
 	cfg := HistoryWindowConfig{
-		KeepLastMessages:             0,
-		KeepLastToolResults:          int(^uint(0) >> 1),
-		KeepLastTruncatedToolResults: 0,
+		KeepLastMessages:               0,
+		KeepLastToolResults:            int(^uint(0) >> 1),
+		KeepLastTruncatedToolResults:   0,
+		KeepLastSummarizedToolResults:  0,
+		TrimmedToolResultChars:         TrimmedToolResultChars,
+		TrimmedToolArgChars:            TrimmedToolArgChars,
+		SummarizedToolResultPreviewLen: SummarizedToolResultPreviewLen,
 	}
 	return convertHistoryWithWindow(history, cfg)
 }
 
 func convertHistoryWithToolLimit(history []models.AppChatMessage, maxToolResults int) []utils.Message {
 	cfg := HistoryWindowConfig{
-		KeepLastMessages:             0,
-		KeepLastToolResults:          maxToolResults,
-		KeepLastTruncatedToolResults: 0,
+		KeepLastMessages:               0,
+		KeepLastToolResults:            maxToolResults,
+		KeepLastTruncatedToolResults:   0,
+		KeepLastSummarizedToolResults:  0,
+		TrimmedToolResultChars:         TrimmedToolResultChars,
+		TrimmedToolArgChars:            TrimmedToolArgChars,
+		SummarizedToolResultPreviewLen: SummarizedToolResultPreviewLen,
 	}
 	if maxToolResults < 0 {
 		cfg.KeepLastToolResults = int(^uint(0) >> 1)
@@ -165,7 +202,7 @@ func convertHistoryWithWindow(history []models.AppChatMessage, cfg HistoryWindow
 				}
 				continue
 			}
-			msgs := convertAssistantPartsWithToolWindow(parts, toolModes, &toolIndex, keepTranscript[i])
+			msgs := convertAssistantPartsWithToolWindow(parts, toolModes, &toolIndex, keepTranscript[i], cfg)
 			out = append(out, msgs...)
 			continue
 		}
@@ -219,7 +256,7 @@ func countAssistantToolParts(history []models.AppChatMessage) int {
 }
 
 func convertAssistantParts(parts []models.ChatMessagePart) []utils.Message {
-	return convertAssistantPartsWithToolWindow(parts, nil, nil, true)
+	return convertAssistantPartsWithToolWindow(parts, nil, nil, true, defaultHistoryWindowConfig())
 }
 
 func convertAssistantPartsWithToolLimit(parts []models.ChatMessagePart, skipToolResults *int) ([]utils.Message, int) {
@@ -242,13 +279,14 @@ func convertAssistantPartsWithToolLimit(parts []models.ChatMessagePart, skipTool
 		modes[i] = toolHistoryFull
 	}
 	idx := 0
-	return convertAssistantPartsWithToolWindow(parts, modes, &idx, true), countToolMode(modes, toolHistoryDrop)
+	return convertAssistantPartsWithToolWindow(parts, modes, &idx, true, defaultHistoryWindowConfig()), countToolMode(modes, toolHistoryDrop)
 }
 
 type toolHistoryMode int
 
 const (
 	toolHistoryDrop toolHistoryMode = iota
+	toolHistorySummarized
 	toolHistoryTruncated
 	toolHistoryFull
 )
@@ -264,6 +302,10 @@ func toolHistoryModes(history []models.AppChatMessage, cfg HistoryWindowConfig) 
 	if truncated < 0 {
 		truncated = 0
 	}
+	summarized := cfg.KeepLastSummarizedToolResults
+	if summarized < 0 {
+		summarized = 0
+	}
 	fullStart := total - full
 	if fullStart < 0 {
 		fullStart = 0
@@ -272,12 +314,18 @@ func toolHistoryModes(history []models.AppChatMessage, cfg HistoryWindowConfig) 
 	if truncatedStart < 0 {
 		truncatedStart = 0
 	}
+	summarizedStart := truncatedStart - summarized
+	if summarizedStart < 0 {
+		summarizedStart = 0
+	}
 	for i := range modes {
 		switch {
 		case i >= fullStart:
 			modes[i] = toolHistoryFull
 		case i >= truncatedStart:
 			modes[i] = toolHistoryTruncated
+		case i >= summarizedStart:
+			modes[i] = toolHistorySummarized
 		default:
 			modes[i] = toolHistoryDrop
 		}
@@ -295,7 +343,7 @@ func countToolMode(modes []toolHistoryMode, want toolHistoryMode) int {
 	return n
 }
 
-func convertAssistantPartsWithToolWindow(parts []models.ChatMessagePart, modes []toolHistoryMode, toolIndex *int, includeText bool) []utils.Message {
+func convertAssistantPartsWithToolWindow(parts []models.ChatMessagePart, modes []toolHistoryMode, toolIndex *int, includeText bool, cfg HistoryWindowConfig) []utils.Message {
 	var out []utils.Message
 	var pendingText string
 	var pendingToolCalls []utils.ToolCall
@@ -342,8 +390,12 @@ func convertAssistantPartsWithToolWindow(parts []models.ChatMessagePart, modes [
 			args := string(p.Input)
 			result := p.Result
 			if mode == toolHistoryTruncated {
-				args = truncatedToolArgs(p)
-				result = truncatedToolResult(p)
+				args = trimmedToolArgs(p, cfg)
+				result = trimmedToolResult(p, cfg)
+			}
+			if mode == toolHistorySummarized {
+				args = summarizedToolArgs(p)
+				result = summarizedToolResult(p, cfg)
 			}
 			pendingToolCalls = append(pendingToolCalls, utils.ToolCall{
 				ID:   p.ToolCallID,
@@ -365,9 +417,27 @@ func convertAssistantPartsWithToolWindow(parts []models.ChatMessagePart, modes [
 	return out
 }
 
-func truncatedToolArgs(p models.ChatMessagePart) string {
+func trimmedToolArgs(p models.ChatMessagePart, cfg HistoryWindowConfig) string {
+	return trimToolArgsForLLM(p.Name, string(p.Input), cfg.TrimmedToolArgChars)
+}
+
+func trimmedToolResult(p models.ChatMessagePart, cfg HistoryWindowConfig) string {
+	result := trimToolResultForLLM(p.Name, p.Result, cfg.TrimmedToolResultChars)
+	if result == strings.TrimSpace(p.Result) {
+		return result
+	}
+	return strings.Join([]string{
+		fmt.Sprintf("Tool result truncated: %s", p.Name),
+		fmt.Sprintf("error: %t", p.IsError),
+		fmt.Sprintf("result_bytes: %d", len(p.Result)),
+		"",
+		result,
+	}, "\n")
+}
+
+func summarizedToolArgs(p models.ChatMessagePart) string {
 	payload := map[string]any{
-		"summary":            "truncated older tool call args",
+		"summary":            "metadata only for older tool call args",
 		"original_arg_bytes": len(p.Input),
 	}
 	if paths := extractToolPaths(string(p.Input)); len(paths) > 0 {
@@ -375,15 +445,15 @@ func truncatedToolArgs(p models.ChatMessagePart) string {
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return `{"summary":"truncated older tool call args"}`
+		return `{"summary":"metadata only for older tool call args"}`
 	}
 	return string(raw)
 }
 
-func truncatedToolResult(p models.ChatMessagePart) string {
+func summarizedToolResult(p models.ChatMessagePart, cfg HistoryWindowConfig) string {
 	paths := extractToolPaths(string(p.Input))
 	parts := []string{
-		fmt.Sprintf("Tool result truncated: %s", p.Name),
+		fmt.Sprintf("Tool result summary: %s", p.Name),
 		fmt.Sprintf("error: %t", p.IsError),
 		fmt.Sprintf("args_bytes: %d", len(p.Input)),
 		fmt.Sprintf("result_bytes: %d", len(p.Result)),
@@ -391,7 +461,11 @@ func truncatedToolResult(p models.ChatMessagePart) string {
 	if len(paths) > 0 {
 		parts = append(parts, "paths: "+strings.Join(paths, ", "))
 	}
-	if preview := firstLine(p.Result, 240); preview != "" {
+	previewLen := cfg.SummarizedToolResultPreviewLen
+	if previewLen <= 0 {
+		previewLen = SummarizedToolResultPreviewLen
+	}
+	if preview := firstLine(p.Result, previewLen); preview != "" {
 		parts = append(parts, "preview: "+preview)
 	}
 	return strings.Join(parts, "\n")

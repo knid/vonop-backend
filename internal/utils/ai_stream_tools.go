@@ -139,6 +139,7 @@ type toolCallWindowMode int
 
 const (
 	toolCallWindowDrop toolCallWindowMode = iota
+	toolCallWindowSummarize
 	toolCallWindowTruncate
 	toolCallWindowFull
 )
@@ -147,8 +148,10 @@ func trimToolCallsForWindow(
 	currentMessages []Message,
 	keepFull int,
 	keepTruncated int,
+	keepSummarized int,
 	trimArgs func(toolName, args string) string,
 	trimResults func(toolName, result string) string,
+	summarizeTool func(toolName, args, result string, isError bool) (string, string),
 ) []Message {
 	if keepFull < 0 {
 		keepFull = 0
@@ -156,8 +159,13 @@ func trimToolCallsForWindow(
 	if keepTruncated < 0 {
 		keepTruncated = 0
 	}
+	if keepSummarized < 0 {
+		keepSummarized = 0
+	}
 	type ref struct {
-		id string
+		id   string
+		name string
+		args string
 	}
 	var refs []ref
 	for _, msg := range currentMessages {
@@ -166,7 +174,13 @@ func trimToolCallsForWindow(
 		}
 		for _, tc := range msg.ToolCalls {
 			if tc.ID != "" {
-				refs = append(refs, ref{id: tc.ID})
+				name := ""
+				args := ""
+				if tc.Function != nil {
+					name = tc.Function.Name
+					args = tc.Function.Arguments
+				}
+				refs = append(refs, ref{id: tc.ID, name: name, args: args})
 			}
 		}
 	}
@@ -181,15 +195,26 @@ func trimToolCallsForWindow(
 	if truncatedStart < 0 {
 		truncatedStart = 0
 	}
-	modes := make(map[string]toolCallWindowMode, len(refs))
+	summarizedStart := truncatedStart - keepSummarized
+	if summarizedStart < 0 {
+		summarizedStart = 0
+	}
+	type toolCallWindowRef struct {
+		mode toolCallWindowMode
+		name string
+		args string
+	}
+	modes := make(map[string]toolCallWindowRef, len(refs))
 	for i, r := range refs {
 		switch {
 		case i >= fullStart:
-			modes[r.id] = toolCallWindowFull
+			modes[r.id] = toolCallWindowRef{mode: toolCallWindowFull, name: r.name, args: r.args}
 		case i >= truncatedStart:
-			modes[r.id] = toolCallWindowTruncate
+			modes[r.id] = toolCallWindowRef{mode: toolCallWindowTruncate, name: r.name, args: r.args}
+		case i >= summarizedStart:
+			modes[r.id] = toolCallWindowRef{mode: toolCallWindowSummarize, name: r.name, args: r.args}
 		default:
-			modes[r.id] = toolCallWindowDrop
+			modes[r.id] = toolCallWindowRef{mode: toolCallWindowDrop, name: r.name, args: r.args}
 		}
 	}
 	out := make([]Message, 0, len(currentMessages))
@@ -202,12 +227,23 @@ func trimToolCallsForWindow(
 			}
 			kept := make([]ToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
-				mode, ok := modes[tc.ID]
-				if !ok || mode == toolCallWindowFull {
+				ref, ok := modes[tc.ID]
+				if !ok || ref.mode == toolCallWindowFull {
 					kept = append(kept, tc)
 					continue
 				}
-				if mode == toolCallWindowDrop {
+				if ref.mode == toolCallWindowDrop {
+					continue
+				}
+				if ref.mode == toolCallWindowSummarize {
+					if summarizeTool == nil {
+						continue
+					}
+					if tc.Function != nil {
+						args, _ := summarizeTool(tc.Function.Name, tc.Function.Arguments, "", false)
+						tc.Function.Arguments = args
+					}
+					kept = append(kept, tc)
 					continue
 				}
 				if trimArgs != nil && tc.Function != nil {
@@ -221,11 +257,22 @@ func trimToolCallsForWindow(
 			}
 			out = append(out, msg)
 		case "tool":
-			mode, ok := modes[msg.ToolCallID]
-			if ok && mode == toolCallWindowDrop {
+			ref, ok := modes[msg.ToolCallID]
+			if ok && ref.mode == toolCallWindowDrop {
 				continue
 			}
-			if ok && mode == toolCallWindowTruncate && trimResults != nil {
+			if ok && ref.mode == toolCallWindowSummarize && summarizeTool == nil {
+				continue
+			}
+			if ok && ref.mode == toolCallWindowSummarize && summarizeTool != nil {
+				name := msg.Name
+				if name == "" {
+					name = ref.name
+				}
+				_, result := summarizeTool(name, ref.args, msg.Content, msg.IsError)
+				msg.Content = result
+			}
+			if ok && ref.mode == toolCallWindowTruncate && trimResults != nil {
 				msg.Content = trimResults(msg.Name, msg.Content)
 			}
 			out = append(out, msg)

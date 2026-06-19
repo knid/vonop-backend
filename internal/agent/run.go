@@ -645,6 +645,7 @@ func Run(
 	}
 
 	toolSchemas := registryToUtilsTools(registry)
+	liveToolCfg := liveToolWindowConfigForRun(isFirstGen, historyCfg, deps.RemoteConfig)
 
 	workflow := NewAgentRunWorkflow(nil)
 	loopResult, llmErr := workflow.ExecuteAgentLoop(ctx, AgentLoopInput{
@@ -663,14 +664,24 @@ func Run(
 			// Sonnet 4.6's non-extended output cap. Running at the provider
 			// max keeps the continuation dance (finish_reason=length → send
 			// "continue") from firing in all but pathological runs.
-			MaxTokens:              64000,
-			KeepRecentToolCalls:    historyCfg.KeepLastToolResults,
-			KeepTruncatedToolCalls: historyCfg.KeepLastTruncatedToolResults,
+			MaxTokens:               64000,
+			KeepRecentToolCalls:     liveToolCfg.KeepLastToolResults,
+			KeepTruncatedToolCalls:  liveToolCfg.KeepLastTruncatedToolResults,
+			KeepSummarizedToolCalls: liveToolCfg.KeepLastSummarizedToolResults,
 			TrimResults: func(toolName, result string) string {
 				return trimToolResultForLLM(toolName, result, trimToolResultChars)
 			},
 			TrimArgs: func(toolName, args string) string {
 				return trimToolArgsForLLM(toolName, args, trimToolArgChars)
+			},
+			SummarizeTool: func(toolName, args, result string, isError bool) (string, string) {
+				part := models.ChatMessagePart{
+					Name:    toolName,
+					Input:   []byte(args),
+					Result:  result,
+					IsError: isError,
+				}
+				return summarizedToolArgs(part), summarizedToolResult(part, liveToolCfg)
 			},
 			// Moonshot K2.6 prompt_cache_key: stable per-project so the system
 			// prompt is cached across runs. Only set for Moonshot — other
