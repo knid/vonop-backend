@@ -93,19 +93,15 @@ var AIMaxStructureFiles = Key{Flag: "rc-ai-max-structure-files", Fallback: 25}
 var AIBuilderToolMaxRounds = Key{Flag: "rc-ai-builder-tool-max-rounds", Fallback: 30}
 var AIGenerationMaxRounds = Key{Flag: "rc-ai-generation-max-rounds", Fallback: 8}
 var AIMaxTokensPerRun = Key{Flag: "rc-ai-max-tokens-per-run", Fallback: 150000}
-var AICompactAfterTokens = Key{Flag: "rc-ai-compact-after-tokens", Fallback: 80000}
-var AICompactIntervalTokens = Key{Flag: "rc-ai-compact-interval-tokens", Fallback: 40000}
 var AITrimToolResultChars = Key{Flag: "rc-ai-trim-tool-result-chars", Fallback: 3000}
 var AITrimToolArgChars = Key{Flag: "rc-ai-trim-tool-arg-chars", Fallback: 1000}
-var AIKeepRecentToolRounds = Key{Flag: "rc-ai-keep-recent-tool-rounds", Fallback: 5}
-var AIBuilderKeepRecentToolRounds = Key{Flag: "rc-ai-builder-keep-recent-tool-rounds", Fallback: 2}
-var AIGenerationKeepRecentToolRounds = Key{Flag: "rc-ai-generation-keep-recent-tool-rounds", Fallback: 5}
-var AIBuilderKeepLastMessages = Key{Flag: "rc-ai-builder-keep-last-messages", Fallback: 15}
-var AIBuilderKeepLastToolResults = Key{Flag: "rc-ai-builder-keep-last-tool-results", Fallback: 5}
-var AIBuilderKeepLastTruncatedToolResults = Key{Flag: "rc-ai-builder-keep-last-truncated-tool-results", Fallback: 10}
-var AIGenerationKeepLastMessages = Key{Flag: "rc-ai-generation-keep-last-messages", Fallback: 15}
-var AIGenerationKeepLastToolResults = Key{Flag: "rc-ai-generation-keep-last-tool-results", Fallback: 5}
-var AIGenerationKeepLastTruncatedToolResults = Key{Flag: "rc-ai-generation-keep-last-truncated-tool-results", Fallback: 10}
+var AIKeepLastMessages = Key{Flag: "rc-ai-keep-last-messages", Fallback: 15}
+var AIKeepLastToolResults = Key{Flag: "rc-ai-keep-last-tool-results", Fallback: 5}
+var AIKeepLastTruncatedToolResults = Key{Flag: "rc-ai-keep-last-truncated-tool-results", Fallback: 10}
+var AIKeepLastSummarizedToolResults = Key{Flag: "rc-ai-keep-last-summarized-tool-results", Fallback: 10}
+var AIProcessKeepLastToolResults = Key{Flag: "rc-ai-process-keep-last-tool-results", Fallback: 5}
+var AIProcessKeepLastTruncatedToolResults = Key{Flag: "rc-ai-process-keep-last-truncated-tool-results", Fallback: 10}
+var AIProcessKeepLastSummarizedToolResults = Key{Flag: "rc-ai-process-keep-last-summarized-tool-results", Fallback: 10}
 var AIMoonshotThinkingEnabled = Key{Flag: "rc-ai-moonshot-thinking-enabled", Fallback: true}
 
 // Nudge/Strip thresholds per project type. Draft (new project) gets more lenient

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -237,37 +238,91 @@ func TestConvertHistoryForRun_KeepsMessagesFullAndTruncatedToolResults(t *testin
 	for i := 0; i < 20; i++ {
 		history = append(history, models.AppChatMessage{Role: "user", Content: "old user"})
 	}
-	for i := 0; i < 18; i++ {
+	for i := 0; i < 30; i++ {
 		parts, _ := json.Marshal([]models.ChatMessagePart{
 			{Type: "text", Text: "assistant"},
-			{Type: "tool_call", ToolCallID: "tc" + string(rune('a'+i)), Name: "read_files", Input: []byte(`{"paths":["a.tsx"]}`), Result: "result " + string(rune('a'+i))},
+			{Type: "tool_call", ToolCallID: fmt.Sprintf("tc-%d", i), Name: "read_files", Input: []byte(`{"paths":["a.tsx"]}`), Result: strings.Repeat(fmt.Sprintf("result-%d-", i), 600)},
 		})
 		history = append(history, models.AppChatMessage{Role: "assistant", Content: "assistant", Parts: parts})
 	}
 
 	out := convertHistoryForRun(history, defaultHistoryWindowConfig())
 
-	userOrAssistant := 0
+	transcriptMessages := 0
 	toolResults := 0
 	truncatedToolResults := 0
+	summarizedToolResults := 0
 	for _, msg := range out {
-		if msg.Role == "user" || msg.Role == "assistant" {
-			userOrAssistant++
+		if msg.Role == "user" || (msg.Role == "assistant" && len(msg.ToolCalls) == 0) {
+			transcriptMessages++
 		}
 		if msg.Role == "tool" {
 			toolResults++
 			if strings.Contains(msg.Content, "Tool result truncated") {
 				truncatedToolResults++
 			}
+			if strings.Contains(msg.Content, "Tool result summary") {
+				summarizedToolResults++
+			}
 		}
 	}
-	assert.LessOrEqual(t, userOrAssistant, KeepLastMessages)
-	assert.Equal(t, KeepLastToolResults+KeepLastTruncatedToolResults, toolResults)
+	assert.LessOrEqual(t, transcriptMessages, KeepLastMessages)
+	assert.Equal(t, KeepLastToolResults+KeepLastTruncatedToolResults+KeepLastSummarizedToolResults, toolResults)
 	assert.Equal(t, KeepLastTruncatedToolResults, truncatedToolResults)
+	assert.Equal(t, KeepLastSummarizedToolResults, summarizedToolResults)
+}
+
+func TestConvertHistoryForRun_KeepsFullTrimmedSummarizedAndDropsOlderTools(t *testing.T) {
+	var history []models.AppChatMessage
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("tc-%d", i)
+		parts, _ := json.Marshal([]models.ChatMessagePart{
+			{Type: "text", Text: "assistant"},
+			{
+				Type:       "tool_call",
+				ToolCallID: id,
+				Name:       "grep",
+				Input:      []byte(fmt.Sprintf(`{"glob":"frontend/src/App.tsx","pattern":"needle-%d","context_lines":20}`, i)),
+				Result:     strings.Repeat(fmt.Sprintf("result-%d-", i), 30),
+			},
+		})
+		history = append(history, models.AppChatMessage{Role: "assistant", Content: "assistant", Parts: parts})
+	}
+
+	out := convertHistoryForRun(history, HistoryWindowConfig{
+		KeepLastMessages:               0,
+		KeepLastToolResults:            1,
+		KeepLastTruncatedToolResults:   2,
+		KeepLastSummarizedToolResults:  1,
+		TrimmedToolResultChars:         40,
+		TrimmedToolArgChars:            80,
+		SummarizedToolResultPreviewLen: 40,
+	})
+
+	var body strings.Builder
+	for _, msg := range out {
+		body.WriteString(msg.Content)
+		body.WriteString("\n")
+		for _, tc := range msg.ToolCalls {
+			body.WriteString(tc.ID)
+			body.WriteString(":")
+			body.WriteString(tc.Function.Arguments)
+			body.WriteString("\n")
+		}
+	}
+	got := body.String()
+	assert.NotContains(t, got, "tc-0")
+	assert.Contains(t, got, "tc-1")
+	assert.Contains(t, got, "Tool result summary: grep")
+	assert.Contains(t, got, "tc-2")
+	assert.Contains(t, got, "[trimmed")
+	assert.Contains(t, got, "tc-3")
+	assert.Contains(t, got, "tc-4")
+	assert.Contains(t, got, "result-4-result-4")
 }
 
 func TestHistoryLimitForRun(t *testing.T) {
-	assert.Equal(t, 15, historyToolMessageLimitForRun(defaultHistoryWindowConfig()))
+	assert.Equal(t, 25, historyToolMessageLimitForRun(defaultHistoryWindowConfig()))
 }
 
 func TestConvertHistoryForRun_KeepsToolUsageOutsideTranscriptWindow(t *testing.T) {
@@ -288,20 +343,25 @@ func TestConvertHistoryForRun_KeepsToolUsageOutsideTranscriptWindow(t *testing.T
 	assert.Contains(t, joined, "old tool result")
 }
 
-func TestHistoryWindowKeysForRunUsesBuilderKeysForEdits(t *testing.T) {
-	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(false)
+func TestHistoryWindowKeysForRunUsesGenericKeys(t *testing.T) {
+	for _, isFirstGen := range []bool{false, true} {
+		messageKey, fullToolKey, truncatedToolKey, summarizedToolKey := historyWindowKeysForRun(isFirstGen)
 
-	assert.Equal(t, "rc-ai-builder-keep-last-messages", messageKey.Flag)
-	assert.Equal(t, "rc-ai-builder-keep-last-tool-results", fullToolKey.Flag)
-	assert.Equal(t, "rc-ai-builder-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+		assert.Equal(t, "rc-ai-keep-last-messages", messageKey.Flag)
+		assert.Equal(t, "rc-ai-keep-last-tool-results", fullToolKey.Flag)
+		assert.Equal(t, "rc-ai-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+		assert.Equal(t, "rc-ai-keep-last-summarized-tool-results", summarizedToolKey.Flag)
+	}
 }
 
-func TestHistoryWindowKeysForRunUsesGenerationKeysForFirstGen(t *testing.T) {
-	messageKey, fullToolKey, truncatedToolKey := historyWindowKeysForRun(true)
+func TestLiveToolWindowKeysForRunUseGenericProcessKeys(t *testing.T) {
+	for _, isFirstGen := range []bool{false, true} {
+		fullToolKey, truncatedToolKey, summarizedToolKey := liveToolWindowKeysForRun(isFirstGen)
 
-	assert.Equal(t, "rc-ai-generation-keep-last-messages", messageKey.Flag)
-	assert.Equal(t, "rc-ai-generation-keep-last-tool-results", fullToolKey.Flag)
-	assert.Equal(t, "rc-ai-generation-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+		assert.Equal(t, "rc-ai-process-keep-last-tool-results", fullToolKey.Flag)
+		assert.Equal(t, "rc-ai-process-keep-last-truncated-tool-results", truncatedToolKey.Flag)
+		assert.Equal(t, "rc-ai-process-keep-last-summarized-tool-results", summarizedToolKey.Flag)
+	}
 }
 
 func TestConvertHistoryForRunDoesNotInjectRunContextMarkers(t *testing.T) {

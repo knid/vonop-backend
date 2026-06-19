@@ -982,8 +982,10 @@ func TestTrimToolCallsForWindowKeepsFullTruncatedAndDropsOlderCalls(t *testing.T
 		messages,
 		1,
 		2,
+		0,
 		func(toolName, args string) string { return "trimmed args " + toolName },
 		func(toolName, result string) string { return "trimmed result " + toolName },
+		nil,
 	)
 
 	var body strings.Builder
@@ -1009,6 +1011,104 @@ func TestTrimToolCallsForWindowKeepsFullTruncatedAndDropsOlderCalls(t *testing.T
 	}
 	if !strings.Contains(got, `tc4:{"path":"c.tsx","old_string":"a","new_string":"b"}`) || !strings.Contains(got, "result 4") {
 		t.Fatalf("latest call was not kept full:\n%s", got)
+	}
+}
+
+func TestTrimToolCallsForWindowKeepsSummariesBeforeDroppingOlderCalls(t *testing.T) {
+	messages := []Message{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{ID: "tc1", Function: &FunctionCall{Name: "read_files", Arguments: `{"paths":["a.tsx"]}`}},
+				{ID: "tc2", Function: &FunctionCall{Name: "grep", Arguments: `{"pattern":"needle"}`}},
+				{ID: "tc3", Function: &FunctionCall{Name: "multi_edit", Arguments: `{"path":"b.tsx"}`}},
+				{ID: "tc4", Function: &FunctionCall{Name: "edit_file", Arguments: `{"path":"c.tsx","old_string":"a","new_string":"b"}`}},
+			},
+		},
+		{Role: "tool", ToolCallID: "tc1", Name: "read_files", Content: "result 1"},
+		{Role: "tool", ToolCallID: "tc2", Name: "grep", Content: "Error: result 2", IsError: true},
+		{Role: "tool", ToolCallID: "tc3", Name: "multi_edit", Content: `{"changed":true,"path":"b.tsx","summary":"edited b.tsx (1 replacements, 1200 bytes)"}`},
+		{Role: "tool", ToolCallID: "tc4", Name: "edit_file", Content: "result 4"},
+	}
+
+	out := trimToolCallsForWindow(
+		messages,
+		1,
+		1,
+		1,
+		func(toolName, args string) string { return "trimmed args " + toolName },
+		func(toolName, result string) string { return "trimmed result " + toolName },
+		func(toolName, args, result string, isError bool) (string, string) {
+			return `{"summary":"metadata only"}`, fmt.Sprintf("summary result %s error=%t", toolName, isError)
+		},
+	)
+
+	var body strings.Builder
+	for _, msg := range out {
+		body.WriteString(msg.Content)
+		body.WriteString("\n")
+		for _, tc := range msg.ToolCalls {
+			body.WriteString(tc.ID)
+			body.WriteString(":")
+			body.WriteString(tc.Function.Arguments)
+			body.WriteString("\n")
+		}
+	}
+	got := body.String()
+	if strings.Contains(got, "tc1") || strings.Contains(got, "result 1") {
+		t.Fatalf("oldest tool call was not dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "tc2:{\"summary\":\"metadata only\"}") || !strings.Contains(got, "summary result grep error=true") {
+		t.Fatalf("summary call was not retained as metadata:\n%s", got)
+	}
+	if !strings.Contains(got, "tc3:trimmed args multi_edit") || !strings.Contains(got, "trimmed result multi_edit") {
+		t.Fatalf("trimmed call was not retained:\n%s", got)
+	}
+	if !strings.Contains(got, `tc4:{"path":"c.tsx","old_string":"a","new_string":"b"}`) || !strings.Contains(got, "result 4") {
+		t.Fatalf("latest call was not kept full:\n%s", got)
+	}
+}
+
+func TestTrimToolCallsForWindowDropsSummarizedCallsWhenSummarizerMissing(t *testing.T) {
+	messages := []Message{
+		{
+			Role: "assistant",
+			ToolCalls: []ToolCall{
+				{ID: "tc1", Function: &FunctionCall{Name: "read_files", Arguments: `{"paths":["a.tsx"]}`}},
+				{ID: "tc2", Function: &FunctionCall{Name: "grep", Arguments: `{"pattern":"needle"}`}},
+			},
+		},
+		{Role: "tool", ToolCallID: "tc1", Name: "read_files", Content: "result 1"},
+		{Role: "tool", ToolCallID: "tc2", Name: "grep", Content: "result 2"},
+	}
+
+	out := trimToolCallsForWindow(
+		messages,
+		1,
+		0,
+		1,
+		nil,
+		nil,
+		nil,
+	)
+
+	var body strings.Builder
+	for _, msg := range out {
+		body.WriteString(msg.Content)
+		body.WriteString("\n")
+		for _, tc := range msg.ToolCalls {
+			body.WriteString(tc.ID)
+			body.WriteString(":")
+			body.WriteString(tc.Function.Arguments)
+			body.WriteString("\n")
+		}
+	}
+	got := body.String()
+	if strings.Contains(got, "tc1") || strings.Contains(got, "result 1") {
+		t.Fatalf("summarized call was retained without summarizer:\n%s", got)
+	}
+	if !strings.Contains(got, `tc2:{"pattern":"needle"}`) || !strings.Contains(got, "result 2") {
+		t.Fatalf("latest full call was not retained:\n%s", got)
 	}
 }
 

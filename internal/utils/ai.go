@@ -918,6 +918,7 @@ type Message struct {
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 	Name             string     `json:"name,omitempty"`
 	Images           []string   `json:"-"` // base64 data URIs; excluded from default serialization
+	IsError          bool       `json:"-"` // internal-only tool result state used for history summaries
 }
 
 // MarshalJSON customises JSON output for Message: when Images is non-empty and
@@ -1546,25 +1547,27 @@ type ImageURLContent struct {
 
 // ToolCallConfig holds optional configuration for StreamWithTools.
 type ToolCallConfig struct {
-	MaxRounds              int                                                        // Maximum tool-calling rounds (default 10)
-	MaxTokens              int                                                        // Max completion tokens per round (default 16384)
-	TrimArgs               func(toolName, args string) string                         // Trim tool call arguments in history to reduce token usage
-	TrimResults            func(toolName, result string) string                       // Trim tool result messages in history to reduce token usage
-	InterceptToolCall      func(toolName, toolArgs string) (result string, skip bool) // Intercept tool calls before execution; if skip=true, use result and skip executor
-	FilterTools            func(tools []Tool) []Tool                                  // Called each round to filter/modify tools; return nil to strip all tools
-	OnToolCallStart        func(toolName string)                                      // Called when a tool call name is first detected during SSE streaming (before args are complete)
-	OnToolResult           func(toolName string, result string, isError bool)         // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
-	OnRoundStart           func(round int)                                            // Called at the start of each round (useful for resetting per-round state like text buffers)
-	MaxContinuations       int                                                        // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
-	ShouldContinue         func() bool                                                // Called before each round/continuation. Return false to abort. nil = always continue.
-	PromptCacheKey         string                                                     // Moonshot K2.6 session-level prompt cache key (sent on every round)
-	SessionID              string                                                     // OpenRouter sticky routing session ID for multi-turn caching
-	MaxMessages            int                                                        // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
-	RefreshPrefix          func(msg *Message)                                         // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
-	CompactHistory         func(messages []Message) ([]Message, bool)                 // Called before each round to replace old history with a compact LLM view. bool=true when changed.
-	KeepRecentToolRounds   int                                                        // Number of latest completed tool rounds to leave untrimmed. Older rounds may have args/results trimmed. Default 1.
-	KeepRecentToolCalls    int                                                        // Number of latest completed tool calls/results to leave full. Overrides KeepRecentToolRounds when set.
-	KeepTruncatedToolCalls int                                                        // Number of older completed tool calls/results to keep with trimmed args/results before dropping older calls.
+	MaxRounds               int                                                                // Maximum tool-calling rounds (default 10)
+	MaxTokens               int                                                                // Max completion tokens per round (default 16384)
+	TrimArgs                func(toolName, args string) string                                 // Trim tool call arguments in history to reduce token usage
+	TrimResults             func(toolName, result string) string                               // Trim tool result messages in history to reduce token usage
+	InterceptToolCall       func(toolName, toolArgs string) (result string, skip bool)         // Intercept tool calls before execution; if skip=true, use result and skip executor
+	FilterTools             func(tools []Tool) []Tool                                          // Called each round to filter/modify tools; return nil to strip all tools
+	OnToolCallStart         func(toolName string)                                              // Called when a tool call name is first detected during SSE streaming (before args are complete)
+	OnToolResult            func(toolName string, result string, isError bool)                 // Called after each tool executes (success, failure, dedup, or intercept). Useful for emitting tool_result SSE events.
+	OnRoundStart            func(round int)                                                    // Called at the start of each round (useful for resetting per-round state like text buffers)
+	MaxContinuations        int                                                                // Max finish_reason=length continuation rounds (default 3). -1 = disable continuations entirely.
+	ShouldContinue          func() bool                                                        // Called before each round/continuation. Return false to abort. nil = always continue.
+	PromptCacheKey          string                                                             // Moonshot K2.6 session-level prompt cache key (sent on every round)
+	SessionID               string                                                             // OpenRouter sticky routing session ID for multi-turn caching
+	MaxMessages             int                                                                // Maximum messages to send to the LLM; drops oldest non-system messages when exceeded. 0 = unlimited.
+	RefreshPrefix           func(msg *Message)                                                 // Called before each round (except round 0) to refresh the user-turn prefix (e.g. file tree). Modifies the message in-place.
+	CompactHistory          func(messages []Message) ([]Message, bool)                         // Called before each round to replace old history with a compact LLM view. bool=true when changed.
+	KeepRecentToolRounds    int                                                                // Number of latest completed tool rounds to leave untrimmed. Older rounds may have args/results trimmed. Default 1.
+	KeepRecentToolCalls     int                                                                // Number of latest completed tool calls/results to leave full. Overrides KeepRecentToolRounds when set.
+	KeepTruncatedToolCalls  int                                                                // Number of older completed tool calls/results to keep with trimmed args/results before dropping older calls.
+	KeepSummarizedToolCalls int                                                                // Number of older completed tool calls/results to keep as metadata-only summaries before dropping older calls.
+	SummarizeTool           func(toolName, args, result string, isError bool) (string, string) // Summarize old tool args/results when keeping metadata only.
 }
 
 // An optional ToolCallConfig can be passed to override defaults.
@@ -1612,9 +1615,11 @@ func StreamWithTools(
 	}
 	keepRecentToolCalls := 0
 	keepTruncatedToolCalls := 0
+	keepSummarizedToolCalls := 0
 	if len(opts) > 0 {
 		keepRecentToolCalls = opts[0].KeepRecentToolCalls
 		keepTruncatedToolCalls = opts[0].KeepTruncatedToolCalls
+		keepSummarizedToolCalls = opts[0].KeepSummarizedToolCalls
 	}
 	currentMessages := make([]Message, len(messages))
 	copy(currentMessages, messages)
@@ -1714,13 +1719,15 @@ func StreamWithTools(
 			roundSpan.End()
 		}
 		if len(opts) > 0 {
-			if keepRecentToolCalls > 0 || keepTruncatedToolCalls > 0 {
+			if keepRecentToolCalls > 0 || keepTruncatedToolCalls > 0 || keepSummarizedToolCalls > 0 {
 				currentMessages = trimToolCallsForWindow(
 					currentMessages,
 					keepRecentToolCalls,
 					keepTruncatedToolCalls,
+					keepSummarizedToolCalls,
 					opts[0].TrimArgs,
 					opts[0].TrimResults,
+					opts[0].SummarizeTool,
 				)
 			} else {
 				toolRoundHistory = trimToolRoundsOlderThan(
@@ -2361,13 +2368,13 @@ func StreamWithTools(
 					slog.Warn("tool returned empty result", "tool", toolName, "round", round)
 					result = "(no output)"
 				}
+				isErr := strings.HasPrefix(result, "Error:") ||
+					strings.Contains(result, " timed out after ") ||
+					strings.Contains(result, " panicked: ")
 				// Notify the caller so they can emit a tool_result SSE event.
 				// "Error: ..." prefix matches the convention used by executors for
 				// failure states and keeps the classifier simple on the frontend.
 				if len(opts) > 0 && opts[0].OnToolResult != nil {
-					isErr := strings.HasPrefix(result, "Error:") ||
-						strings.Contains(result, " timed out after ") ||
-						strings.Contains(result, " panicked: ")
 					opts[0].OnToolResult(toolName, result, isErr)
 				}
 				currentMessages = append(currentMessages, Message{
@@ -2375,6 +2382,7 @@ func StreamWithTools(
 					Content:    result,
 					ToolCallID: tc.ID,
 					Name:       toolName,
+					IsError:    isErr,
 				})
 			}
 
