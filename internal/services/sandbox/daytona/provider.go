@@ -25,8 +25,35 @@ const (
 )
 
 type sdkClient interface {
-	Create(ctx context.Context, params any, opts ...func(*sdkoptions.CreateSandbox)) (*daytonasdk.Sandbox, error)
-	Get(ctx context.Context, sandboxIDOrName string) (*daytonasdk.Sandbox, error)
+	Create(ctx context.Context, params any, opts ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error)
+	Get(ctx context.Context, sandboxIDOrName string) (sandboxHandle, error)
+}
+
+type sandboxHandle interface {
+	ID() string
+	State() string
+	ErrorReason() *string
+	Start(ctx context.Context) error
+	Stop(ctx context.Context) error
+	Archive(ctx context.Context) error
+	Delete(ctx context.Context) error
+	GetPreviewLink(ctx context.Context, port int) (string, error)
+	FileSystem() fileSystemAPI
+	Process() processAPI
+}
+
+type fileSystemAPI interface {
+	CreateFolder(ctx context.Context, path string) error
+	DeleteFile(ctx context.Context, path string, recursive bool) error
+	UploadFile(ctx context.Context, source any, destination string) error
+}
+
+type processAPI interface {
+	ExecuteCommand(ctx context.Context, command string, opts ...func(*sdkoptions.ExecuteCommand)) (*sdktypes.ExecuteResponse, error)
+	CreateSession(ctx context.Context, sessionID string) error
+	DeleteSession(ctx context.Context, sessionID string) error
+	ExecuteSessionCommand(ctx context.Context, sessionID, command string, runAsync bool, suppressInputEcho bool) (map[string]any, error)
+	CreatePty(ctx context.Context, id string, opts ...func(*sdkoptions.CreatePty)) (ptyHandle, error)
 }
 
 type ptyHandle interface {
@@ -44,6 +71,126 @@ type Provider struct {
 	mu            sync.Mutex
 }
 
+type sdkClientAdapter struct {
+	client *daytonasdk.Client
+}
+
+func (a sdkClientAdapter) Create(ctx context.Context, params any, opts ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error) {
+	sb, err := a.client.Create(ctx, params, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return sdkSandbox{sandbox: sb}, nil
+}
+
+func (a sdkClientAdapter) Get(ctx context.Context, sandboxIDOrName string) (sandboxHandle, error) {
+	sb, err := a.client.Get(ctx, sandboxIDOrName)
+	if err != nil {
+		return nil, err
+	}
+	return sdkSandbox{sandbox: sb}, nil
+}
+
+type sdkSandbox struct {
+	sandbox *daytonasdk.Sandbox
+}
+
+func (s sdkSandbox) ID() string {
+	if s.sandbox == nil {
+		return ""
+	}
+	return s.sandbox.ID
+}
+
+func (s sdkSandbox) State() string {
+	if s.sandbox == nil {
+		return ""
+	}
+	return string(s.sandbox.State)
+}
+
+func (s sdkSandbox) ErrorReason() *string {
+	if s.sandbox == nil {
+		return nil
+	}
+	return s.sandbox.ErrorReason
+}
+
+func (s sdkSandbox) Start(ctx context.Context) error {
+	return s.sandbox.Start(ctx)
+}
+
+func (s sdkSandbox) Stop(ctx context.Context) error {
+	return s.sandbox.Stop(ctx)
+}
+
+func (s sdkSandbox) Archive(ctx context.Context) error {
+	return s.sandbox.Archive(ctx)
+}
+
+func (s sdkSandbox) Delete(ctx context.Context) error {
+	return s.sandbox.Delete(ctx)
+}
+
+func (s sdkSandbox) GetPreviewLink(ctx context.Context, port int) (string, error) {
+	link, err := s.sandbox.GetPreviewLink(ctx, port)
+	if err != nil {
+		return "", err
+	}
+	if link == nil {
+		return "", nil
+	}
+	return link.URL, nil
+}
+
+func (s sdkSandbox) FileSystem() fileSystemAPI {
+	return sdkFileSystem{fileSystem: s.sandbox.FileSystem}
+}
+
+func (s sdkSandbox) Process() processAPI {
+	return sdkProcess{process: s.sandbox.Process}
+}
+
+type sdkFileSystem struct {
+	fileSystem *daytonasdk.FileSystemService
+}
+
+func (f sdkFileSystem) CreateFolder(ctx context.Context, path string) error {
+	return f.fileSystem.CreateFolder(ctx, path)
+}
+
+func (f sdkFileSystem) DeleteFile(ctx context.Context, path string, recursive bool) error {
+	return f.fileSystem.DeleteFile(ctx, path, recursive)
+}
+
+func (f sdkFileSystem) UploadFile(ctx context.Context, source any, destination string) error {
+	return f.fileSystem.UploadFile(ctx, source, destination)
+}
+
+type sdkProcess struct {
+	process *daytonasdk.ProcessService
+}
+
+func (p sdkProcess) ExecuteCommand(ctx context.Context, command string, opts ...func(*sdkoptions.ExecuteCommand)) (*sdktypes.ExecuteResponse, error) {
+	return p.process.ExecuteCommand(ctx, command, opts...)
+}
+
+func (p sdkProcess) CreateSession(ctx context.Context, sessionID string) error {
+	return p.process.CreateSession(ctx, sessionID)
+}
+
+func (p sdkProcess) DeleteSession(ctx context.Context, sessionID string) error {
+	return p.process.DeleteSession(ctx, sessionID)
+}
+
+func (p sdkProcess) ExecuteSessionCommand(ctx context.Context, sessionID, command string, runAsync bool, suppressInputEcho bool) (map[string]any, error) {
+	return p.process.ExecuteSessionCommand(ctx, sessionID, command, runAsync, suppressInputEcho)
+}
+
+func (p sdkProcess) CreatePty(ctx context.Context, id string, opts ...func(*sdkoptions.CreatePty)) (ptyHandle, error) {
+	return p.process.CreatePty(ctx, id, opts...)
+}
+
 func New(apiKey, target, previewDomain string) (*Provider, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, errors.New("daytona api key is required")
@@ -55,7 +202,7 @@ func New(apiKey, target, previewDomain string) (*Provider, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create daytona client: %w", err)
 	}
-	return NewWithClient(client, previewDomain), nil
+	return NewWithClient(sdkClientAdapter{client: client}, previewDomain), nil
 }
 
 func NewWithClient(client sdkClient, previewDomain string) *Provider {
@@ -92,10 +239,10 @@ func (p *Provider) Create(ctx context.Context, plan sandbox.RuntimePlan) (string
 	if err != nil {
 		return "", fmt.Errorf("create daytona sandbox: %w", err)
 	}
-	if created == nil || created.ID == "" {
+	if created == nil || created.ID() == "" {
 		return "", errors.New("create daytona sandbox: empty sandbox id")
 	}
-	return created.ID, nil
+	return created.ID(), nil
 }
 
 func (p *Provider) GetStatus(ctx context.Context, sandboxID string, plan sandbox.RuntimePlan) (*sandbox.Status, error) {
@@ -103,15 +250,15 @@ func (p *Provider) GetStatus(ctx context.Context, sandboxID string, plan sandbox
 	if err != nil {
 		return nil, err
 	}
-	state, recommended := mapState(string(sb.State))
+	state, recommended := mapState(sb.State())
 	st := &sandbox.Status{
 		Provider:          sandbox.ProviderDaytona,
-		SandboxID:         sb.ID,
+		SandboxID:         sb.ID(),
 		State:             state,
 		RecommendedAction: recommended,
 	}
-	if sb.ErrorReason != nil {
-		st.LastError = *sb.ErrorReason
+	if reason := sb.ErrorReason(); reason != nil {
+		st.LastError = *reason
 	}
 	return st, nil
 }
@@ -169,7 +316,7 @@ func (p *Provider) WriteFiles(ctx context.Context, sandboxID string, files []san
 		if root.Path == "" {
 			continue
 		}
-		if err := sb.FileSystem.CreateFolder(ctx, root.Path); err != nil {
+		if err := sb.FileSystem().CreateFolder(ctx, root.Path); err != nil {
 			return fmt.Errorf("create root %s: %w", root.Path, err)
 		}
 	}
@@ -179,18 +326,18 @@ func (p *Provider) WriteFiles(ctx context.Context, sandboxID string, files []san
 			return err
 		}
 		if file.Delete {
-			if err := sb.FileSystem.DeleteFile(ctx, dest, true); err != nil {
+			if err := sb.FileSystem().DeleteFile(ctx, dest, true); err != nil {
 				return fmt.Errorf("delete %s: %w", dest, err)
 			}
 			continue
 		}
 		dir := path.Dir(dest)
 		if dir != "." && dir != "/" {
-			if err := sb.FileSystem.CreateFolder(ctx, dir); err != nil {
+			if err := sb.FileSystem().CreateFolder(ctx, dir); err != nil {
 				return fmt.Errorf("create parent %s: %w", dir, err)
 			}
 		}
-		if err := sb.FileSystem.UploadFile(ctx, []byte(file.Content), dest); err != nil {
+		if err := sb.FileSystem().UploadFile(ctx, []byte(file.Content), dest); err != nil {
 			return fmt.Errorf("upload %s: %w", dest, err)
 		}
 	}
@@ -210,7 +357,7 @@ func (p *Provider) Execute(ctx context.Context, sandboxID, command, cwd string, 
 	if cwd != "" {
 		opts = append(opts, sdkoptions.WithCwd(cwd))
 	}
-	resp, err := sb.Process.ExecuteCommand(ctx, command, opts...)
+	resp, err := sb.Process().ExecuteCommand(ctx, command, opts...)
 	if err != nil {
 		return "", "", 0, fmt.Errorf("execute daytona command: %w", err)
 	}
@@ -233,12 +380,12 @@ func (p *Provider) StartProcess(ctx context.Context, sandboxID string, spec sand
 		return err
 	}
 	sessionID := processSessionID(spec.Name)
-	_ = sb.Process.DeleteSession(ctx, sessionID)
-	if err := sb.Process.CreateSession(ctx, sessionID); err != nil {
+	_ = sb.Process().DeleteSession(ctx, sessionID)
+	if err := sb.Process().CreateSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("create process session %s: %w", spec.Name, err)
 	}
 	command := processCommand(spec)
-	if _, err := sb.Process.ExecuteSessionCommand(ctx, sessionID, command, true, false); err != nil {
+	if _, err := sb.Process().ExecuteSessionCommand(ctx, sessionID, command, true, false); err != nil {
 		return fmt.Errorf("start process %s: %w", spec.Name, err)
 	}
 	return nil
@@ -253,7 +400,7 @@ func (p *Provider) StopProcess(ctx context.Context, sandboxID string, name sandb
 		return err
 	}
 	sessionID := processSessionID(name)
-	deleteErr := sb.Process.DeleteSession(ctx, sessionID)
+	deleteErr := sb.Process().DeleteSession(ctx, sessionID)
 	if port, ok := fallbackPort(name); ok {
 		_, _, _, _ = p.Execute(ctx, sandboxID, fmt.Sprintf("bash -lc %s", shellQuote(fmt.Sprintf("fuser -k %d/tcp 2>/dev/null || true", port))), "", 10000)
 	}
@@ -321,10 +468,10 @@ func (p *Provider) PreviewURL(ctx context.Context, sandboxID string, port int) (
 	if err != nil {
 		return "", fmt.Errorf("get daytona preview link for port %d: %w", port, err)
 	}
-	if link == nil || link.URL == "" {
+	if link == "" {
 		return "", fmt.Errorf("daytona preview link for port %d is empty", port)
 	}
-	return link.URL, nil
+	return link, nil
 }
 
 func (p *Provider) CreateTerminal(ctx context.Context, sandboxID string, cols, rows int) (*sandbox.Terminal, error) {
@@ -339,7 +486,7 @@ func (p *Provider) CreateTerminal(ctx context.Context, sandboxID string, cols, r
 		return nil, err
 	}
 	id := fmt.Sprintf("wemob-pty-%d", time.Now().UnixNano())
-	handle, err := sb.Process.CreatePty(ctx, id, sdkoptions.WithCreatePtySize(sdktypes.PtySize{Cols: cols, Rows: rows}))
+	handle, err := sb.Process().CreatePty(ctx, id, sdkoptions.WithCreatePtySize(sdktypes.PtySize{Cols: cols, Rows: rows}))
 	if err != nil {
 		return nil, fmt.Errorf("create daytona pty: %w", err)
 	}
@@ -434,7 +581,7 @@ func (p *Provider) RunDiagnostics(ctx context.Context, sandboxID string, plan sa
 	return &sandbox.DiagnosticsResult{Summary: "Daytona diagnostics complete", Items: items}, nil
 }
 
-func (p *Provider) get(ctx context.Context, sandboxID string) (*daytonasdk.Sandbox, error) {
+func (p *Provider) get(ctx context.Context, sandboxID string) (sandboxHandle, error) {
 	if err := p.ready(); err != nil {
 		return nil, err
 	}
@@ -447,6 +594,9 @@ func (p *Provider) get(ctx context.Context, sandboxID string) (*daytonasdk.Sandb
 	}
 	if sb == nil {
 		return nil, fmt.Errorf("get daytona sandbox %s: empty response", sandboxID)
+	}
+	if sb.ID() == "" {
+		return nil, fmt.Errorf("get daytona sandbox %s: empty sandbox id", sandboxID)
 	}
 	return sb, nil
 }

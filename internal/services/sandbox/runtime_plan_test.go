@@ -51,6 +51,15 @@ func TestRuntimePlanViteSplitWeb(t *testing.T) {
 	if plan.Previews[PreviewApp] != 3000 || plan.Previews[PreviewBackend] != 3001 {
 		t.Fatalf("preview ports = %#v", plan.Previews)
 	}
+	var frontend ProcessSpec
+	for _, process := range plan.Processes {
+		if process.Name == ProcessFrontend {
+			frontend = process
+		}
+	}
+	if frontend.Cwd != ProjectRoot+"/frontend" {
+		t.Fatalf("frontend cwd = %q", frontend.Cwd)
+	}
 }
 
 func TestRuntimePlanMobileNative(t *testing.T) {

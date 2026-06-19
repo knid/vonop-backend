@@ -57,6 +57,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		plan.Previews[PreviewBackend] = 3001
 		plan.Processes = append(plan.Processes, backendProcess())
 	case project.UsesSplitWebRuntime():
+		frontendRoot := ProjectRoot + "/frontend"
 		plan.DefaultPreview = PreviewApp
 		plan.Previews[PreviewApp] = 3000
 		if project.BackendEnabled && project.BackendRuntime == models.BackendRuntimeNextJSAPI {
@@ -66,7 +67,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		plan.Processes = append(plan.Processes, ProcessSpec{
 			Name:        ProcessFrontend,
 			Command:     "export NODE_OPTIONS='--max-old-space-size=3072' && npm run dev -- --config vite.config.preview.ts --host 0.0.0.0 --port 3000",
-			Cwd:         ProjectRoot,
+			Cwd:         frontendRoot,
 			Port:        3000,
 			Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:3000"},
 			LogPath:     "/tmp/wemob-frontend.log",
