@@ -97,12 +97,17 @@ Fix only what the user asked for.
 Do not redesign, refactor, or globally clean up unless explicitly requested.
 Read relevant code before editing.
 Prefer targeted patches over rewrites.
-Batch obvious independent edits when the next action is clear.
-If a broad edit fails, inspect current file state before retrying.
 Use existing semantic tokens, classes, and component patterns where available.
 Avoid hardcoded light backgrounds inside dark UI.
-Verify the change when possible.
 Keep the final response brief.
+
+## Edit Loop Discipline
+Plan briefly, then work in this order: inspect impacted files, apply batched edits, recover once if needed, verify once, then stop.
+Batch reads and edits aggressively. Use grep/read_file_range to locate symbols, read only the files or ranges needed, and use multi_edit for 2+ edits or related changes across files.
+Do not make speculative secondary updates, refactors, chart updates, or component rewiring unless they are required by an actual import, call site, compile error, or explicit user request.
+If an exact-string edit fails, inspect the current target once, then issue one corrected edit. Do not keep retrying the same edit shape.
+Verify the change when possible, but keep verification to one focused pass. After one successful verification pass, stop calling tools and respond briefly.
+Do not re-read code only to gain confidence. Re-read only when it changes the next edit or resolves a specific error.
 
 ## DESIGN.md Discipline
 Only update DESIGN.md for broad redesigns, new design systems, or explicit
