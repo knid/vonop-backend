@@ -182,54 +182,16 @@ func langfuseBasePromptName(profile *AgentProfile) string {
 }
 
 func buildModePromptWithLangfuse(ctx context.Context, deps *RunDependencies, profile *AgentProfile, isFirstGen bool) (string, observability.PromptLink) {
+	if profile != nil && profile.ID == AgentIDMobileBuilder {
+		if isFirstGen {
+			return resolveLangfusePrompt(ctx, deps, observability.PromptAgentMobileFirstGen, profile.ModePrompt(true), nil)
+		}
+		return resolveLangfusePrompt(ctx, deps, observability.PromptAgentMobileEdit, profile.ModePrompt(false), nil)
+	}
 	if isFirstGen {
-		return resolveLangfusePrompt(ctx, deps, observability.PromptAgentModeFirstGen, profile.ModePrompt(true), firstGenPromptVars(profile))
+		return resolveLangfusePrompt(ctx, deps, observability.PromptAgentWebFirstGen, profile.ModePrompt(true), nil)
 	}
-	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentModeEdit, profile.ModePrompt(false), editPromptVars(profile))
-}
-
-func firstGenPromptVars(profile *AgentProfile) map[string]string {
-	if profile != nil && profile.ID == AgentIDMobileBuilder {
-		return map[string]string{
-			"first_gen_intro":    "",
-			"home_first_title":   "home screen first",
-			"home_first_rule":    "On a new project, your VERY FIRST turn MUST customize mobile/app/(app)/index.tsx.\nIt must render a real home experience: header, hero/intro, primary CTA, and at\nleast one content block, even with stub data. Other screens come AFTER.\n\nWhy: runs can be cancelled mid-loop. If home lands first, the user sees\nsomething working. Treat this as a hard ordering constraint.\n\nThis rule does NOT apply when the FILE TREE already shows a customized home.",
-			"home_label":         "home",
-			"visible_surface":    "screen",
-			"run_order":          "  1. mobile/app/(app)/index.tsx                  (Home First)\n  2. Every other screen + component with stubs   (UI First)\n  3. Image generation                            (Images Last)\n  4. Database / native modules / integrations    (only if requested)",
-			"backend_exceptions": "This rule does NOT apply when the user explicitly asks for backend work first.",
-			"image_surface":      "screen",
-			"image_detail":       "Use __IMG_<SLOT>__ placeholder tokens, then swap them in a final edit_file pass.",
-			"resume_detail":      "Treat \"continue\" or \"devam et\" as a resume signal when it follows a failed run.",
-		}
-	}
-	return map[string]string{
-		"first_gen_intro":    "## First Generation Role\nFor first generation only, build production-grade web applications: SaaS apps,\ndashboards, storefronts, sites, blogs, and workflow tools. Use React,\nTypeScript, and Tailwind in the project runtime. Designs must be specific to\nthe user's domain, responsive, accessible, and free of overlapping text or\nbroken states.\n",
-		"home_first_title":   "design brief + layout & home first",
-		"home_first_rule":    "If DESIGN.md does not exist, your VERY FIRST assistant turn MUST include\ncreate_design with concrete values for register, design_direction,\ncolor_system, typography, layout, components, imagery, and accessibility.\nDo not create DESIGN.md with write_files unless create_design is unavailable.\n\nIf app/layout.tsx or app/page.tsx does not exist, that same first assistant\nturn MUST also include write_files for app/layout.tsx and app/page.tsx. Keep\ntool arguments valid JSON by writing smaller files or splitting large work\nacross multiple structured tool calls.\nDESIGN.md, layout, and home go in the SAME first turn when all are missing.\nAll other pages, components, sections, route handlers, and assets come AFTER.\n\nThis rule does NOT require rewriting app/layout.tsx or app/page.tsx when both\nalready exist. But if DESIGN.md is missing during first generation, create it\nbefore broad visual work.",
-		"home_label":         "layout + home",
-		"visible_surface":    "page/component",
-		"run_order":          "  1. DESIGN.md + app/layout.tsx + app/page.tsx (Design Brief + Layout & Home First)\n  2. Every other page + component with stubs   (UI First)\n  3. Image generation                          (Images Last)\n  4. Database / API routes / integrations      (when required)",
-		"backend_exceptions": "This rule does NOT apply when:\n- The user explicitly asks for backend / DB / integration work first\n  (\"hook up Stripe now\", \"switch the stubs to real data\").\n- The project already has the UI built and the request is a wiring task.\n- A project architecture addendum says backend is required by default for the\n  requested product behavior, such as content management, admin workflows,\n  contact submissions, persistence, auth, or cross-device data.",
-		"image_surface":      "page",
-		"image_detail":       "When a file needs imagery, write it first using a distinctive placeholder\ntoken as the image src: \"__IMG_<SLOT>__\". Each placeholder must appear exactly\nonce in the project so a later edit_file can swap it unambiguously.\n\nOnce every file is written, enter the image phase:\n1. Call generate_image for each placeholder, passing a detailed prompt,\n   width, height, and style.\n2. Immediately follow with edit_file, old_string = the placeholder token\n   (e.g. \"__IMG_HERO__\"), new_string = the returned URL.\n3. Repeat for every placeholder.",
-		"resume_detail":      "Treat \"continue\" or \"devam et\" as a resume signal when it follows a failed run.",
-	}
-}
-
-func editPromptVars(profile *AgentProfile) map[string]string {
-	if profile != nil && profile.ID == AgentIDMobileBuilder {
-		return map[string]string{
-			"project_kind":         "mobile project",
-			"platform_edit_rules":  "Make minimal, targeted changes that address the user's request. Preserve existing functionality, design patterns, and code style. Do not rewrite entire files unless the user explicitly asks for a redesign.\nRespect the existing file structure; do not create new files unless needed.\nWhen the user asks to change an image, replace the existing source directly; only use __IMG_<SLOT>__ placeholders when adding a brand-new image.",
-			"design_md_discipline": "",
-		}
-	}
-	return map[string]string{
-		"project_kind":         "app",
-		"platform_edit_rules":  "Preserve behavior and structure. Fix only what the user asked for. Do not redesign, refactor, or globally clean up unless explicitly requested.\nUse existing semantic tokens, classes, and component patterns where available. Avoid hardcoded light backgrounds inside dark UI.",
-		"design_md_discipline": "## DESIGN.md Discipline\nOnly update DESIGN.md for broad redesigns, new design systems, or explicit\nuser requests. Do not update DESIGN.md for targeted bug fixes such as dark\nmode, spacing, broken layout, or color contrast fixes.",
-	}
+	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentWebEdit, profile.ModePrompt(false), nil)
 }
 
 func resolveLangfusePrompt(ctx context.Context, deps *RunDependencies, name, fallback string, vars map[string]string) (string, observability.PromptLink) {
@@ -335,12 +297,12 @@ func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, 
 			}
 		}
 		if projectHasDatabase(project) {
-			a, link := buildDatabaseCapabilityWithLangfuse(ctx, deps, DatabaseAddendumNative, "native_backend")
+			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseNativeBackend, DatabaseAddendumNative, nil)
 			parts = append(parts, a)
 			links = append(links, link)
 		}
 		if projectHasLocalDatabase(project) {
-			a, link := buildDatabaseCapabilityWithLangfuse(ctx, deps, LocalDatabaseAddendum, "mobile_local")
+			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseMobileLocal, LocalDatabaseAddendum, nil)
 			parts = append(parts, a)
 			links = append(links, link)
 		}
@@ -355,11 +317,11 @@ func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, 
 	isEcommerce := project.ProjectType == "ecommerce"
 	isBackendOnly := project.FrontendRuntime == models.FrontendRuntimeNone
 	if isBackendOnly {
-		a, link := buildArchitectureAddendumWithLangfuse(ctx, deps, BackendOnlyAddendum, "backend_only")
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentArchitectureBackend, BackendOnlyAddendum, nil)
 		parts = append(parts, a)
 		links = append(links, link)
 	} else if project.UsesSplitWebRuntime() {
-		a, link := buildArchitectureAddendumWithLangfuse(ctx, deps, SplitWebAddendum, "split_web")
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentArchitectureSplitWeb, SplitWebAddendum, nil)
 		parts = append(parts, a)
 		links = append(links, link)
 	}
@@ -374,11 +336,11 @@ func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, 
 		links = append(links, link)
 	}
 	if (project.UsesSplitWebRuntime() || isBackendOnly) && projectHasDatabase(project) {
-		a, link := buildDatabaseCapabilityWithLangfuse(ctx, deps, DatabaseAddendumSplitWeb, "split_web_backend")
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseSplitWeb, DatabaseAddendumSplitWeb, nil)
 		parts = append(parts, a)
 		links = append(links, link)
 	} else if !isEcommerce && projectHasDatabase(project) {
-		a, link := buildDatabaseCapabilityWithLangfuse(ctx, deps, DatabaseAddendum, "nextjs_monolith")
+		a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseNextJS, DatabaseAddendum, nil)
 		parts = append(parts, a)
 		links = append(links, link)
 	}

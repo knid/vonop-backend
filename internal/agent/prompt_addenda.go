@@ -78,13 +78,6 @@ user explicitly asks to add a web frontend.
 - After enable_frontend, build browser UI under frontend/ and call the existing
   backend through relative /api/* URLs. Never import backend files from frontend/.`
 
-func buildArchitectureAddendumWithLangfuse(ctx context.Context, deps *RunDependencies, fallback, architectureKind string) (string, observability.PromptLink) {
-	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentArchitectureAddendum, fallback, map[string]string{
-		"architecture_kind": architectureKind,
-		"architecture_body": fallback,
-	})
-}
-
 // EcommerceAddendum is appended to BasePromptWeb for project.ProjectType == "ecommerce".
 // Ecommerce projects bypass DatabaseAddendum — this addendum is the single
 // source of truth for their data-layer story.
@@ -311,9 +304,7 @@ func buildAIAddendumWithLangfuse(ctx context.Context, deps *RunDependencies, pro
 
 	if project.UsesSplitWebRuntime() {
 		fallback := buildAISplitWebAddendum(modelBlock, imageModelBlock, defaultModel)
-		return resolveLangfusePrompt(ctx, deps, observability.PromptAgentAICapability, fallback, map[string]string{
-			"ai_runtime":        "split_web_backend",
-			"ai_body":           fallback,
+		return resolveLangfusePrompt(ctx, deps, observability.PromptAgentAISplitWeb, fallback, map[string]string{
 			"model_block":       modelBlock,
 			"image_model_block": imageModelBlock,
 			"default_model":     defaultModel,
@@ -381,9 +372,7 @@ never reach the browser.
 - Do NOT rewrite lib/wemob-ai.ts. It is template-managed; extend it only by
   adding new functions, never by replacing the existing exports.
 `
-	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentAICapability, fallback, map[string]string{
-		"ai_runtime":        "nextjs_monolith",
-		"ai_body":           fallback,
+	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentAINextJS, fallback, map[string]string{
 		"model_block":       modelBlock,
 		"image_model_block": imageModelBlock,
 		"default_model":     defaultModel,
@@ -563,13 +552,6 @@ Drizzle types match the live tables. If the seed data references imagery,
 generate the images with the generate_image tool first and store the
 returned URLs in the INSERT statements.
 `
-
-func buildDatabaseCapabilityWithLangfuse(ctx context.Context, deps *RunDependencies, fallback, databaseKind string) (string, observability.PromptLink) {
-	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseCapability, fallback, map[string]string{
-		"database_kind": databaseKind,
-		"database_body": fallback,
-	})
-}
 
 // DatabaseAddendumNative is appended to the base prompt for mobile_app_native
 // projects whose backend/ Postgres database has been provisioned (signaled by
