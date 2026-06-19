@@ -1,13 +1,9 @@
 package sandbox
 
-import (
-	"context"
-
-	"github.com/knid/wemob/internal/models"
-)
+import "context"
 
 type ProviderClient interface {
-	Create(ctx context.Context, project *models.AppProject, plan RuntimePlan) (string, error)
+	Create(ctx context.Context, plan RuntimePlan) (string, error)
 	GetStatus(ctx context.Context, sandboxID string, plan RuntimePlan) (*Status, error)
 	Start(ctx context.Context, sandboxID string) error
 	Stop(ctx context.Context, sandboxID string) error
