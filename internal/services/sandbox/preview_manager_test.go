@@ -72,6 +72,25 @@ func TestManagerPreviewStatusUsesSupervisorState(t *testing.T) {
 	}
 }
 
+func TestManagerPreviewStatusMissingWhenSupervisorStateAbsent(t *testing.T) {
+	fp := newFakeProvider()
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+
+	status, err := manager.PreviewStatus(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if status.State != PreviewMissing {
+		t.Fatalf("state = %q, want %q", status.State, PreviewMissing)
+	}
+	if !strings.Contains(status.Error, "preview supervisor") {
+		t.Fatalf("error = %q, want supervisor explanation", status.Error)
+	}
+}
+
 func TestManagerPreviewLogsFiltersByTarget(t *testing.T) {
 	fp := newFakeProvider()
 	manager := NewManager(fp)

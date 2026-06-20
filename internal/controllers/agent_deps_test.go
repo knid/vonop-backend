@@ -27,7 +27,7 @@ func TestAgentSandboxStatusMapUsesStablePreviewURLs(t *testing.T) {
 	if !ok {
 		t.Fatalf("preview_urls type = %T", out["preview_urls"])
 	}
-	wantAppURL := "https://id-" + projectID.String() + "-app.preview.wemob.app"
+	wantAppURL := "https://todo.preview.wemob.app"
 	if urls["app"] != wantAppURL {
 		t.Fatalf("app URL = %q", urls["app"])
 	}

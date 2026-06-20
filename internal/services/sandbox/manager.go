@@ -177,6 +177,9 @@ func (m *Manager) PreviewStatus(ctx context.Context, project *models.AppProject)
 		if supervisorMsg != "" {
 			msg = supervisorMsg
 		}
+	} else if state == PreviewReady {
+		state = PreviewMissing
+		msg = "preview supervisor has not started"
 	}
 	return m.previewStatus(ctx, project, runtime, state, msg)
 }
@@ -566,9 +569,6 @@ func StablePreviewLabel(project *models.AppProject, kind PreviewKind) string {
 	if !ok {
 		return ""
 	}
-	if kind == PreviewApp || kind == PreviewRoute {
-		return idPreviewLabel(project, suffix)
-	}
 	slug := strings.TrimSpace(project.Slug)
 	if slug != "" && len(slug)+len(suffix) <= maxDNSLabelLength {
 		return slug + suffix
@@ -597,7 +597,7 @@ func previewKindSuffix(kind PreviewKind) (string, bool) {
 	case PreviewArtifacts:
 		return "-artifacts", true
 	case PreviewApp, PreviewRoute:
-		return "-app", true
+		return "", true
 	default:
 		return "", false
 	}
