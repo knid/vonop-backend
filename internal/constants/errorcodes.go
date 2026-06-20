@@ -24,9 +24,9 @@ const (
 	// linked OAuth identity. Refusing the merge prevents account takeover
 	// via a pre-registered email collision.
 	ErrAuthEmailHasCredentialsAccount = "AUTH_EMAIL_HAS_CREDENTIALS_ACCOUNT"
-	ErrAdminRequired            = "ADMIN_REQUIRED"
-	ErrInsufficientScope        = "INSUFFICIENT_SCOPE"
-	ErrForbidden                = "FORBIDDEN"
+	ErrAdminRequired                  = "ADMIN_REQUIRED"
+	ErrInsufficientScope              = "INSUFFICIENT_SCOPE"
+	ErrForbidden                      = "FORBIDDEN"
 
 	// Validation. Details: { field, value, rule, param? } (or { errors: [...] } for multi-field)
 	ErrValidationRequired      = "VALIDATION_REQUIRED"
@@ -59,12 +59,12 @@ const (
 	ErrDeployFailed       = "DEPLOY_FAILED"
 
 	// Domain
-	ErrDomainTaken         = "DOMAIN_TAKEN"
-	ErrDomainInvalid       = "DOMAIN_INVALID"
-	ErrDomainDNSFailed     = "DOMAIN_DNS_FAILED"
-	ErrDomainNotFound      = "DOMAIN_NOT_FOUND"
-	ErrDomainLimitReached  = "DOMAIN_LIMIT_REACHED" // details: { limit, used }
-	ErrAppNotDeployed      = "APP_NOT_DEPLOYED"
+	ErrDomainTaken        = "DOMAIN_TAKEN"
+	ErrDomainInvalid      = "DOMAIN_INVALID"
+	ErrDomainDNSFailed    = "DOMAIN_DNS_FAILED"
+	ErrDomainNotFound     = "DOMAIN_NOT_FOUND"
+	ErrDomainLimitReached = "DOMAIN_LIMIT_REACHED" // details: { limit, used }
+	ErrAppNotDeployed     = "APP_NOT_DEPLOYED"
 
 	// Asset / upload
 	ErrAssetNotFound     = "ASSET_NOT_FOUND"
@@ -87,7 +87,9 @@ const (
 	ErrGitHubRepoExists         = "GITHUB_REPO_EXISTS"
 	ErrGitHubRepoNotFound       = "GITHUB_REPO_NOT_FOUND"
 	ErrGitHubPushRejected       = "GITHUB_PUSH_REJECTED"
+	ErrGitHubPullConflict       = "GITHUB_PULL_CONFLICT"
 	ErrGitHubPushTimeout        = "GITHUB_PUSH_TIMEOUT"
+	ErrGitHubPullTimeout        = "GITHUB_PULL_TIMEOUT"
 	ErrGitHubExportNotAvailable = "GITHUB_EXPORT_NOT_AVAILABLE"
 
 	// Billing / paywall
@@ -122,20 +124,20 @@ const (
 // DefaultMessages provides the English fallback string for each code.
 // Used by JSONErrorCode when no per-call message is supplied.
 var DefaultMessages = map[string]string{
-	ErrAuthRequired:             "Authentication required.",
-	ErrAuthInvalidToken:         "Invalid or expired token.",
-	ErrAuthInvalidCredentials:   "Invalid email or password.",
-	ErrAuthEmailTaken:           "An account with this email already exists.",
-	ErrAuthVerificationRequired: "Please verify your email before continuing.",
-	ErrAuthVerificationInvalid:  "Verification link is invalid or expired.",
-	ErrAuthResetTokenInvalid:    "Password reset link is invalid.",
-	ErrAuthResetTokenExpired:    "Password reset link has expired.",
-	ErrAuthOAuthFailed:          "OAuth sign-in failed.",
-	ErrAuthOAuthStateInvalid:    "Invalid or expired OAuth state.",
+	ErrAuthRequired:                   "Authentication required.",
+	ErrAuthInvalidToken:               "Invalid or expired token.",
+	ErrAuthInvalidCredentials:         "Invalid email or password.",
+	ErrAuthEmailTaken:                 "An account with this email already exists.",
+	ErrAuthVerificationRequired:       "Please verify your email before continuing.",
+	ErrAuthVerificationInvalid:        "Verification link is invalid or expired.",
+	ErrAuthResetTokenInvalid:          "Password reset link is invalid.",
+	ErrAuthResetTokenExpired:          "Password reset link has expired.",
+	ErrAuthOAuthFailed:                "OAuth sign-in failed.",
+	ErrAuthOAuthStateInvalid:          "Invalid or expired OAuth state.",
 	ErrAuthEmailHasCredentialsAccount: "This email is already registered with a password. Please sign in with your password.",
-	ErrAdminRequired:            "Admin access required.",
-	ErrInsufficientScope:        "API key does not have the required scope.",
-	ErrForbidden:                "Access denied.",
+	ErrAdminRequired:                  "Admin access required.",
+	ErrInsufficientScope:              "API key does not have the required scope.",
+	ErrForbidden:                      "Access denied.",
 
 	ErrValidationRequired:      "This field is required.",
 	ErrValidationInvalidEmail:  "Please enter a valid email address.",
@@ -187,7 +189,9 @@ var DefaultMessages = map[string]string{
 	ErrGitHubRepoExists:         "A repository with this name already exists.",
 	ErrGitHubRepoNotFound:       "GitHub repository not found.",
 	ErrGitHubPushRejected:       "GitHub push was rejected.",
+	ErrGitHubPullConflict:       "GitHub changes could not be pulled because histories diverged.",
 	ErrGitHubPushTimeout:        "GitHub push timed out.",
+	ErrGitHubPullTimeout:        "GitHub pull timed out.",
 	ErrGitHubExportNotAvailable: "GitHub export is not available on your plan.",
 
 	ErrSubscriptionRequired:  "An active subscription is required.",

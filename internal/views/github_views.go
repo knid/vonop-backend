@@ -260,6 +260,56 @@ func (v *HttpViews) PushToGitHub(w http.ResponseWriter, r *http.Request) {
 	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusOK)
 }
 
+// POST /v2/apps/{appId}/github/pull — pulls latest changes from existing GitHub repo.
+func (v *HttpViews) PullFromGitHub(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+	if requireActiveSubscription(w, v.Controller, user) {
+		return
+	}
+
+	appID := chi.URLParam(r, "appId")
+	project, err := v.Controller.GetAppProject(appID, user)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
+		return
+	}
+
+	if project.OrganizationID != uuid.Nil {
+		if _, err := v.Controller.RequirePermission(user, project.OrganizationID.String(), constants.PermCodeExport); err != nil {
+			utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
+			return
+		}
+	}
+
+	export, err := v.Controller.PullFromGitHub(user, project.ID)
+	if err != nil {
+		errMsg := err.Error()
+		switch errMsg {
+		case "GITHUB_AUTH_EXPIRED":
+			utils.JSONError(w, constants.ErrGitHubAuthExpired,
+				"your GitHub token has expired — please reconnect", http.StatusUnauthorized, nil)
+		case "GITHUB_REPO_NOT_FOUND":
+			utils.JSONError(w, constants.ErrGitHubRepoNotFound,
+				"the GitHub repository was deleted — export again to create a new one", http.StatusNotFound, nil)
+		case "GITHUB_PULL_CONFLICT":
+			utils.JSONError(w, constants.ErrGitHubPullConflict,
+				"pull rejected — the GitHub repository and Wemob project have diverged. Push or re-export after resolving the conflict.", http.StatusConflict, nil)
+		case "GITHUB_PULL_TIMEOUT":
+			utils.JSONError(w, constants.ErrGitHubPullTimeout,
+				"pull timed out — try again later", http.StatusGatewayTimeout, nil)
+		default:
+			utils.JSONInternalError(w, err)
+		}
+		return
+	}
+
+	utils.JSONResponse(w, toGitHubExportResponse(export), http.StatusOK)
+}
+
 // GET /v2/apps/{appId}/github — returns the export record for a project.
 func (v *HttpViews) GetGitHubExport(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
