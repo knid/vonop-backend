@@ -22,6 +22,8 @@ const (
 	defaultCPU         = 1
 	defaultMemory      = 1
 	defaultDisk        = 3
+	defaultAutoStop    = 60
+	defaultAutoDelete  = -1
 	defaultExecTimeout = 30 * time.Second
 	startWaitTimeout   = 45 * time.Second
 	startPollInterval  = 750 * time.Millisecond
@@ -223,11 +225,15 @@ func (p *Provider) Create(ctx context.Context, plan sandbox.RuntimePlan) (string
 		return "", err
 	}
 	name := sandboxName(plan)
+	autoStop := defaultAutoStop
+	autoDelete := defaultAutoDelete
 	created, err := p.client.Create(ctx, sdktypes.ImageParams{
 		SandboxBaseParams: sdktypes.SandboxBaseParams{
-			Name:     name,
-			Language: sdktypes.CodeLanguageTypeScript,
-			Public:   true,
+			Name:               name,
+			Language:           sdktypes.CodeLanguageTypeScript,
+			Public:             true,
+			AutoStopInterval:   &autoStop,
+			AutoDeleteInterval: &autoDelete,
 			Labels: map[string]string{
 				"wemob":    "true",
 				"app_id":   plan.AppID,

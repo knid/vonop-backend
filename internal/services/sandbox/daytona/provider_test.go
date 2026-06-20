@@ -213,6 +213,12 @@ func TestCreateUsesDefaultMachineResources(t *testing.T) {
 	if params.Resources.Disk != 3 {
 		t.Fatalf("Disk = %d, want 3", params.Resources.Disk)
 	}
+	if params.AutoStopInterval == nil || *params.AutoStopInterval != 60 {
+		t.Fatalf("AutoStopInterval = %#v, want 60", params.AutoStopInterval)
+	}
+	if params.AutoDeleteInterval == nil || *params.AutoDeleteInterval != -1 {
+		t.Fatalf("AutoDeleteInterval = %#v, want -1", params.AutoDeleteInterval)
+	}
 }
 
 func TestCreateReturnsExistingSandboxOnNameConflict(t *testing.T) {

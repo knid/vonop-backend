@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -88,6 +89,116 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 	return m.Status(ctx, project)
 }
 
+func (m *Manager) EnsurePreview(ctx context.Context, project *models.AppProject, files map[string]string, env map[string]string) (*PreviewStatus, error) {
+	provider, err := m.providerClient()
+	if err != nil {
+		return nil, err
+	}
+	if project == nil {
+		return nil, errors.New("project is nil")
+	}
+	plan := BuildRuntimePlan(project)
+	runtime := BuildPreviewRuntime(project)
+	sandboxID := project.SandboxID
+	if sandboxID == "" {
+		sandboxID, err = provider.Create(ctx, plan)
+		if err != nil {
+			return nil, fmt.Errorf("create sandbox: %w", err)
+		}
+		if sandboxID == "" {
+			return nil, errors.New("create sandbox: empty sandbox id")
+		}
+		project.SandboxID = sandboxID
+	}
+	if err := provider.Start(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("start sandbox: %w", err)
+	}
+	files = withManagedPreviewFiles(plan, files)
+	copied := make(map[string]string, len(files)+1)
+	for p, content := range files {
+		copied[p] = content
+	}
+	copied["tmp/wemob-preview.sh"] = BuildPreviewSupervisorScript(runtime)
+	if err := m.syncFiles(ctx, sandboxID, plan, copied); err != nil {
+		return nil, err
+	}
+	spec := ProcessSpec{
+		Name:        ProcessPreview,
+		Command:     "bash /workspace/project/tmp/wemob-preview.sh",
+		Cwd:         runtime.Root,
+		Port:        runtime.Port(runtime.Main),
+		Probe:       ReadinessProbe{Type: "http", URL: fmt.Sprintf("http://localhost:%d", runtime.Port(runtime.Main))},
+		AutoRestart: true,
+	}
+	spec.Env = mergeProcessEnv(spec.Env, env)
+	if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
+		return nil, fmt.Errorf("start preview supervisor: %w", err)
+	}
+	return m.previewStatus(ctx, project, runtime, PreviewStarting, "")
+}
+
+func (m *Manager) PreviewStatus(ctx context.Context, project *models.AppProject) (*PreviewStatus, error) {
+	if project == nil {
+		return nil, errors.New("project is nil")
+	}
+	if project.SandboxID == "" {
+		return &PreviewStatus{
+			AppID:     project.ID.String(),
+			State:     PreviewMissing,
+			Ports:     previewRuntimePorts(BuildPreviewRuntime(project)),
+			UpdatedAt: time.Now().UTC(),
+		}, nil
+	}
+	runtime := BuildPreviewRuntime(project)
+	st, err := m.Status(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	state := PreviewStarting
+	var msg string
+	switch st.State {
+	case StateReady, StateDegraded:
+		state = PreviewReady
+	case StateStopped, StateArchived, StateMissing:
+		state = PreviewStopped
+	case StateError:
+		state = PreviewError
+		msg = st.LastError
+	case StateCreating, StateSyncing, StateInstalling:
+		state = PreviewPreparing
+	default:
+		state = PreviewStarting
+	}
+	if msg == "" {
+		msg = st.LastError
+	}
+	if supervisorState, supervisorMsg, ok := m.previewSupervisorState(ctx, project); ok {
+		state = supervisorState
+		if supervisorMsg != "" {
+			msg = supervisorMsg
+		}
+	}
+	return m.previewStatus(ctx, project, runtime, state, msg)
+}
+
+func (m *Manager) PreviewLogs(ctx context.Context, project *models.AppProject, target string, lines int) (string, error) {
+	if lines <= 0 {
+		lines = 200
+	}
+	return m.previewLogs(ctx, project, BuildPreviewRuntime(project), target, lines)
+}
+
+func (m *Manager) RestartPreview(ctx context.Context, project *models.AppProject, files map[string]string, env map[string]string) (*PreviewStatus, error) {
+	if project != nil && project.SandboxID != "" {
+		provider, err := m.providerClient()
+		if err != nil {
+			return nil, err
+		}
+		_ = provider.StopProcess(ctx, project.SandboxID, ProcessPreview)
+	}
+	return m.EnsurePreview(ctx, project, files, env)
+}
+
 func (m *Manager) installDependencies(ctx context.Context, provider ProviderClient, sandboxID string, plan RuntimePlan) error {
 	seen := map[string]bool{}
 	for _, spec := range plan.Processes {
@@ -109,6 +220,122 @@ func (m *Manager) installDependencies(ctx context.Context, provider ProviderClie
 		}
 	}
 	return nil
+}
+
+func (m *Manager) previewStatus(ctx context.Context, project *models.AppProject, runtime PreviewRuntime, state PreviewState, msg string) (*PreviewStatus, error) {
+	url := StablePreviewBaseURL(project, previewKindForRuntime(runtime))
+	if url == "" && project.SandboxID != "" {
+		provider, err := m.providerClient()
+		if err != nil {
+			return nil, err
+		}
+		if port := runtime.Port(runtime.Main); port > 0 {
+			url, _ = provider.PreviewURL(ctx, project.SandboxID, port)
+		}
+	}
+	logs, _ := m.previewLogs(ctx, project, runtime, "", 80)
+	return &PreviewStatus{
+		AppID:     project.ID.String(),
+		SandboxID: project.SandboxID,
+		State:     state,
+		URL:       url,
+		Ports:     previewRuntimePorts(runtime),
+		LogsTail:  logs,
+		Error:     msg,
+		UpdatedAt: time.Now().UTC(),
+	}, nil
+}
+
+func (m *Manager) previewLogs(ctx context.Context, project *models.AppProject, runtime PreviewRuntime, target string, lines int) (string, error) {
+	if project == nil || project.SandboxID == "" {
+		return "", nil
+	}
+	if lines <= 0 {
+		lines = 200
+	}
+	provider, err := m.providerClient()
+	if err != nil {
+		return "", err
+	}
+	paths := make([]string, 0, len(runtime.Processes))
+	target = strings.TrimSpace(target)
+	if target == "all" {
+		target = ""
+	}
+	for _, process := range runtime.Processes {
+		if process.Name == "" {
+			continue
+		}
+		if target != "" && process.Name != target {
+			continue
+		}
+		paths = append(paths, fmt.Sprintf("/workspace/.wemob/logs/%s.log", process.Name))
+	}
+	if len(paths) == 0 {
+		return "", nil
+	}
+	sort.Strings(paths)
+	parts := make([]string, 0, len(paths))
+	for _, p := range paths {
+		parts = append(parts, fmt.Sprintf("echo '--- %s ---'; test -f %s && tail -n %d %s || true", p, shellQuoteForBash(p), lines, shellQuoteForBash(p)))
+	}
+	stdout, stderr, _, err := provider.Execute(ctx, project.SandboxID, "bash -lc "+shellQuoteForBash(strings.Join(parts, "\n")), "", 10000)
+	if err != nil {
+		return "", err
+	}
+	return stdout + stderr, nil
+}
+
+func (m *Manager) previewSupervisorState(ctx context.Context, project *models.AppProject) (PreviewState, string, bool) {
+	if project == nil || project.SandboxID == "" {
+		return "", "", false
+	}
+	provider, err := m.providerClient()
+	if err != nil {
+		return "", "", false
+	}
+	command := "bash -lc " + shellQuoteForBash("test -f "+shellQuoteForBash(previewStatePath)+" && cat "+shellQuoteForBash(previewStatePath)+" || true")
+	stdout, _, exitCode, err := provider.Execute(ctx, project.SandboxID, command, "", 5000)
+	if err != nil || exitCode != 0 || strings.TrimSpace(stdout) == "" {
+		return "", "", false
+	}
+	var state struct {
+		State string `json:"state"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &state); err != nil {
+		return PreviewError, "invalid preview supervisor state", true
+	}
+	switch PreviewState(state.State) {
+	case PreviewMissing, PreviewPreparing, PreviewInstalling, PreviewStarting, PreviewReady, PreviewStopped, PreviewError:
+		return PreviewState(state.State), state.Error, true
+	default:
+		return PreviewError, fmt.Sprintf("unknown preview supervisor state %q", state.State), true
+	}
+}
+
+func previewRuntimePorts(runtime PreviewRuntime) map[string]int {
+	ports := make(map[string]int, len(runtime.Processes))
+	for _, process := range runtime.Processes {
+		if process.Name != "" && process.Port > 0 {
+			ports[process.Name] = process.Port
+		}
+	}
+	return ports
+}
+
+func previewKindForRuntime(runtime PreviewRuntime) PreviewKind {
+	if runtime.Main == "backend" {
+		return PreviewBackend
+	}
+	if runtime.Port("expo") > 0 && runtime.Port("web") == 0 {
+		return PreviewExpo
+	}
+	return PreviewApp
+}
+
+func shellQuoteForBash(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func mergeProcessEnv(base, extra map[string]string) map[string]string {

@@ -103,9 +103,10 @@ type MobileBuildTrigger func(ctx context.Context, project *models.AppProject, us
 type WebDeployTrigger func(ctx context.Context, project *models.AppProject, user *models.User) (deploymentID string, err error)
 
 // SandboxControlRequest is an agent-runtime request for the backend-owned
-// Daytona-backed sandbox control plane. App source files remain backed by Git;
-// this is for live sandbox state, named process control, logs, terminals,
-// previews, diagnostics, snapshots, and sandbox-only artifacts.
+// Daytona-backed preview control plane. App source files remain backed by Git.
+// The exposed agent tools are intentionally read-only: preview status and
+// recent preview logs. Other fields are legacy controller plumbing until the
+// old sandbox API is fully deleted.
 type SandboxControlRequest struct {
 	Action     string            `json:"action"`
 	Command    string            `json:"command,omitempty"`

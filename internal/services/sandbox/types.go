@@ -29,6 +29,7 @@ const (
 	ProcessExpoWeb   ProcessName = "expo_web"
 	ProcessExpoGo    ProcessName = "expo_go"
 	ProcessArtifacts ProcessName = "artifacts"
+	ProcessPreview   ProcessName = "preview"
 )
 
 type ProcessStatus string
@@ -121,6 +122,37 @@ type Status struct {
 	PreviewURLs       map[PreviewKind]string       `json:"preview_urls,omitempty"`
 	Processes         map[ProcessName]ProcessState `json:"processes,omitempty"`
 	RecommendedAction string                       `json:"recommended_action,omitempty"`
+}
+
+type PreviewState string
+
+const (
+	PreviewMissing    PreviewState = "missing"
+	PreviewPreparing  PreviewState = "preparing"
+	PreviewInstalling PreviewState = "installing"
+	PreviewStarting   PreviewState = "starting"
+	PreviewReady      PreviewState = "ready"
+	PreviewStopped    PreviewState = "stopped"
+	PreviewError      PreviewState = "error"
+)
+
+type PreviewStatus struct {
+	AppID     string         `json:"app_id"`
+	SandboxID string         `json:"sandbox_id,omitempty"`
+	State     PreviewState   `json:"state"`
+	URL       string         `json:"url,omitempty"`
+	Ports     map[string]int `json:"ports,omitempty"`
+	LogsTail  string         `json:"logs_tail,omitempty"`
+	Error     string         `json:"error,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+type PreviewEvent struct {
+	Type      string         `json:"type"`
+	State     PreviewState   `json:"state,omitempty"`
+	Chunk     string         `json:"chunk,omitempty"`
+	Status    *PreviewStatus `json:"status,omitempty"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type FileDelta struct {
