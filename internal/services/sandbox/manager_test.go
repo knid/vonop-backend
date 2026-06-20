@@ -12,7 +12,7 @@ import (
 )
 
 func managerProject() *models.AppProject {
-	return &models.AppProject{ID: uuid.New(), ProjectType: models.ProjectTypeApp, FrontendRuntime: models.FrontendRuntimeNextJSLegacy}
+	return &models.AppProject{ID: uuid.New(), Slug: "todo", ProjectType: models.ProjectTypeApp, FrontendRuntime: models.FrontendRuntimeNextJSLegacy}
 }
 
 func TestManagerStartCreatesSyncsAndStartsProcesses(t *testing.T) {
@@ -109,7 +109,8 @@ func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	if target.SetBy != "agent" {
 		t.Fatalf("set_by = %q", target.SetBy)
 	}
-	if target.URL != "https://provider-3000.example.test/checkout" {
+	wantURL := "https://id-" + project.ID.String() + "-app.preview.wemob.app/checkout"
+	if target.URL != wantURL {
 		t.Fatalf("url = %q", target.URL)
 	}
 }
@@ -133,11 +134,53 @@ func TestManagerOpenArtifactStartsServerAndBuildsPreviewTarget(t *testing.T) {
 	if target.SetBy != "agent" {
 		t.Fatalf("set_by = %q", target.SetBy)
 	}
-	if target.URL != "https://provider-7000.example.test/reports/summary.html" {
+	if target.URL != "https://todo-artifacts.preview.wemob.app/reports/summary.html" {
 		t.Fatalf("url = %q", target.URL)
 	}
 	if len(fp.started) != 1 || fp.started[0] != ProcessArtifacts {
 		t.Fatalf("started = %#v", fp.started)
+	}
+}
+
+func TestStablePreviewBaseURLUsesAppSuffixForReservedSlug(t *testing.T) {
+	project := managerProject()
+	project.Slug = "todo-backend"
+
+	got := StablePreviewBaseURL(project, PreviewApp)
+	want := "https://id-" + project.ID.String() + "-app.preview.wemob.app"
+	if got != want {
+		t.Fatalf("stable app URL = %q", got)
+	}
+}
+
+func TestStablePreviewBaseURLFallsBackToIDWhenLabelWouldBeTooLong(t *testing.T) {
+	project := managerProject()
+	project.Slug = strings.Repeat("a", 56)
+
+	got := StablePreviewBaseURL(project, PreviewArtifacts)
+	want := "https://id-" + project.ID.String() + "-artifacts.preview.wemob.app"
+	if got != want {
+		t.Fatalf("stable artifact URL = %q, want %q", got, want)
+	}
+	if label := strings.TrimSuffix(strings.TrimPrefix(got, "https://"), ".preview.wemob.app"); len(label) > 63 {
+		t.Fatalf("preview label length = %d, want <= 63", len(label))
+	}
+}
+
+func TestManagerOpenArtifactFallsBackToProviderURLWithoutSlug(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.Slug = strings.Repeat("a", 56)
+	project.ID = uuid.Nil
+	project.SandboxID = fp.sandboxID
+
+	target, err := m.OpenArtifact(context.Background(), project, "/workspace/artifacts/hello.pdf", "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.URL != "https://provider-7000.example.test/hello.pdf" {
+		t.Fatalf("url = %q", target.URL)
 	}
 }
 
@@ -418,6 +461,8 @@ func TestManagerOpenRoutePreservesProviderBasePath(t *testing.T) {
 	fp.previews[3000] = "https://host.example.test/sandbox/abc"
 	m := NewManager(fp)
 	project := managerProject()
+	project.Slug = ""
+	project.ID = uuid.Nil
 	project.SandboxID = fp.sandboxID
 
 	target, err := m.OpenRoute(context.Background(), project, "/checkout", "agent")

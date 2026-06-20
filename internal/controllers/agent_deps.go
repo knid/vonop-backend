@@ -162,10 +162,10 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	switch req.Action {
 	case "status":
 		status, err := c.SandboxManager.Status(ctx, project)
-		return structToMap(status), err
+		return agentSandboxStatusMap(project, status), err
 	case "start":
 		status, err := c.StartSandbox(ctx, project)
-		return structToMap(status), err
+		return agentSandboxStatusMap(project, status), err
 	case "sync":
 		err := c.SyncSandbox(ctx, project)
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
@@ -219,6 +219,37 @@ func structToMap(v any) map[string]any {
 	b, _ := json.Marshal(v)
 	out := map[string]any{}
 	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+func agentSandboxStatusMap(project *models.AppProject, status *sandboxService.Status) map[string]any {
+	out := structToMap(status)
+	if project == nil || status == nil || len(status.PreviewURLs) == 0 {
+		return out
+	}
+	publicURLs := stableSandboxPreviewURLs(project, status.PreviewURLs)
+	if len(publicURLs) == 0 {
+		return out
+	}
+	out["preview_urls"] = publicURLs
+	if appURL, ok := publicURLs[string(sandboxService.PreviewApp)]; ok {
+		out["preview_url"] = appURL
+	}
+	return out
+}
+
+func stableSandboxPreviewURLs(project *models.AppProject, previewURLs map[sandboxService.PreviewKind]string) map[string]string {
+	out := make(map[string]string, len(previewURLs))
+	for kind, rawURL := range previewURLs {
+		if rawURL == "" {
+			continue
+		}
+		publicURL := sandboxService.StablePreviewBaseURL(project, kind)
+		if publicURL == "" {
+			continue
+		}
+		out[string(kind)] = publicURL
+	}
 	return out
 }
 

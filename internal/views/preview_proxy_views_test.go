@@ -14,11 +14,14 @@ func TestParsePreviewHost(t *testing.T) {
 		wantKind sandbox.PreviewKind
 	}{
 		{"todo.preview.wemob.app", "todo", sandbox.PreviewApp},
+		{"todo-app.preview.wemob.app", "todo-app", sandbox.PreviewApp},
 		{"todo-backend.preview.wemob.app", "todo", sandbox.PreviewBackend},
 		{"todo-expo.preview.wemob.app", "todo", sandbox.PreviewExpo},
 		{"todo-artifacts.preview.wemob.app", "todo", sandbox.PreviewArtifacts},
 		{"Todo-Backend.Preview.Wemob.App:443", "todo", sandbox.PreviewBackend},
 		{"my-app.preview.wemob.app", "my-app", sandbox.PreviewApp},
+		{"id-4bba6fd1-1123-4885-9133-48efd7ce26f9-app.preview.wemob.app", "id-4bba6fd1-1123-4885-9133-48efd7ce26f9", sandbox.PreviewApp},
+		{"id-4bba6fd1-1123-4885-9133-48efd7ce26f9-artifacts.preview.wemob.app", "id-4bba6fd1-1123-4885-9133-48efd7ce26f9", sandbox.PreviewArtifacts},
 	}
 
 	for _, tc := range cases {
