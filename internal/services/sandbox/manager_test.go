@@ -93,6 +93,36 @@ func TestManagerStartInstallsDependenciesBeforeProcesses(t *testing.T) {
 	}
 }
 
+func TestManagerStartWritesVitePreviewProxyConfigForSplitWeb(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	if _, err := m.Start(context.Background(), project, map[string]string{
+		"frontend/package.json": `{"scripts":{"dev":"vite"}}`,
+		"backend/package.json":  `{"scripts":{"dev":"next dev"}}`,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var config string
+	for _, file := range fp.files {
+		if file.Path == "frontend/vite.config.preview.ts" {
+			config = file.Content
+			break
+		}
+	}
+	if config == "" {
+		t.Fatalf("preview config was not synced: %#v", fp.files)
+	}
+	if !strings.Contains(config, `"/api"`) || !strings.Contains(config, `"http://127.0.0.1:3001"`) {
+		t.Fatalf("preview config does not proxy /api to backend: %s", config)
+	}
+}
+
 func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)
