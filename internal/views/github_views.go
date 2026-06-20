@@ -50,6 +50,27 @@ func (v *HttpViews) GitHubAuthRedirect(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 }
 
+// POST /v2/auth/github/start — returns the GitHub OAuth authorization URL.
+func (v *HttpViews) StartGitHubAuth(w http.ResponseWriter, r *http.Request) {
+	user, err := v.Controller.GetUserFromReq(r)
+	if err != nil {
+		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
+		return
+	}
+
+	clientID := v.Controller.SecretManager.GetSecret("GITHUB_CLIENT_ID")
+	clientSecret := v.Controller.SecretManager.GetSecret("GITHUB_CLIENT_SECRET")
+	redirectURI := v.Controller.SecretManager.GetSecret("GITHUB_REDIRECT_URI")
+
+	state := utils.GenerateOAuthState(user.ID.String(), clientSecret)
+	authURL := fmt.Sprintf(
+		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&scope=repo&state=%s",
+		url.QueryEscape(clientID), url.QueryEscape(redirectURI), url.QueryEscape(state),
+	)
+
+	utils.JSONResponse(w, map[string]string{"auth_url": authURL}, http.StatusOK)
+}
+
 // GET /v2/auth/github/callback — handles the OAuth callback from GitHub.
 func (v *HttpViews) GitHubAuthCallback(w http.ResponseWriter, r *http.Request) {
 	code := r.URL.Query().Get("code")

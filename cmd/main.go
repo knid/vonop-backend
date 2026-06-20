@@ -1479,6 +1479,7 @@ func main() {
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 
 			// GitHub OAuth
+			r.Post("/auth/github/start", httpViews.StartGitHubAuth)
 			r.Get("/auth/github", httpViews.GitHubAuthRedirect)
 			r.Get("/auth/github/callback", httpViews.GitHubAuthCallback)
 			r.Delete("/auth/github", httpViews.DisconnectGitHub)
