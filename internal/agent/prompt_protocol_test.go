@@ -32,3 +32,39 @@ func TestAgentPromptsDoNotAdvertiseRemovedRawFileBlockProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentBasePromptsDescribeDaytonaSandboxRuntime(t *testing.T) {
+	prompts := map[string]string{
+		"CompactBasePromptWeb":          CompactBasePromptWeb,
+		"CompactBasePromptMobileNative": CompactBasePromptMobileNative,
+	}
+
+	for name, prompt := range prompts {
+		t.Run(name, func(t *testing.T) {
+			for _, forbidden := range []string{
+				"E2B",
+				"/home/user/project",
+				"/home/user/backend",
+				"/home/user/artifacts",
+			} {
+				if strings.Contains(prompt, forbidden) {
+					t.Fatalf("%s still contains stale sandbox guidance %q", name, forbidden)
+				}
+			}
+			for _, required := range []string{
+				"Daytona-backed sandbox",
+				"/workspace/project",
+				"/workspace/backend",
+				"/workspace/artifacts",
+				"sandbox_start",
+				"sandbox_sync",
+				"process_restart",
+				"Git-backed",
+			} {
+				if !strings.Contains(prompt, required) {
+					t.Fatalf("%s is missing sandbox guidance %q", name, required)
+				}
+			}
+		})
+	}
+}
