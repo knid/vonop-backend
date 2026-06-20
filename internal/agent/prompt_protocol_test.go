@@ -57,13 +57,19 @@ func TestAgentBasePromptsDescribeDaytonaSandboxRuntime(t *testing.T) {
 				"/workspace/project",
 				"/workspace/backend",
 				"/workspace/artifacts",
-				"sandbox_start",
-				"sandbox_sync",
 				"process_restart",
 				"Git-backed",
 			} {
 				if !strings.Contains(prompt, required) {
 					t.Fatalf("%s is missing sandbox guidance %q", name, required)
+				}
+			}
+			for _, forbidden := range []string{
+				"sandbox_start",
+				"sandbox_sync",
+			} {
+				if strings.Contains(prompt, forbidden) {
+					t.Fatalf("%s still advertises removed sandbox tool %q", name, forbidden)
 				}
 			}
 		})
