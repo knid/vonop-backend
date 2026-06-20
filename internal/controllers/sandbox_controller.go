@@ -34,11 +34,11 @@ func (c *Controller) startSandboxWithFiles(ctx context.Context, project *models.
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
 	status, err := c.SandboxManager.Start(ctx, project, files, envVars)
+	if project.SandboxID != "" && c.DB != nil {
+		_ = c.DB.UpdateAppProjectSandboxID(project.ID.String(), project.SandboxID)
+	}
 	if err != nil {
 		return nil, err
-	}
-	if project.SandboxID != "" {
-		_ = c.DB.UpdateAppProjectSandboxID(project.ID.String(), project.SandboxID)
 	}
 	return status, nil
 }

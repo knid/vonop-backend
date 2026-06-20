@@ -164,6 +164,7 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		status, err := c.SandboxManager.Status(ctx, project)
 		out := agentSandboxStatusMap(project, status)
 		out["env_status"] = sandboxEnvStatus(c.CollectAllEnvVars(project))
+		addSandboxError(out, err)
 		return out, err
 	case "start":
 		var (
@@ -177,6 +178,7 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		}
 		out := agentSandboxStatusMap(project, status)
 		out["env_status"] = sandboxEnvStatus(c.CollectAllEnvVars(project))
+		addSandboxError(out, err)
 		return out, err
 	case "sync":
 		var err error
@@ -185,7 +187,9 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		} else {
 			err = c.SyncSandbox(ctx, project)
 		}
-		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
+		out := map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}
+		addSandboxError(out, err)
+		return out, err
 	case "exec":
 		stdout, stderr, exitCode, err := c.SandboxManager.Execute(ctx, project, req.Command, req.Cwd, req.TimeoutMs)
 		return sandboxExecOutput(stdout, stderr, exitCode, project.SandboxID, err), err
@@ -232,6 +236,13 @@ func copySandboxFiles(files map[string]string) map[string]string {
 		copied[path] = content
 	}
 	return copied
+}
+
+func addSandboxError(out map[string]any, err error) {
+	if out == nil || err == nil {
+		return
+	}
+	out["error"] = err.Error()
 }
 
 func sandboxExecOutput(stdout, stderr string, exitCode int, sandboxID string, execErr error) map[string]any {

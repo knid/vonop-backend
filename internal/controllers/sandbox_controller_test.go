@@ -75,6 +75,19 @@ func TestSandboxExecOutputMarksInfrastructureError(t *testing.T) {
 	}
 }
 
+func TestAddSandboxErrorIncludesMessage(t *testing.T) {
+	out := map[string]any{"env_status": map[string]string{"DATABASE_URL": "set"}}
+
+	addSandboxError(out, errors.New("install dependencies in /workspace/backend: package.json not found"))
+
+	if out["error"] != "install dependencies in /workspace/backend: package.json not found" {
+		t.Fatalf("error = %#v", out["error"])
+	}
+	if out["env_status"] == nil {
+		t.Fatal("env_status should be preserved")
+	}
+}
+
 func containsAll(s string, wants []string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {

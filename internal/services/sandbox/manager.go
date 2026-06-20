@@ -63,6 +63,7 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		if sandboxID == "" {
 			return nil, errors.New("create sandbox: empty sandbox id")
 		}
+		project.SandboxID = sandboxID
 	}
 	if err := provider.Start(ctx, sandboxID); err != nil {
 		return nil, fmt.Errorf("start sandbox: %w", err)
@@ -82,7 +83,7 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 			return nil, fmt.Errorf("start process %s: %w", spec.Name, err)
 		}
 	}
-	if newSandbox {
+	if newSandbox && project.SandboxID == "" {
 		project.SandboxID = sandboxID
 	}
 	return m.Status(ctx, project)

@@ -123,6 +123,23 @@ func TestManagerStartWritesVitePreviewProxyConfigForSplitWeb(t *testing.T) {
 	}
 }
 
+func TestManagerStartKeepsSandboxIDWhenStartupFails(t *testing.T) {
+	fp := newFakeProvider()
+	fp.executeErr = errors.New("npm install failed")
+	m := NewManager(fp)
+	project := managerProject()
+
+	_, err := m.Start(context.Background(), project, map[string]string{
+		"package.json": `{"scripts":{"dev":"next dev"}}`,
+	}, nil)
+	if err == nil {
+		t.Fatal("expected start error")
+	}
+	if project.SandboxID != fp.sandboxID {
+		t.Fatalf("project sandbox id = %q, want %q", project.SandboxID, fp.sandboxID)
+	}
+}
+
 func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)
@@ -336,7 +353,7 @@ func TestManagerStartRejectsEmptyCreateID(t *testing.T) {
 	}
 }
 
-func TestManagerStartDoesNotAssignSandboxIDOnSyncFailure(t *testing.T) {
+func TestManagerStartKeepsSandboxIDOnSyncFailure(t *testing.T) {
 	fp := newFakeProvider()
 	fp.writeErr = errors.New("sync failed")
 	m := NewManager(fp)
@@ -346,12 +363,12 @@ func TestManagerStartDoesNotAssignSandboxIDOnSyncFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "sync sandbox files") {
 		t.Fatalf("err = %v", err)
 	}
-	if project.SandboxID != "" {
-		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	if project.SandboxID != fp.sandboxID {
+		t.Fatalf("project sandbox id = %q, want %q", project.SandboxID, fp.sandboxID)
 	}
 }
 
-func TestManagerStartDoesNotAssignSandboxIDOnProcessFailure(t *testing.T) {
+func TestManagerStartKeepsSandboxIDOnProcessFailure(t *testing.T) {
 	fp := newFakeProvider()
 	fp.startProcessErr = errors.New("process failed")
 	m := NewManager(fp)
@@ -361,8 +378,8 @@ func TestManagerStartDoesNotAssignSandboxIDOnProcessFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "start process") {
 		t.Fatalf("err = %v", err)
 	}
-	if project.SandboxID != "" {
-		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	if project.SandboxID != fp.sandboxID {
+		t.Fatalf("project sandbox id = %q, want %q", project.SandboxID, fp.sandboxID)
 	}
 }
 
