@@ -48,6 +48,9 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 	if err := m.syncFiles(ctx, sandboxID, plan, files); err != nil {
 		return nil, err
 	}
+	if err := m.installDependencies(ctx, provider, sandboxID, plan); err != nil {
+		return nil, err
+	}
 	for _, spec := range plan.Processes {
 		if spec.Name == ProcessArtifacts {
 			continue
@@ -61,6 +64,29 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		project.SandboxID = sandboxID
 	}
 	return m.Status(ctx, project)
+}
+
+func (m *Manager) installDependencies(ctx context.Context, provider ProviderClient, sandboxID string, plan RuntimePlan) error {
+	seen := map[string]bool{}
+	for _, spec := range plan.Processes {
+		if spec.Name == ProcessArtifacts || spec.Cwd == "" || seen[spec.Cwd] {
+			continue
+		}
+		seen[spec.Cwd] = true
+		command := "test ! -f package.json || npm install"
+		_, stderr, exitCode, err := provider.Execute(ctx, sandboxID, command, spec.Cwd, 120000)
+		if err != nil {
+			return fmt.Errorf("install dependencies in %s: %w", spec.Cwd, err)
+		}
+		if exitCode != 0 {
+			msg := strings.TrimSpace(stderr)
+			if msg == "" {
+				msg = fmt.Sprintf("exit code %d", exitCode)
+			}
+			return fmt.Errorf("install dependencies in %s: %s", spec.Cwd, msg)
+		}
+	}
+	return nil
 }
 
 func mergeProcessEnv(base, extra map[string]string) map[string]string {
