@@ -14,6 +14,9 @@ type fakeProvider struct {
 	startCalls       int
 	startErr         error
 	writeErr         error
+	executed         []string
+	executeCwds      []string
+	executeErr       error
 	started          []ProcessName
 	stopped          []ProcessName
 	startProcessErr  error
@@ -59,6 +62,11 @@ func (f *fakeProvider) WriteFiles(ctx context.Context, sandboxID string, files [
 }
 
 func (f *fakeProvider) Execute(ctx context.Context, sandboxID, command, cwd string, timeoutMs int) (string, string, int, error) {
+	f.executed = append(f.executed, command)
+	f.executeCwds = append(f.executeCwds, cwd)
+	if f.executeErr != nil {
+		return "", "", 1, f.executeErr
+	}
 	return "", "", 0, nil
 }
 

@@ -67,7 +67,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		}
 		plan.Processes = append(plan.Processes, ProcessSpec{
 			Name:        ProcessFrontend,
-			Command:     nodeHeapFlag + "npm run dev -- --config vite.config.preview.ts --host 0.0.0.0 --port 3000",
+			Command:     nodeHeapFlag + "npm run dev -- --host 0.0.0.0 --port 3000",
 			Cwd:         frontendRoot,
 			Port:        3000,
 			Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:3000"},

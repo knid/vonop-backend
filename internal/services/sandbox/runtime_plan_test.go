@@ -97,6 +97,9 @@ func TestRuntimePlanViteSplitWeb(t *testing.T) {
 	if frontend.Cwd != ProjectRoot+"/frontend" {
 		t.Fatalf("frontend cwd = %q", frontend.Cwd)
 	}
+	if strings.Contains(frontend.Command, "vite.config.preview.ts") {
+		t.Fatalf("frontend command references unsynced preview config: %q", frontend.Command)
+	}
 }
 
 func TestRuntimePlanMobileNative(t *testing.T) {

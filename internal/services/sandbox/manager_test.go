@@ -64,6 +64,35 @@ func TestManagerStartPropagatesEnvToProcesses(t *testing.T) {
 	}
 }
 
+func TestManagerStartInstallsDependenciesBeforeProcesses(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	if _, err := m.Start(context.Background(), project, map[string]string{
+		"frontend/package.json": `{"scripts":{"dev":"vite"}}`,
+		"backend/package.json":  `{"scripts":{"dev":"next dev"}}`,
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fp.executed) != 2 {
+		t.Fatalf("install commands = %#v", fp.executed)
+	}
+	if fp.executeCwds[0] != BackendRoot || fp.executeCwds[1] != ProjectRoot+"/frontend" {
+		t.Fatalf("install cwds = %#v", fp.executeCwds)
+	}
+	if len(fp.startedSpecs) == 0 {
+		t.Fatal("expected processes to start")
+	}
+	if fp.executeCwds[0] != fp.startedSpecs[0].Cwd {
+		t.Fatalf("first install cwd %q should match first process cwd %q", fp.executeCwds[0], fp.startedSpecs[0].Cwd)
+	}
+}
+
 func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)

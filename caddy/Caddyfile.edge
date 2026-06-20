@@ -20,7 +20,7 @@
         reverse_proxy https://api.wemob.io {
             header_up Host api.wemob.io
             header_up X-Original-URI {http.request.orig_uri}
-            header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+            header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
             transport http {
                 tls
                 tls_server_name api.wemob.io
@@ -39,7 +39,7 @@
     reverse_proxy https://api.wemob.io {
         header_up Host api.wemob.io
         header_up X-Original-URI {http.request.orig_uri}
-        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+        header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
         transport http {
             tls
             tls_server_name api.wemob.io

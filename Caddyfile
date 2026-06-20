@@ -83,7 +83,7 @@ mcp.wemob.io {
         header_up X-Forwarded-Host {host}
         header_up X-Wemob-Preview-Host {host}
         header_up X-Original-URI {http.request.orig_uri}
-        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+        header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
     }
 }
 
@@ -98,7 +98,7 @@ mcp.wemob.io {
     reverse_proxy api:8001 {
         header_up Host api.wemob.io
         header_up X-Original-URI {http.request.orig_uri}
-        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+        header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
     }
 
     log {
@@ -119,7 +119,7 @@ mcp.wemob.io {
     reverse_proxy api:8001 {
         header_up Host api.wemob.io
         header_up X-Original-URI {http.request.orig_uri}
-        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+        header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
     }
 
     log {
