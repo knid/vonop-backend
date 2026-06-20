@@ -133,8 +133,11 @@ var GatewayImageTimeoutSeconds = Key{Flag: "rc-gateway-image-timeout-seconds", F
 
 // --- Category 5: Builder LLM Provider / Model (per plan) ---
 // These control which LLM provider + model the app builder uses per user plan.
-// Format: "provider/model" — e.g. "anthropic/claude-sonnet-4.6" or
-// "deepseek/deepseek-v4-flash" (implicit openrouter).
+// Format: "provider/model[;reasoning_effort]" — e.g.
+// "anthropic/claude-sonnet-4.6", "deepseek/deepseek-v4-flash" (implicit
+// openrouter), or "qwen/qwen3.7-plus;medium".
+// reasoning_effort accepts OpenRouter's effort values:
+// "xhigh", "high", "medium", "low", "minimal", or "none".
 
 var BuilderProviderModelStarter = Key{Flag: "rc-builder-provider-model-starter", Fallback: "deepseek/deepseek-v4-flash"}
 var BuilderProviderModelHobby = Key{Flag: "rc-builder-provider-model-hobby", Fallback: "moonshot/kimi-k2.6"}

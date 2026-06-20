@@ -910,7 +910,7 @@ type ToolExecutor func(ctx context.Context, name string, arguments string) (stri
 // ReasoningConfig controls thinking/reasoning mode on OpenRouter.
 // See https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
 type ReasoningConfig struct {
-	Effort  string `json:"effort,omitempty"`  // "none", "low", "medium", "high", "xhigh"
+	Effort  string `json:"effort,omitempty"`  // "none", "minimal", "low", "medium", "high", "xhigh"
 	Exclude bool   `json:"exclude,omitempty"` // true = model thinks but doesn't return reasoning tokens
 	Enabled *bool  `json:"enabled,omitempty"` // explicitly enable/disable
 }
