@@ -37,7 +37,7 @@ func TestManagerEnsurePreviewStartsOneSupervisorSession(t *testing.T) {
 	if spec.Name != ProcessPreview {
 		t.Fatalf("process name = %q, want %q", spec.Name, ProcessPreview)
 	}
-	if !strings.Contains(spec.Command, "/workspace/project/tmp/wemob-preview.sh") {
+	if !strings.Contains(spec.Command, "/tmp/wemob-preview.sh") {
 		t.Fatalf("supervisor command = %q", spec.Command)
 	}
 	var script string
