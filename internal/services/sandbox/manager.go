@@ -124,7 +124,7 @@ func (m *Manager) EnsurePreview(ctx context.Context, project *models.AppProject,
 	}
 	spec := ProcessSpec{
 		Name:        ProcessPreview,
-		Command:     "bash /workspace/project/tmp/wemob-preview.sh",
+		Command:     "bash /tmp/wemob-preview.sh",
 		Cwd:         runtime.Root,
 		Port:        runtime.Port(runtime.Main),
 		Probe:       ReadinessProbe{Type: "http", URL: fmt.Sprintf("http://localhost:%d", runtime.Port(runtime.Main))},
