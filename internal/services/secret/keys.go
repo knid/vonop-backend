@@ -29,7 +29,6 @@ var KnownSecretKeys = []string{
 	"DB_PORT",
 	"DB_SSLMODE",
 	"DB_USER",
-	"E2B_PREVIEW_DOMAIN",
 	"EDGE_INTERNAL_TOKEN",
 	"EDGE_IPS",
 	"ENCRYPTION_KEY",

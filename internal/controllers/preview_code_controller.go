@@ -15,8 +15,7 @@ import (
 const previewCodeTTL = 5 * time.Minute
 
 // GeneratePreviewCode creates a one-time code for previewing an app.
-// It resolves the preview URL by checking for an active E2B sandbox first,
-// then falling back to the latest deployed web URL.
+// It resolves the preview URL from the active sandbox or latest deployed web URL.
 func (c *Controller) GeneratePreviewCode(user *models.User, appProjectID string) (*models.PreviewCode, error) {
 	project, err := c.DB.GetAppProjectByID(appProjectID)
 	if err != nil {
@@ -84,9 +83,8 @@ func (c *Controller) RedeemPreviewCode(user *models.User, code string) (*models.
 }
 
 // resolvePreviewURL determines the best preview URL for a project.
-// Priority: 1) Active E2B sandbox  2) Latest deployed web URL
+// Priority: 1) active sandbox metadata  2) latest deployed web URL
 func (c *Controller) resolvePreviewURL(project *models.AppProject) (string, string, error) {
-	// Check for active E2B sandbox
 	if project.SandboxID != "" {
 		slog.Info("project has active sandbox", "sandbox_id", project.SandboxID, "project_id", project.ID)
 	}

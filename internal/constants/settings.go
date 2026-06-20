@@ -16,7 +16,7 @@ const (
 	MAX_DOMAINS_PER_PROJECT = 10
 
 	// Agent settings keys written in AppProject.Settings.
-	// These are used by the agent tool authorization layer and e2b control plane.
+	// These are used by the agent tool authorization layer and sandbox control plane.
 	AgentSettingAllowSandboxExec = "agent_allow_sandbox_exec"
 )
 

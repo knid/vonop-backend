@@ -52,7 +52,6 @@ func TestIsAllowedEdgeProxyHost(t *testing.T) {
 		{"www.wemob.app", false},
 		{"wemob.app", false},
 		{"3000-sandbox.preview.wemob.app", false},
-		{"3000-sandbox.e2b.app", false},
 		{"wemob-app.fly.dev", false},
 		{"", false},
 	}

@@ -37,7 +37,7 @@ func TestParsePreviewHostRejectsInvalidHosts(t *testing.T) {
 		"todo.wemob.app",
 		"todo.preview.wemob.app.evil.test",
 		"nested.todo.preview.wemob.app",
-		"3000-sandbox.e2b.app",
+		"3000-sandbox.provider.test",
 	} {
 		t.Run(host, func(t *testing.T) {
 			gotSlug, gotKind := parsePreviewHost(host)

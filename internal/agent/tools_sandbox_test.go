@@ -110,8 +110,8 @@ func TestAllowedPreviewURL(t *testing.T) {
 	if err := allowedPreviewURL("https://3000-sbx.preview.wemob.app/report.pdf"); err != nil {
 		t.Fatalf("preview URL rejected: %v", err)
 	}
-	if err := allowedPreviewURL("https://3000-sbx.e2b.app/report.pdf"); err == nil {
-		t.Fatal("expected e2b URL to be rejected")
+	if err := allowedPreviewURL("https://3000-sbx.provider.test/report.pdf"); err == nil {
+		t.Fatal("expected provider URL to be rejected")
 	}
 	if err := allowedPreviewURL("https://example.com/report.pdf"); err == nil {
 		t.Fatal("expected external URL to be rejected")

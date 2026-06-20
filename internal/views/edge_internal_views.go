@@ -165,7 +165,6 @@ func isAllowedEdgeProxyHost(host string) bool {
 		host != "wemob.io" &&
 		!strings.HasSuffix(host, ".wemob.io") &&
 		!strings.HasSuffix(host, ".preview.wemob.app") &&
-		!strings.HasSuffix(host, ".e2b.app") &&
 		!strings.HasSuffix(host, ".fly.dev")
 }
 
