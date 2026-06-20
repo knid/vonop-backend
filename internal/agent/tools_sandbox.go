@@ -47,6 +47,9 @@ func sandboxControl(ctx context.Context, rc *RunContext, req SandboxControlReque
 	if rc.Project == nil || rc.User == nil {
 		return nil, true, nil
 	}
+	if (req.Action == "start" || req.Action == "sync") && rc.FileMap != nil {
+		req.Files = rc.FileMap.Snapshot()
+	}
 	out, err := rc.Deps.SandboxControl(ctx, rc.Project, rc.User, req)
 	if err != nil {
 		if out != nil {

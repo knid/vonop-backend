@@ -480,7 +480,7 @@ func TestManagerRestartProcessStopsAndStartsKnownProcess(t *testing.T) {
 	project := managerProject()
 	project.SandboxID = fp.sandboxID
 
-	err := m.RestartProcess(context.Background(), project, ProcessFrontend)
+	err := m.RestartProcess(context.Background(), project, ProcessFrontend, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,13 +492,33 @@ func TestManagerRestartProcessStopsAndStartsKnownProcess(t *testing.T) {
 	}
 }
 
+func TestManagerRestartProcessPropagatesEnvToProcess(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = fp.sandboxID
+	env := map[string]string{"DATABASE_URL": "postgres://example", "NEXT_PUBLIC_FLAG": "on"}
+
+	err := m.RestartProcess(context.Background(), project, ProcessFrontend, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fp.startedSpecs) != 1 {
+		t.Fatalf("started specs = %#v", fp.startedSpecs)
+	}
+	got := fp.startedSpecs[0].Env
+	if got["DATABASE_URL"] != "postgres://example" || got["NEXT_PUBLIC_FLAG"] != "on" {
+		t.Fatalf("process env = %#v", got)
+	}
+}
+
 func TestManagerRestartProcessRejectsUnknownProcess(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)
 	project := managerProject()
 	project.SandboxID = fp.sandboxID
 
-	err := m.RestartProcess(context.Background(), project, ProcessName("missing"))
+	err := m.RestartProcess(context.Background(), project, ProcessName("missing"), nil)
 	if err == nil || !strings.Contains(err.Error(), "process missing not found") {
 		t.Fatalf("err = %v", err)
 	}

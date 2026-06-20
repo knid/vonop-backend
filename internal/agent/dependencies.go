@@ -107,22 +107,23 @@ type WebDeployTrigger func(ctx context.Context, project *models.AppProject, user
 // this is for live sandbox state, named process control, logs, terminals,
 // previews, diagnostics, snapshots, and sandbox-only artifacts.
 type SandboxControlRequest struct {
-	Action     string `json:"action"`
-	Command    string `json:"command,omitempty"`
-	Cwd        string `json:"cwd,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Content    string `json:"content,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Process    string `json:"process,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Label      string `json:"label,omitempty"`
-	Kind       string `json:"kind,omitempty"`
-	Route      string `json:"route,omitempty"`
-	Input      string `json:"input,omitempty"`
-	Cols       int    `json:"cols,omitempty"`
-	Rows       int    `json:"rows,omitempty"`
-	SnapshotID string `json:"snapshot_id,omitempty"`
-	TimeoutMs  int    `json:"timeout_ms,omitempty"`
+	Action     string            `json:"action"`
+	Command    string            `json:"command,omitempty"`
+	Cwd        string            `json:"cwd,omitempty"`
+	Path       string            `json:"path,omitempty"`
+	Content    string            `json:"content,omitempty"`
+	Target     string            `json:"target,omitempty"`
+	Process    string            `json:"process,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Label      string            `json:"label,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	Route      string            `json:"route,omitempty"`
+	Input      string            `json:"input,omitempty"`
+	Cols       int               `json:"cols,omitempty"`
+	Rows       int               `json:"rows,omitempty"`
+	SnapshotID string            `json:"snapshot_id,omitempty"`
+	TimeoutMs  int               `json:"timeout_ms,omitempty"`
+	Files      map[string]string `json:"-"`
 }
 
 type SandboxControlFn func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error)
