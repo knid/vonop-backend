@@ -70,7 +70,7 @@ func TestAddCustomDomainRoute_SetsOriginHeader(t *testing.T) {
 		t.Fatalf("snippet missing: %v", err)
 	}
 	if !strings.Contains(string(body), "/internal/edge/proxy?host={host}") ||
-		!strings.Contains(string(body), "header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}") {
+		!strings.Contains(string(body), "header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}") {
 		t.Fatalf("snippet content unexpected: %s", body)
 	}
 }

@@ -54,7 +54,7 @@ func (a *Admin) AddCustomDomainRoute(hostname, flyAppName string) error {
     reverse_proxy api:8001 {
         header_up Host api.wemob.io
         header_up X-Original-URI {http.request.orig_uri}
-        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
+        header_up X-Internal-Token {$EDGE_INTERNAL_TOKEN}
     }
 }
 `, hostname)
