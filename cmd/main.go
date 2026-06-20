@@ -1152,13 +1152,11 @@ func main() {
 					// Preview bundle (WebContainer-based, client-side)
 					r.Get("/preview-bundle", httpViews.GetPreviewBundle)
 
-					// Sandbox lifecycle for live Daytona previews
-					r.Get("/sandbox", httpViews.GetAppSandbox)
-					r.Put("/sandbox", httpViews.SetAppSandbox)
-					r.Post("/sandbox/start", httpViews.StartAppSandbox)
-					r.Get("/sandbox/status", httpViews.GetAppSandboxStatus)
-					r.Post("/sandbox/sync", httpViews.SyncSandbox)
-					r.Post("/sandbox/open-route", httpViews.OpenSandboxRoute)
+					// Backend-owned live Daytona preview lifecycle
+					r.Post("/preview/ensure", httpViews.EnsureAppPreview)
+					r.Get("/preview/status", httpViews.GetAppPreviewStatus)
+					r.Get("/preview/events", httpViews.StreamAppPreviewEvents)
+					r.Post("/preview/restart", httpViews.RestartAppPreview)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {

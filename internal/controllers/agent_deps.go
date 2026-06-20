@@ -160,6 +160,17 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		return nil, fmt.Errorf("sandbox manager is not configured")
 	}
 	switch req.Action {
+	case "preview_status":
+		status, err := c.PreviewStatus(ctx, project)
+		out := structToMap(status)
+		out["env_status"] = sandboxEnvStatus(c.CollectAllEnvVars(project))
+		return out, err
+	case "preview_logs":
+		logs, err := c.PreviewLogs(ctx, project, req.Target, 200)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"logs": logs, "sandbox_id": project.SandboxID, "target": req.Target}, nil
 	case "status":
 		status, err := c.SandboxManager.Status(ctx, project)
 		out := agentSandboxStatusMap(project, status)

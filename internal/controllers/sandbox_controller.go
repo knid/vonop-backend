@@ -9,6 +9,60 @@ import (
 	"github.com/knid/wemob/internal/services/sandbox"
 )
 
+func (c *Controller) EnsurePreview(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
+	}
+	files, err := c.sandboxSourceFiles(project)
+	if err != nil {
+		return nil, err
+	}
+	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
+	status, err := c.SandboxManager.EnsurePreview(ctx, project, files, envVars)
+	if err != nil {
+		return nil, err
+	}
+	if project.SandboxID != "" {
+		_ = c.DB.UpdateAppProjectSandboxID(project.ID.String(), project.SandboxID)
+	}
+	return status, nil
+}
+
+func (c *Controller) PreviewStatus(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
+	}
+	return c.SandboxManager.PreviewStatus(ctx, project)
+}
+
+func (c *Controller) RestartPreview(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
+	}
+	files, err := c.sandboxSourceFiles(project)
+	if err != nil {
+		return nil, err
+	}
+	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
+	status, err := c.SandboxManager.RestartPreview(ctx, project, files, envVars)
+	if err != nil {
+		return nil, err
+	}
+	if project.SandboxID != "" {
+		_ = c.DB.UpdateAppProjectSandboxID(project.ID.String(), project.SandboxID)
+	}
+	return status, nil
+}
+
+func (c *Controller) PreviewLogs(ctx context.Context, project *models.AppProject, target string, lines int) (string, error) {
+	if c.SandboxManager == nil {
+		return "", fmt.Errorf("sandbox manager is not configured")
+	}
+	return c.SandboxManager.PreviewLogs(ctx, project, target, lines)
+}
+
 func (c *Controller) SandboxStatus(ctx context.Context, project *models.AppProject) (*sandbox.Status, error) {
 	if c.SandboxManager == nil {
 		return nil, fmt.Errorf("sandbox manager is not configured")

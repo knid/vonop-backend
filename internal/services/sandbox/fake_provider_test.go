@@ -16,6 +16,9 @@ type fakeProvider struct {
 	writeErr         error
 	executed         []string
 	executeCwds      []string
+	executeStdout    string
+	executeStderr    string
+	executeExitCode  int
 	executeErr       error
 	started          []ProcessName
 	stopped          []ProcessName
@@ -67,7 +70,7 @@ func (f *fakeProvider) Execute(ctx context.Context, sandboxID, command, cwd stri
 	if f.executeErr != nil {
 		return "", "", 1, f.executeErr
 	}
-	return "", "", 0, nil
+	return f.executeStdout, f.executeStderr, f.executeExitCode, nil
 }
 
 func (f *fakeProvider) StartProcess(ctx context.Context, sandboxID string, spec ProcessSpec) error {
