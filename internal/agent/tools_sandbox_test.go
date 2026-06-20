@@ -164,45 +164,6 @@ func TestPreviewOpenRouteUsesManagedStableURL(t *testing.T) {
 	}
 }
 
-func TestSandboxStartAndSyncToolsUseManagedActions(t *testing.T) {
-	actions := []string{}
-	deps := &RunDependencies{
-		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
-			actions = append(actions, req.Action)
-			if req.Files["backend/package.json"] != `{"scripts":{"dev":"next dev"}}` {
-				t.Fatalf("%s did not include live backend files: %#v", req.Action, req.Files)
-			}
-			if req.Files["frontend/src/App.tsx"] != "export default function App() { return null }" {
-				t.Fatalf("%s did not include live frontend files: %#v", req.Action, req.Files)
-			}
-			return map[string]any{"ok": true}, nil
-		},
-	}
-	rc := &RunContext{
-		Project: &models.AppProject{Settings: map[string]any{}},
-		User:    &models.User{},
-		Deps:    deps,
-		FileMap: NewSafeFileMap(map[string]string{
-			"backend/package.json": `{"scripts":{"dev":"next dev"}}`,
-			"frontend/src/App.tsx": "export default function App() { return null }",
-		}),
-	}
-
-	for _, tool := range []ToolExecutor{SandboxStartTool{Deps: deps}, SandboxSyncTool{Deps: deps}} {
-		result, isErr, err := tool.Execute(context.Background(), rc, json.RawMessage(`{}`))
-		if err != nil {
-			t.Fatalf("%s returned error: %v", tool.Name(), err)
-		}
-		if isErr {
-			t.Fatalf("%s returned isErr=true: %s", tool.Name(), result)
-		}
-	}
-
-	if got, want := strings.Join(actions, ","), "start,sync"; got != want {
-		t.Fatalf("actions = %q, want %q", got, want)
-	}
-}
-
 func TestProcessToolsUseNamedProcessActions(t *testing.T) {
 	var got []SandboxControlRequest
 	deps := &RunDependencies{

@@ -28,8 +28,6 @@ var blockedSandboxCommandPatterns = []*regexp.Regexp{
 
 func registerSandboxTools(r *Registry, deps *RunDependencies) {
 	r.Register(SandboxStatusTool{Deps: deps})
-	r.Register(SandboxStartTool{Deps: deps})
-	r.Register(SandboxSyncTool{Deps: deps})
 	r.Register(SandboxExecTool{Deps: deps})
 	r.Register(SandboxReadLogsTool{Deps: deps})
 	r.Register(ProcessRestartTool{Deps: deps})
@@ -217,34 +215,6 @@ func (SandboxStatusTool) Schema() map[string]any {
 }
 func (t SandboxStatusTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
 	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "status"})
-	return renderSandboxResult(out), isErr, err
-}
-
-type SandboxStartTool struct{ Deps *RunDependencies }
-
-func (SandboxStartTool) Name() string { return "sandbox_start" }
-func (SandboxStartTool) Description() string {
-	return "Start or resume the Daytona-backed sandbox, sync current Git-backed source files, and start the app preview processes."
-}
-func (SandboxStartTool) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{}}
-}
-func (t SandboxStartTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "start"})
-	return renderSandboxResult(out), isErr, err
-}
-
-type SandboxSyncTool struct{ Deps *RunDependencies }
-
-func (SandboxSyncTool) Name() string { return "sandbox_sync" }
-func (SandboxSyncTool) Description() string {
-	return "Sync the current Git-backed project source files into the existing Daytona-backed sandbox."
-}
-func (SandboxSyncTool) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{}}
-}
-func (t SandboxSyncTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
-	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "sync"})
 	return renderSandboxResult(out), isErr, err
 }
 
@@ -564,8 +534,6 @@ func (t PreviewOpenArtifactTool) Execute(ctx context.Context, rc *RunContext, in
 func sandboxToolNames() []string {
 	names := []string{
 		"sandbox_status",
-		"sandbox_start",
-		"sandbox_sync",
 		"sandbox_exec",
 		"sandbox_read_logs",
 		"process_restart",

@@ -85,7 +85,7 @@ func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 			t.Fatalf("expected %s to be exposed", name)
 		}
 	}
-	for _, name := range []string{"sandbox_read_file", "sandbox_write_file", "sandbox_list_files", "read_file", "update_todos"} {
+	for _, name := range []string{"sandbox_start", "sandbox_sync", "sandbox_read_file", "sandbox_write_file", "sandbox_list_files", "read_file", "update_todos"} {
 		if names[name] {
 			t.Fatalf("%s must not be exposed", name)
 		}

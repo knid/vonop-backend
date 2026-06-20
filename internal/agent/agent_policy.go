@@ -133,8 +133,6 @@ var mutatingToolNames = []string{
 	"configure_mobile_bridge",
 	"trigger_build_after_fix",
 	"trigger_web_deploy",
-	"sandbox_start",
-	"sandbox_sync",
 	"sandbox_exec",
 	"process_restart",
 	"sandbox_serve_artifact",
@@ -149,7 +147,7 @@ func ClassifyToolRisk(toolName string) string {
 	switch toolName {
 	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search", "list_skills", "search_skills", "load_skill", "sandbox_status", "sandbox_read_logs", "process_logs":
 		return ToolRiskLow
-	case "write_file", "write_files", "edit_file", "multi_edit", "generate_image", "sandbox_start", "sandbox_sync", "process_restart", "sandbox_serve_artifact", "preview_set_url", "preview_open_route", "preview_open_artifact":
+	case "write_file", "write_files", "edit_file", "multi_edit", "generate_image", "process_restart", "sandbox_serve_artifact", "preview_set_url", "preview_open_route", "preview_open_artifact":
 		return ToolRiskMedium
 	case "execute_sql", "provision_database", "provision_local_database", "setup_wemob_ai_gateway", "setup_store", "configure_mobile_bridge", "trigger_build_after_fix", "trigger_web_deploy", "sandbox_exec":
 		return ToolRiskHigh
