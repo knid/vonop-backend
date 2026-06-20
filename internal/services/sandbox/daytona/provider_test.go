@@ -11,17 +11,19 @@ import (
 )
 
 type fakeClient struct {
-	sb *fakeSandbox
+	sb               *fakeSandbox
+	lastCreateParams any
 }
 
-func (c fakeClient) Create(context.Context, any, ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error) {
+func (c *fakeClient) Create(_ context.Context, params any, _ ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error) {
+	c.lastCreateParams = params
 	if c.sb != nil {
 		return c.sb, nil
 	}
 	return newFakeSandbox(), nil
 }
 
-func (c fakeClient) Get(context.Context, string) (sandboxHandle, error) {
+func (c *fakeClient) Get(context.Context, string) (sandboxHandle, error) {
 	if c.sb != nil {
 		return c.sb, nil
 	}
@@ -167,12 +169,41 @@ func TestNewRequiresAPIKey(t *testing.T) {
 }
 
 func TestNewWithClientConfiguresProvider(t *testing.T) {
-	provider := NewWithClient(fakeClient{}, "preview.wemob.app")
+	provider := NewWithClient(&fakeClient{}, "preview.wemob.app")
 	if err := provider.ready(); err != nil {
 		t.Fatalf("expected provider to be ready: %v", err)
 	}
 	if provider.previewDomain != "preview.wemob.app" {
 		t.Fatalf("preview domain = %q", provider.previewDomain)
+	}
+}
+
+func TestCreateUsesDefaultMachineResources(t *testing.T) {
+	client := &fakeClient{}
+	provider := NewWithClient(client, "")
+
+	id, err := provider.Create(context.Background(), sandbox.RuntimePlan{AppID: "app-123"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if id != "sandbox-123" {
+		t.Fatalf("sandbox ID = %q, want sandbox-123", id)
+	}
+	params, ok := client.lastCreateParams.(sdktypes.ImageParams)
+	if !ok {
+		t.Fatalf("create params type = %T, want sdktypes.ImageParams", client.lastCreateParams)
+	}
+	if params.Resources == nil {
+		t.Fatal("expected resources")
+	}
+	if params.Resources.CPU != 1 {
+		t.Fatalf("CPU = %d, want 1", params.Resources.CPU)
+	}
+	if params.Resources.Memory != 1024 {
+		t.Fatalf("Memory = %d, want 1024", params.Resources.Memory)
+	}
+	if params.Resources.Disk != 3072 {
+		t.Fatalf("Disk = %d, want 3072", params.Resources.Disk)
 	}
 }
 
@@ -267,7 +298,7 @@ func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 
 func TestWriteFilesSyncsUploadsAndDeletes(t *testing.T) {
 	sb := newFakeSandbox()
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	err := provider.WriteFiles(context.Background(), "sandbox-123", []sandbox.FileDelta{
 		{Path: "frontend/src/App.tsx", Content: "app"},
 		{Path: "backend/app/api/route.ts", Content: "api"},
@@ -298,7 +329,7 @@ func TestExecuteReturnsCommandResult(t *testing.T) {
 		ExitCode: 7,
 		Result:   "stdout",
 	}
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	stdout, stderr, exitCode, err := provider.Execute(context.Background(), "sandbox-123", "npm test", sandbox.ProjectRoot, 1000)
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
@@ -313,7 +344,7 @@ func TestExecuteReturnsCommandResult(t *testing.T) {
 
 func TestStartAndStopProcessUseNamedSessions(t *testing.T) {
 	sb := newFakeSandbox()
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	spec := sandbox.ProcessSpec{
 		Name:    sandbox.ProcessFrontend,
 		Command: "npm run dev",
@@ -339,7 +370,7 @@ func TestStartAndStopProcessUseNamedSessions(t *testing.T) {
 
 func TestPreviewURLReturnsProviderLink(t *testing.T) {
 	sb := newFakeSandbox()
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	got, err := provider.PreviewURL(context.Background(), "sandbox-123", 3000)
 	if err != nil {
 		t.Fatalf("PreviewURL returned error: %v", err)
@@ -351,7 +382,7 @@ func TestPreviewURLReturnsProviderLink(t *testing.T) {
 
 func TestTerminalLifecycleTracksHandle(t *testing.T) {
 	sb := newFakeSandbox()
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	terminal, err := provider.CreateTerminal(context.Background(), "sandbox-123", 120, 40)
 	if err != nil {
 		t.Fatalf("CreateTerminal returned error: %v", err)
@@ -375,7 +406,7 @@ func TestTerminalLifecycleTracksHandle(t *testing.T) {
 
 func TestRunDiagnosticsReturnsCommandItems(t *testing.T) {
 	sb := newFakeSandbox()
-	provider := NewWithClient(fakeClient{sb: sb}, "")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
 	result, err := provider.RunDiagnostics(context.Background(), "sandbox-123", sandbox.RuntimePlan{})
 	if err != nil {
 		t.Fatalf("RunDiagnostics returned error: %v", err)
