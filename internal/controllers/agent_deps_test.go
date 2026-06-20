@@ -41,3 +41,14 @@ func TestAgentSandboxStatusMapUsesStablePreviewURLs(t *testing.T) {
 		t.Fatalf("preview_url = %q", out["preview_url"])
 	}
 }
+
+func TestAgentSandboxStatusMapReturnsWritableMapForNilStatus(t *testing.T) {
+	project := &models.AppProject{ID: uuid.New(), Slug: "todo"}
+
+	out := agentSandboxStatusMap(project, nil)
+	out["env_status"] = map[string]string{"DATABASE_URL": "set"}
+
+	if out["env_status"] == nil {
+		t.Fatal("env_status was not written")
+	}
+}
