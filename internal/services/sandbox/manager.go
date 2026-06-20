@@ -78,7 +78,7 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		if spec.Name == ProcessArtifacts {
 			continue
 		}
-		spec.Env = mergeProcessEnv(spec.Env, env)
+		spec.Env = mergeProcessEnv(spec.Env, publicProcessEnv(env))
 		if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
 			return nil, fmt.Errorf("start process %s: %w", spec.Name, err)
 		}
@@ -96,7 +96,7 @@ func (m *Manager) installDependencies(ctx context.Context, provider ProviderClie
 			continue
 		}
 		seen[spec.Cwd] = true
-		command := "test ! -f package.json || npm install"
+		command := "test ! -f package.json || { if [ -f package-lock.json ]; then npm ci --include=dev || { rm -rf node_modules package-lock.json && npm install; }; else npm install; fi; }"
 		_, stderr, exitCode, err := provider.Execute(ctx, sandboxID, command, spec.Cwd, 120000)
 		if err != nil {
 			return fmt.Errorf("install dependencies in %s: %w", spec.Cwd, err)
@@ -124,6 +124,22 @@ func mergeProcessEnv(base, extra map[string]string) map[string]string {
 		merged[key] = value
 	}
 	return merged
+}
+
+func publicProcessEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for key, value := range env {
+		if strings.HasPrefix(key, "NEXT_PUBLIC_") {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Status, error) {
@@ -391,7 +407,7 @@ func (m *Manager) RestartProcess(ctx context.Context, project *models.AppProject
 		return err
 	}
 	if name != ProcessArtifacts {
-		spec.Env = mergeProcessEnv(spec.Env, env)
+		spec.Env = mergeProcessEnv(spec.Env, publicProcessEnv(env))
 	}
 	if err := provider.StopProcess(ctx, sandboxID, name); err != nil {
 		return fmt.Errorf("stop process %s: %w", name, err)

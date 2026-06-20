@@ -42,7 +42,7 @@ func TestManagerStartCreatesSyncsAndStartsProcesses(t *testing.T) {
 	}
 }
 
-func TestManagerStartPropagatesEnvToProcesses(t *testing.T) {
+func TestManagerStartOnlyPropagatesPublicEnvToProcesses(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)
 	project := managerProject()
@@ -59,7 +59,7 @@ func TestManagerStartPropagatesEnvToProcesses(t *testing.T) {
 		t.Fatalf("no process specs started")
 	}
 	got := fp.startedSpecs[0].Env
-	if got["API_KEY"] != "secret" || got["NEXT_PUBLIC_FLAG"] != "enabled" {
+	if got["API_KEY"] != "" || got["NEXT_PUBLIC_FLAG"] != "enabled" {
 		t.Fatalf("process env = %#v", got)
 	}
 }
@@ -81,6 +81,9 @@ func TestManagerStartInstallsDependenciesBeforeProcesses(t *testing.T) {
 
 	if len(fp.executed) != 2 {
 		t.Fatalf("install commands = %#v", fp.executed)
+	}
+	if !strings.Contains(fp.executed[0], "npm ci --include=dev") {
+		t.Fatalf("install command should rebuild from lockfile, got %q", fp.executed[0])
 	}
 	if fp.executeCwds[0] != BackendRoot || fp.executeCwds[1] != ProjectRoot+"/frontend" {
 		t.Fatalf("install cwds = %#v", fp.executeCwds)
@@ -539,7 +542,7 @@ func TestManagerRestartProcessStopsAndStartsKnownProcess(t *testing.T) {
 	}
 }
 
-func TestManagerRestartProcessPropagatesEnvToProcess(t *testing.T) {
+func TestManagerRestartProcessOnlyPropagatesPublicEnvToProcess(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)
 	project := managerProject()
@@ -554,7 +557,7 @@ func TestManagerRestartProcessPropagatesEnvToProcess(t *testing.T) {
 		t.Fatalf("started specs = %#v", fp.startedSpecs)
 	}
 	got := fp.startedSpecs[0].Env
-	if got["DATABASE_URL"] != "postgres://example" || got["NEXT_PUBLIC_FLAG"] != "on" {
+	if got["DATABASE_URL"] != "" || got["NEXT_PUBLIC_FLAG"] != "on" {
 		t.Fatalf("process env = %#v", got)
 	}
 }

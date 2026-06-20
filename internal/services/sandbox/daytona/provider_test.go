@@ -330,34 +330,31 @@ func TestProcessCommandWrapsCWDAndLogs(t *testing.T) {
 	}
 }
 
-func TestProcessCommandExportsEnv(t *testing.T) {
+func TestProcessCommandOnlyExportsPublicEnv(t *testing.T) {
 	exports := envExports(map[string]string{
-		"API_KEY": "a'b",
-		"EMPTY":   "",
+		"API_KEY":          "a'b",
+		"NEXT_PUBLIC_FLAG": "enabled",
 	})
-	for _, want := range []string{
-		"export API_KEY='a'\"'\"'b'",
-		"export EMPTY=''",
-	} {
-		if !strings.Contains(exports, want) {
-			t.Fatalf("envExports missing %q in %q", want, exports)
-		}
+	if strings.Contains(exports, "API_KEY") {
+		t.Fatalf("envExports leaked server env in %q", exports)
+	}
+	if !strings.Contains(exports, "export NEXT_PUBLIC_FLAG='enabled'") {
+		t.Fatalf("envExports missing public env in %q", exports)
 	}
 
 	got := processCommand(sandbox.ProcessSpec{
 		Command: "npm run dev",
 		Cwd:     "/workspace/project",
 		Env: map[string]string{
-			"API_KEY": "a'b",
-			"EMPTY":   "",
+			"API_KEY":          "a'b",
+			"NEXT_PUBLIC_FLAG": "enabled",
 		},
 	})
 
-	for _, want := range []string{
-		"export API_KEY",
-		"export EMPTY",
-		"npm run dev",
-	} {
+	if strings.Contains(got, "API_KEY") || strings.Contains(got, "a'") {
+		t.Fatalf("processCommand leaked server env in %q", got)
+	}
+	for _, want := range []string{"export NEXT_PUBLIC_FLAG", "npm run dev"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("processCommand missing %q in %q", want, got)
 		}

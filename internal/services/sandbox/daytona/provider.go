@@ -781,7 +781,7 @@ func processCommand(spec sandbox.ProcessSpec) string {
 func envExports(env map[string]string) string {
 	keys := make([]string, 0, len(env))
 	for key := range env {
-		if envNamePattern.MatchString(key) {
+		if envNamePattern.MatchString(key) && processCommandEnvAllowed(key) {
 			keys = append(keys, key)
 		}
 	}
@@ -795,6 +795,10 @@ func envExports(env map[string]string) string {
 		b.WriteString(" && ")
 	}
 	return b.String()
+}
+
+func processCommandEnvAllowed(key string) bool {
+	return strings.HasPrefix(key, "NEXT_PUBLIC_")
 }
 
 func shellQuote(value string) string {
