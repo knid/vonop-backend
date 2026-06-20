@@ -79,7 +79,8 @@ func (v *HttpViews) StreamAppPreviewEvents(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
-	logsTail := status.LogsTail
+	emittedLogLines := map[string]bool{}
+	logsTail := unseenPreviewLogLines(status.LogsTail, emittedLogLines)
 	status.LogsTail = ""
 	_ = utils.WriteSSEEvent(w, flusher, 0, "status", sandbox.PreviewEvent{
 		Type:      "status",
@@ -113,7 +114,7 @@ func (v *HttpViews) StreamAppPreviewEvents(w http.ResponseWriter, r *http.Reques
 				})
 				return
 			}
-			nextLogsTail := status.LogsTail
+			nextLogsTail := unseenPreviewLogLines(status.LogsTail, emittedLogLines)
 			status.LogsTail = ""
 			_ = utils.WriteSSEEvent(w, flusher, 0, "status", sandbox.PreviewEvent{
 				Type:      "status",
@@ -121,23 +122,36 @@ func (v *HttpViews) StreamAppPreviewEvents(w http.ResponseWriter, r *http.Reques
 				Status:    status,
 				UpdatedAt: time.Now().UTC(),
 			})
-			if nextLogsTail != "" && nextLogsTail != logsTail {
-				chunk := nextLogsTail
-				if strings.HasPrefix(nextLogsTail, logsTail) {
-					chunk = strings.TrimPrefix(nextLogsTail, logsTail)
-				}
+			if nextLogsTail != "" {
 				logsTail = nextLogsTail
-				if chunk != "" {
-					_ = utils.WriteSSEEvent(w, flusher, 0, "stdout", sandbox.PreviewEvent{
-						Type:      "stdout",
-						State:     status.State,
-						Chunk:     chunk,
-						UpdatedAt: time.Now().UTC(),
-					})
-				}
+				_ = utils.WriteSSEEvent(w, flusher, 0, "stdout", sandbox.PreviewEvent{
+					Type:      "stdout",
+					State:     status.State,
+					Chunk:     nextLogsTail,
+					UpdatedAt: time.Now().UTC(),
+				})
 			}
 		}
 	}
+}
+
+func unseenPreviewLogLines(snapshot string, emitted map[string]bool) string {
+	if snapshot == "" {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range strings.SplitAfter(snapshot, "\n") {
+		if line == "" {
+			continue
+		}
+		key := strings.TrimRight(line, "\r\n")
+		if emitted[key] {
+			continue
+		}
+		emitted[key] = true
+		b.WriteString(line)
+	}
+	return b.String()
 }
 
 func (v *HttpViews) previewProjectFromRequest(w http.ResponseWriter, r *http.Request) (*models.AppProject, bool) {
