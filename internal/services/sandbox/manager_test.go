@@ -139,7 +139,7 @@ func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	if target.SetBy != "agent" {
 		t.Fatalf("set_by = %q", target.SetBy)
 	}
-	wantURL := "https://id-" + project.ID.String() + "-app.preview.wemob.app/checkout"
+	wantURL := "https://todo.preview.wemob.app/checkout"
 	if target.URL != wantURL {
 		t.Fatalf("url = %q", target.URL)
 	}
@@ -172,14 +172,14 @@ func TestManagerOpenArtifactStartsServerAndBuildsPreviewTarget(t *testing.T) {
 	}
 }
 
-func TestStablePreviewBaseURLUsesAppSuffixForReservedSlug(t *testing.T) {
+func TestStablePreviewBaseURLUsesSlugForAppPreview(t *testing.T) {
 	project := managerProject()
-	project.Slug = "todo-backend"
+	project.Slug = "avukat-icin-hukuk-blog-sitesi-istiyorum-bu-blogun-ktx3f"
 
 	got := StablePreviewBaseURL(project, PreviewApp)
-	want := "https://id-" + project.ID.String() + "-app.preview.wemob.app"
+	want := "https://avukat-icin-hukuk-blog-sitesi-istiyorum-bu-blogun-ktx3f.preview.wemob.app"
 	if got != want {
-		t.Fatalf("stable app URL = %q", got)
+		t.Fatalf("stable app URL = %q, want %q", got, want)
 	}
 }
 
