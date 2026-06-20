@@ -20,8 +20,8 @@ import (
 const (
 	defaultImage       = "node:22-bookworm"
 	defaultCPU         = 1
-	defaultMemory      = 1024
-	defaultDisk        = 3072
+	defaultMemory      = 1
+	defaultDisk        = 3
 	defaultExecTimeout = 30 * time.Second
 )
 

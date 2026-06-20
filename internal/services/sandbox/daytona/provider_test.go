@@ -199,11 +199,11 @@ func TestCreateUsesDefaultMachineResources(t *testing.T) {
 	if params.Resources.CPU != 1 {
 		t.Fatalf("CPU = %d, want 1", params.Resources.CPU)
 	}
-	if params.Resources.Memory != 1024 {
-		t.Fatalf("Memory = %d, want 1024", params.Resources.Memory)
+	if params.Resources.Memory != 1 {
+		t.Fatalf("Memory = %d, want 1", params.Resources.Memory)
 	}
-	if params.Resources.Disk != 3072 {
-		t.Fatalf("Disk = %d, want 3072", params.Resources.Disk)
+	if params.Resources.Disk != 3 {
+		t.Fatalf("Disk = %d, want 3", params.Resources.Disk)
 	}
 }
 
