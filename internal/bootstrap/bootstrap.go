@@ -24,7 +24,6 @@ import (
 	"github.com/knid/wemob/internal/services"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
 	"github.com/knid/wemob/internal/services/codemagic"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
@@ -35,6 +34,8 @@ import (
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
 	"github.com/knid/wemob/internal/services/revenuecat"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
+	daytonaSandbox "github.com/knid/wemob/internal/services/sandbox/daytona"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
@@ -229,11 +230,18 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		slog.Info("Meta CAPI disabled (META_PIXEL_ID or META_CAPI_ACCESS_TOKEN unset)")
 	}
 
-	e2b := e2bService.NewService(
-		sm.GetSecret("DASHBOARD_URL"),
-		sm.GetSecret("E2B_PREVIEW_DOMAIN"),
-		sm.GetSecret("E2B_AGENT_CONTROL_TOKEN"),
+	daytonaProvider, err := daytonaSandbox.New(
+		sm.GetSecret("DAYTONA_API_KEY"),
+		sm.GetSecret("DAYTONA_TARGET"),
+		sm.GetSecret("DAYTONA_PREVIEW_DOMAIN"),
 	)
+	if err != nil {
+		slog.Warn("Daytona sandbox provider not configured", "error", err)
+	}
+	var sandboxManager *sandboxService.Manager
+	if daytonaProvider != nil {
+		sandboxManager = sandboxService.NewManager(daytonaProvider)
+	}
 
 	flyService := fly.NewService(
 		sm.GetSecret("FLY_API_TOKEN"),
@@ -405,7 +413,7 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		revenueCatService,
 		metaCAPI,
 		remoteConfigService,
-		e2b,
+		sandboxManager,
 		edgeIPs,
 		caddyAdmin,
 	)

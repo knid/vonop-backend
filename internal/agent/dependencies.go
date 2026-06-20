@@ -102,25 +102,32 @@ type MobileBuildTrigger func(ctx context.Context, project *models.AppProject, us
 // must not fail because a background deploy failed to enqueue.
 type WebDeployTrigger func(ctx context.Context, project *models.AppProject, user *models.User) (deploymentID string, err error)
 
-// SandboxControlRequest is an agent-runtime request for the E2B-backed
-// sandbox control plane. App source files remain backed by Git; this is for
-// live sandbox state, shell commands, logs, and sandbox-only artifacts.
+// SandboxControlRequest is an agent-runtime request for the backend-owned
+// Daytona-backed sandbox control plane. App source files remain backed by Git;
+// this is for live sandbox state, named process control, logs, terminals,
+// previews, diagnostics, snapshots, and sandbox-only artifacts.
 type SandboxControlRequest struct {
-	Action    string `json:"action"`
-	Command   string `json:"command,omitempty"`
-	Cwd       string `json:"cwd,omitempty"`
-	Path      string `json:"path,omitempty"`
-	Content   string `json:"content,omitempty"`
-	Target    string `json:"target,omitempty"`
-	URL       string `json:"url,omitempty"`
-	Label     string `json:"label,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Route     string `json:"route,omitempty"`
-	TimeoutMs int    `json:"timeout_ms,omitempty"`
+	Action     string `json:"action"`
+	Command    string `json:"command,omitempty"`
+	Cwd        string `json:"cwd,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Content    string `json:"content,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Process    string `json:"process,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Label      string `json:"label,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Route      string `json:"route,omitempty"`
+	Input      string `json:"input,omitempty"`
+	Cols       int    `json:"cols,omitempty"`
+	Rows       int    `json:"rows,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	TimeoutMs  int    `json:"timeout_ms,omitempty"`
 }
 
 type SandboxControlFn func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error)
 type PreviewURLSetter func(ctx context.Context, project *models.AppProject, url, label, kind string) error
+type SandboxFileSyncer func(ctx context.Context, project *models.AppProject, paths []string) error
 
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
@@ -263,6 +270,7 @@ type RunDependencies struct {
 	TriggerWebDeploy      WebDeployTrigger
 	SandboxControl        SandboxControlFn
 	SetPreviewURL         PreviewURLSetter
+	SyncSandboxFiles      SandboxFileSyncer
 	RecordLLMUsage        LLMUsageRecorder
 	RecordLLMError        LLMErrorRecorder
 	RecordLangfuseScore   LangfuseScoreRecorder

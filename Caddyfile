@@ -77,52 +77,13 @@ mcp.wemob.io {
         dns cloudflare {env.CF_API_TOKEN}
     }
 
-    reverse_proxy {
-        # versions ipv4: Fly publishes both A and AAAA for *.fly.dev, but the
-        # docker host has no IPv6, so dialing the AAAA address fails with
-        # "network is unreachable" ~50% of requests.
-        dynamic a {
-            name {http.request.host.labels.3}.e2b.app
-            port 443
-            versions ipv4
-        }
-        transport http {
-            tls
-            tls_server_name {http.request.host.labels.3}.e2b.app
-        }
-        header_up Host {http.request.host.labels.3}.e2b.app
-
-        # Sandbox expired (~1h idle) — E2B returns 502 with a JSON body.
-        # Swap it for the branded static page served from this image's
-        # /etc/caddy/static dir so the iframe (and direct visitors to
-        # shared preview URLs) get something actionable instead of raw
-        # JSON. The static page postMessages the studio parent so the
-        # preview UI auto-recovers. Self-hosted from Caddy so the error
-        # path has no cross-domain dependency on the studio frontend.
-        #
-        # Two variants, switched on Referer:
-        #   - Iframe in the studio sends Referer https://app.wemob.io/
-        #     (origin-only under default strict-origin-when-cross-origin)
-        #     → /sandbox-expired.html, which has the deploy hint and no
-        #     "Open Studio" CTA (the studio shell already handles the
-        #     restart via postMessage).
-        #   - Anything else (direct visitor on a shared preview link,
-        #     no Referer, or external Referer) → /sandbox-expired-shared.html
-        #     which links back to the studio so they have somewhere to go.
-        @sandbox_gone status 502
-        handle_response @sandbox_gone {
-            header -Content-Type
-            root * /etc/caddy/static
-            @from_studio header Referer https://app.wemob.io/*
-            handle @from_studio {
-                rewrite * /sandbox-expired.html
-                file_server
-            }
-            handle {
-                rewrite * /sandbox-expired-shared.html
-                file_server
-            }
-        }
+    rewrite * /internal/preview/proxy?host={host}
+    reverse_proxy api:8001 {
+        header_up Host {host}
+        header_up X-Forwarded-Host {host}
+        header_up X-Wemob-Preview-Host {host}
+        header_up X-Original-URI {http.request.orig_uri}
+        header_up X-Internal-Token {env.EDGE_INTERNAL_TOKEN}
     }
 }
 

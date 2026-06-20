@@ -728,28 +728,13 @@ func (v *HttpViews) StartAppSandbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := utils.ExtractTokenFromHeader(r)
+	status, err := v.Controller.StartSandbox(r.Context(), project)
 	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
-		return
-	}
-	result, err := v.Controller.E2BService.StartSandbox(token, appID)
-	if err != nil {
-		utils.JSONErrorCode(w, constants.ErrInternalUpstream, http.StatusBadGateway, nil)
+		utils.JSONInternalError(w, err)
 		return
 	}
 
-	// Save sandbox ID if we got one
-	if result.SandboxID != "" {
-		_ = v.Controller.DB.UpdateAppProjectSandboxID(project.ID.String(), result.SandboxID)
-	}
-
-	if result.Status == "error" {
-		utils.JSONResponse(w, result, http.StatusBadGateway)
-		return
-	}
-
-	utils.JSONResponse(w, result, http.StatusOK)
+	utils.JSONResponse(w, status, http.StatusOK)
 }
 
 // GET /v2/apps/{appId}/sandbox/status
@@ -767,59 +752,12 @@ func (v *HttpViews) GetAppSandboxStatus(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if project.SandboxID == "" {
-		utils.JSONResponse(w, map[string]string{
-			"status":      "stopped",
-			"preview_url": "",
-			"sandbox_id":  "",
-		}, http.StatusOK)
+	status, err := v.Controller.SandboxStatus(r.Context(), project)
+	if err != nil {
+		utils.JSONInternalError(w, err)
 		return
 	}
-
-	utils.JSONResponse(w, map[string]string{
-		"status":      "ready",
-		"preview_url": v.Controller.E2BService.PreviewURL(project.SandboxID),
-		"sandbox_id":  project.SandboxID,
-	}, http.StatusOK)
-}
-
-// POST /internal/e2b/agent/authorize
-func (v *HttpViews) AuthorizeE2BAgentSandbox(w http.ResponseWriter, r *http.Request) {
-	if v.Controller.E2BService == nil || v.Controller.E2BService.AgentToken == "" ||
-		r.Header.Get("X-Wemob-Agent-Token") != v.Controller.E2BService.AgentToken {
-		utils.JSONErrorCode(w, constants.ErrAuthInvalidToken, http.StatusUnauthorized, nil)
-		return
-	}
-	var body struct {
-		AppID     string `json:"appId"`
-		SandboxID string `json:"sandboxId"`
-	}
-	if err := utils.ParseJSONBody(r, &body); err != nil {
-		utils.ValidationError(w, err)
-		return
-	}
-	if body.AppID == "" || body.SandboxID == "" {
-		utils.JSONErrorCode(w, constants.ErrValidationRequired, http.StatusBadRequest, nil)
-		return
-	}
-	project, err := v.Controller.DB.GetAppProjectByID(body.AppID)
-	if err != nil || project == nil || project.SandboxID != body.SandboxID {
-		utils.JSONErrorCode(w, constants.ErrForbidden, http.StatusForbidden, nil)
-		return
-	}
-	allowExec, ok := project.Settings[constants.AgentSettingAllowSandboxExec].(bool)
-	if !ok {
-		allowExec = true
-	}
-	utils.JSONResponse(w, map[string]any{
-		"authorized":         true,
-		"sandbox_id":         project.SandboxID,
-		"project_type":       project.ProjectType,
-		"frontend_runtime":   project.FrontendRuntime,
-		"backend_enabled":    project.BackendEnabled,
-		"backend_runtime":    project.BackendRuntime,
-		"allow_sandbox_exec": allowExec,
-	}, http.StatusOK)
+	utils.JSONResponse(w, status, http.StatusOK)
 }
 
 // POST /v2/apps/{appId}/deploy/validate

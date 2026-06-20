@@ -1099,6 +1099,7 @@ func main() {
 					// Files (code-first CRUD)
 					r.Get("/files/{platform}", httpViews.GetAppFiles)
 					r.Post("/files", httpViews.CreateAppFile)
+					r.Put("/files", httpViews.UpdateAppFile)
 					r.Put("/files/{fid}", httpViews.UpdateAppFile)
 					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
 
@@ -1151,12 +1152,13 @@ func main() {
 					// Preview bundle (WebContainer-based, client-side)
 					r.Get("/preview-bundle", httpViews.GetPreviewBundle)
 
-					// Sandbox ID persistence for E2B preview
+					// Sandbox lifecycle for live Daytona previews
 					r.Get("/sandbox", httpViews.GetAppSandbox)
 					r.Put("/sandbox", httpViews.SetAppSandbox)
-					// Sandbox lifecycle for mobile preview
 					r.Post("/sandbox/start", httpViews.StartAppSandbox)
 					r.Get("/sandbox/status", httpViews.GetAppSandboxStatus)
+					r.Post("/sandbox/sync", httpViews.SyncSandbox)
+					r.Post("/sandbox/open-route", httpViews.OpenSandboxRoute)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {
@@ -1483,8 +1485,6 @@ func main() {
 			r.Get("/auth/github/status", httpViews.GetGitHubConnectionStatus)
 		})
 
-		r.Post("/internal/e2b/agent/authorize", httpViews.AuthorizeE2BAgentSandbox)
-
 		edgeToken := sm.GetSecret("EDGE_INTERNAL_TOKEN")
 		// cert-allowed is called by Caddy's on_demand_tls.ask, which cannot
 		// send custom headers — InternalOnly would always 401 it. The endpoint
@@ -1498,6 +1498,11 @@ func main() {
 				r.Use(appMiddleware.InternalOnly(edgeToken))
 				r.Get("/upstream", httpViews.HandleEdgeUpstream)
 			})
+		})
+		r.Route("/internal/preview", func(r chi.Router) {
+			r.Use(appMiddleware.InternalOnly(edgeToken))
+			r.Get("/resolve", httpViews.ResolvePreviewHost)
+			r.HandleFunc("/proxy", httpViews.HandlePreviewProxy)
 		})
 
 		r.Route("/internal/health", func(r chi.Router) {

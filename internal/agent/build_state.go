@@ -84,6 +84,36 @@ func (s *BuildState) RecordFileDelete(path string) {
 	s.Deleted[path] = true
 }
 
+func (s *BuildState) ChangedPaths() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]bool{}
+	for path, ok := range s.Created {
+		if ok {
+			seen[path] = true
+		}
+	}
+	for path, ok := range s.Updated {
+		if ok {
+			seen[path] = true
+		}
+	}
+	for path, ok := range s.Deleted {
+		if ok {
+			seen[path] = true
+		}
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
 func (s *BuildState) SetPhase(phase BuildPhase) {
 	if s == nil || phase == "" {
 		return

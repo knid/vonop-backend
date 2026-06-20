@@ -118,7 +118,8 @@ func (r *AppFileCreateRequest) Validate(validate *validator.Validate) error {
 }
 
 type AppFileUpdateRequest struct {
-	Content string `json:"content" validate:"required" errormgs:"is required"`
+	FilePath string `json:"file_path" validate:"omitempty,min=2" errormgs:"must be at least 2 characters"`
+	Content  string `json:"content" validate:"required" errormgs:"is required"`
 }
 
 func (r *AppFileUpdateRequest) Validate(validate *validator.Validate) error {

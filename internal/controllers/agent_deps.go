@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -11,8 +12,8 @@ import (
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/observability"
-	e2bService "github.com/knid/wemob/internal/services/e2b"
 	"github.com/knid/wemob/internal/services/fal"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/posthog/posthog-go"
 )
@@ -125,6 +126,9 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		SetPreviewURL: func(ctx context.Context, project *models.AppProject, url, label, kind string) error {
 			return c.setPreviewURLForAgent(ctx, project, url, label, kind)
 		},
+		SyncSandboxFiles: func(ctx context.Context, project *models.AppProject, paths []string) error {
+			return c.SyncSandbox(ctx, project)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},
@@ -152,35 +156,94 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	if user == nil {
 		return nil, fmt.Errorf("user is required")
 	}
-	if c.E2BService == nil {
-		return nil, fmt.Errorf("E2B service is not configured")
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
 	}
-	out, err := c.E2BService.AgentControl(ctx, e2bService.AgentControlRequest{
-		AppID:     project.ID.String(),
-		SandboxID: project.SandboxID,
-		Action:    req.Action,
-		Command:   req.Command,
-		Cwd:       req.Cwd,
-		Path:      req.Path,
-		Content:   req.Content,
-		Target:    req.Target,
-		URL:       req.URL,
-		Label:     req.Label,
-		Kind:      req.Kind,
-		Route:     req.Route,
-		TimeoutMs: req.TimeoutMs,
-	})
-	if err != nil {
+	switch req.Action {
+	case "status":
+		status, err := c.SandboxManager.Status(ctx, project)
+		return structToMap(status), err
+	case "start":
+		status, err := c.StartSandbox(ctx, project)
+		return structToMap(status), err
+	case "sync":
+		err := c.SyncSandbox(ctx, project)
+		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
+	case "exec":
+		stdout, stderr, exitCode, err := c.SandboxManager.Execute(ctx, project, req.Command, req.Cwd, req.TimeoutMs)
+		out := map[string]any{
+			"stdout":     stdout,
+			"stderr":     stderr,
+			"exit_code":  exitCode,
+			"sandbox_id": project.SandboxID,
+		}
 		return out, err
+	case "logs", "process_logs":
+		logs, err := c.SandboxManager.ProcessLogs(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)), 200)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"logs": logs, "sandbox_id": project.SandboxID}, nil
+	case "restart_process", "process_restart":
+		err := c.SandboxManager.RestartProcess(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)))
+		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
+	case "open_route", "preview_open_route":
+		target, err := c.SandboxManager.OpenRoute(ctx, project, req.Route, "agent")
+		return structToMap(target), err
+	case "serve_artifact", "serve-artifact":
+		target, err := c.SandboxManager.OpenArtifact(ctx, project, req.Path, "agent")
+		return structToMap(target), err
+	case "diagnostics":
+		diagnostics, err := c.SandboxManager.RunDiagnostics(ctx, project)
+		return structToMap(diagnostics), err
+	case "terminal_create":
+		terminal, err := c.SandboxManager.CreateTerminal(ctx, project, req.Cols, req.Rows)
+		return structToMap(terminal), err
+	case "terminal_input":
+		err := c.SandboxManager.SendTerminalInput(ctx, project, req.Target, firstNonEmptySandboxValue(req.Input, req.Content))
+		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
+	case "terminal_close":
+		err := c.SandboxManager.CloseTerminal(ctx, project, req.Target)
+		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
+	case "write_file", "delete_file":
+		return nil, fmt.Errorf("sandbox source writes are disabled; use Git-backed app file tools, then sync to sandbox")
+	default:
+		return nil, fmt.Errorf("unsupported sandbox action %q", req.Action)
 	}
-	if sid, _ := out["sandbox_id"].(string); sid != "" && sid != project.SandboxID {
-		if updateErr := c.DB.UpdateAppProjectSandboxID(project.ID.String(), sid); updateErr != nil {
-			slog.Warn("agent_deps: failed to persist sandbox id from agent control", "project_id", project.ID, "sandbox_id", sid, "error", updateErr)
-		} else {
-			project.SandboxID = sid
+}
+
+func structToMap(v any) map[string]any {
+	if v == nil {
+		return map[string]any{}
+	}
+	b, _ := json.Marshal(v)
+	out := map[string]any{}
+	_ = json.Unmarshal(b, &out)
+	return out
+}
+
+func firstNonEmptySandboxValue(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
 		}
 	}
-	return out, nil
+	return ""
+}
+
+func sandboxProcessName(target string) sandboxService.ProcessName {
+	switch target {
+	case string(sandboxService.ProcessBackend):
+		return sandboxService.ProcessBackend
+	case string(sandboxService.ProcessExpoGo):
+		return sandboxService.ProcessExpoGo
+	case string(sandboxService.ProcessExpoWeb):
+		return sandboxService.ProcessExpoWeb
+	case "artifacts", "artifact":
+		return sandboxService.ProcessArtifacts
+	default:
+		return sandboxService.ProcessFrontend
+	}
 }
 
 func (c *Controller) setPreviewURLForAgent(ctx context.Context, project *models.AppProject, url, label, kind string) error {

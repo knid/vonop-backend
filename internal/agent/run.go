@@ -426,7 +426,7 @@ func Run(
 	) error {
 		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
 			code, failureMessage, wrapped, tracker, runStart,
-			fileMap, message)
+			fileMap, buildState, message)
 	}
 
 	// Bind the credit checker to the run's token tracker.
@@ -541,7 +541,7 @@ func Run(
 		lastDeductedCredits = chargeFinalCreditDelta(context.Background(), deps, emitter, runID, turn, tracker, deductAction, project.ID.String(), lastDeductedCredits)
 		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
 			code, failureMessage, wrapped, tracker, runStart,
-			fileMap, message)
+			fileMap, buildState, message)
 	}
 
 	// Budget check before entering the loop.
@@ -802,6 +802,7 @@ func Run(
 			Run:             run,
 			Emitter:         emitter,
 			FileMap:         fileMap,
+			BuildState:      buildState,
 			Parts:           finalParts,
 			Tracker:         tracker,
 			RunStart:        runStart,
@@ -901,6 +902,7 @@ func finaliseSuccess(
 	run *models.AppAgentRun,
 	emitter EventEmitter,
 	fileMap *SafeFileMap,
+	buildState *BuildState,
 	parts []models.ChatMessagePart,
 	tracker *utils.TokenTracker,
 	runStart time.Time,
@@ -933,7 +935,10 @@ func finaliseSuccess(
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
 			tracker, runStart,
-			fileMap, userMessage)
+			fileMap, buildState, userMessage)
+	}
+	if finalCommit != "" && finalCommit != run.PreCommit {
+		syncSandboxAfterCommit(ctx, deps, project, buildState)
 	}
 
 	// 1b. Auto-deploy the backend/ subtree if this turn touched it.
@@ -1287,6 +1292,7 @@ func finaliseFailureV2(
 	tracker *utils.TokenTracker,
 	runStart time.Time,
 	fileMap *SafeFileMap,
+	buildState *BuildState,
 	originalUserMessage string,
 ) error {
 	// 1. Attempt to commit partial progress so the user isn't left with
@@ -1300,6 +1306,7 @@ func finaliseFailureV2(
 			if partialCommit != run.PreCommit {
 				run.FinalCommit = partialCommit
 				checkpointCommit = partialCommit
+				syncSandboxAfterCommit(ctx, deps, project, buildState)
 				emitter.Emit(EventCheckpoint, CheckpointEvent{
 					RunID:  run.ID,
 					Commit: partialCommit,

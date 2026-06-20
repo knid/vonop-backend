@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -40,6 +41,20 @@ func TestBuildStateDoesNotListCreatedFileAsUpdated(t *testing.T) {
 	}
 	if strings.Contains(rendered, "Updated this run:\n- app/page.tsx") {
 		t.Fatalf("created path should not also be listed as updated:\n%s", rendered)
+	}
+}
+
+func TestBuildStateChangedPathsReturnsSortedUniquePaths(t *testing.T) {
+	state := NewBuildState("build app", false)
+	state.RecordFileWrite("components/button.tsx", "update")
+	state.RecordFileWrite("app/page.tsx", "create")
+	state.RecordFileWrite("app/page.tsx", "update")
+	state.RecordFileDelete("components/old.tsx")
+
+	got := state.ChangedPaths()
+	want := []string{"app/page.tsx", "components/button.tsx", "components/old.tsx"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ChangedPaths() = %#v, want %#v", got, want)
 	}
 }
 

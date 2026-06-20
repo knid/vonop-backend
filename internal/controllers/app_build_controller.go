@@ -473,8 +473,8 @@ type AppValidationResult struct {
 }
 
 // ValidateAppFiles runs LLM-based validation on project files.
-// Static deterministic checks were removed — the E2B sandbox catches build
-// errors at runtime, making a static pre-flight layer redundant.
+// Runtime sandbox verification catches build errors, making a static
+// pre-flight layer redundant.
 //
 // `user` is optional and only used for PostHog attribution. Pass nil to skip
 // the trace.
@@ -551,8 +551,8 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 	return &result, nil
 }
 
-// GetPreviewBundle returns all project files and env vars for the E2B
-// sandbox preview. The shape varies by project_type:
+// GetPreviewBundle returns all project files and env vars for the sandbox
+// preview. The shape varies by project_type:
 //
 //   - vite_react: returns the frontend/ subtree with the prefix stripped so
 //     the existing sandbox can run npm scripts from its root. backend/ files
@@ -567,9 +567,8 @@ func (c *Controller) ValidateAppFiles(ctx context.Context, projectID string, use
 //     sandbox runs Metro/Expo, not Next.js.
 //   - everything else: returns the full file map with Next.js patches.
 //
-// project_type is included so the frontend's /api/e2b/start route can
-// branch its sandbox setup (which dev-server command, which port to wait
-// on) without an extra backend round-trip.
+// project_type is included so sandbox setup can branch by dev-server command
+// and readiness port without an extra backend round-trip.
 func (c *Controller) GetPreviewBundle(project *models.AppProject) (map[string]interface{}, error) {
 	repo, err := c.GitRepoService.Open(project.ID.String())
 	if err != nil {

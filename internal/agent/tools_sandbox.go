@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	sandboxRootProject   = "/home/user/project"
-	sandboxRootBackend   = "/home/user/backend"
-	sandboxRootArtifacts = "/home/user/artifacts"
+	sandboxRootProject   = "/workspace/project"
+	sandboxRootBackend   = "/workspace/backend"
+	sandboxRootArtifacts = "/workspace/artifacts"
 	sandboxRootTmp       = "/tmp"
 )
 
@@ -28,8 +28,12 @@ var blockedSandboxCommandPatterns = []*regexp.Regexp{
 
 func registerSandboxTools(r *Registry, deps *RunDependencies) {
 	r.Register(SandboxStatusTool{Deps: deps})
+	r.Register(SandboxStartTool{Deps: deps})
+	r.Register(SandboxSyncTool{Deps: deps})
 	r.Register(SandboxExecTool{Deps: deps})
 	r.Register(SandboxReadLogsTool{Deps: deps})
+	r.Register(ProcessRestartTool{Deps: deps})
+	r.Register(ProcessLogsTool{Deps: deps})
 	r.Register(SandboxServeArtifactTool{Deps: deps})
 	r.Register(PreviewSetURLTool{Deps: deps})
 	r.Register(PreviewOpenRouteTool{Deps: deps})
@@ -173,8 +177,7 @@ func allowedPreviewURL(raw string) error {
 		return fmt.Errorf("preview URL must use https")
 	}
 	host := strings.ToLower(u.Hostname())
-	if host == "preview.wemob.app" || strings.HasSuffix(host, ".preview.wemob.app") ||
-		host == "e2b.app" || strings.HasSuffix(host, ".e2b.app") {
+	if host == "preview.wemob.app" || strings.HasSuffix(host, ".preview.wemob.app") {
 		return nil
 	}
 	return fmt.Errorf("preview URL host %q is not approved", host)
@@ -204,7 +207,7 @@ type SandboxStatusTool struct{ Deps *RunDependencies }
 
 func (SandboxStatusTool) Name() string { return "sandbox_status" }
 func (SandboxStatusTool) Description() string {
-	return "Inspect the current E2B sandbox state, preview URLs, known ports, dev processes, and log availability for this app."
+	return "Inspect the current Daytona-backed sandbox state, preview URLs, known ports, dev processes, and log availability for this app."
 }
 func (SandboxStatusTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
@@ -214,18 +217,46 @@ func (t SandboxStatusTool) Execute(ctx context.Context, rc *RunContext, input js
 	return renderSandboxResult(out), isErr, err
 }
 
+type SandboxStartTool struct{ Deps *RunDependencies }
+
+func (SandboxStartTool) Name() string { return "sandbox_start" }
+func (SandboxStartTool) Description() string {
+	return "Start or resume the Daytona-backed sandbox, sync current Git-backed source files, and start the app preview processes."
+}
+func (SandboxStartTool) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (t SandboxStartTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "start"})
+	return renderSandboxResult(out), isErr, err
+}
+
+type SandboxSyncTool struct{ Deps *RunDependencies }
+
+func (SandboxSyncTool) Name() string { return "sandbox_sync" }
+func (SandboxSyncTool) Description() string {
+	return "Sync the current Git-backed project source files into the existing Daytona-backed sandbox."
+}
+func (SandboxSyncTool) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{}}
+}
+func (t SandboxSyncTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "sync"})
+	return renderSandboxResult(out), isErr, err
+}
+
 type SandboxExecTool struct{ Deps *RunDependencies }
 
 func (SandboxExecTool) Name() string { return "sandbox_exec" }
 func (SandboxExecTool) Description() string {
-	return "Run a non-interactive shell command in the E2B sandbox from an approved cwd. Use /home/user/project for frontend/mobile work and /home/user/backend for backend work. Use Git-backed tools for app source edits; use this for tests, diagnostics, conversions, and artifact work."
+	return "Run a non-interactive shell command in the Daytona-backed sandbox from an approved cwd. Use /workspace/project for frontend/mobile work and /workspace/backend for backend work. Use Git-backed tools for app source edits; use this for tests, diagnostics, conversions, and artifact work."
 }
 func (SandboxExecTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command":    map[string]any{"type": "string", "description": "Shell command to run. Set cwd for the target app root; do not use cd prefixes."},
-			"cwd":        map[string]any{"type": "string", "description": "Absolute sandbox cwd. Defaults to /home/user/project. Use /home/user/project for frontend/mobile commands, /home/user/backend for backend commands, /home/user/artifacts for artifact work, or /tmp for temporary work."},
+			"cwd":        map[string]any{"type": "string", "description": "Absolute sandbox cwd. Defaults to /workspace/project. Use /workspace/project for frontend/mobile commands, /workspace/backend for backend commands, /workspace/artifacts for artifact work, or /tmp for temporary work."},
 			"timeout_ms": map[string]any{"type": "integer", "description": "Optional command timeout in milliseconds."},
 		},
 		"required": []string{"command"},
@@ -255,7 +286,7 @@ type SandboxReadLogsTool struct{ Deps *RunDependencies }
 
 func (SandboxReadLogsTool) Name() string { return "sandbox_read_logs" }
 func (SandboxReadLogsTool) Description() string {
-	return "Read recent sandbox dev logs. target can be dev, expo_go, or backend."
+	return "Read recent sandbox dev logs. target can be frontend, dev, expo_web, expo_go, backend, or artifacts."
 }
 func (SandboxReadLogsTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"target": map[string]any{"type": "string"}}}
@@ -267,12 +298,67 @@ func (t SandboxReadLogsTool) Execute(ctx context.Context, rc *RunContext, input 
 	_ = json.Unmarshal(input, &args)
 	target := strings.TrimSpace(args.Target)
 	if target == "" {
-		target = "dev"
+		target = "frontend"
 	}
-	if target != "dev" && target != "expo_go" && target != "backend" {
-		return "target must be one of: dev, expo_go, backend", true, nil
+	if target == "dev" {
+		target = "frontend"
+	}
+	if target != "frontend" && target != "expo_web" && target != "expo_go" && target != "backend" && target != "artifacts" {
+		return "target must be one of: frontend, dev, expo_web, expo_go, backend, artifacts", true, nil
 	}
 	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "logs", Target: target})
+	return renderSandboxResult(out), isErr, execErr
+}
+
+type ProcessRestartTool struct{ Deps *RunDependencies }
+
+func (ProcessRestartTool) Name() string { return "process_restart" }
+func (ProcessRestartTool) Description() string {
+	return "Restart a named Daytona sandbox process such as frontend, backend, expo_web, expo_go, or artifacts."
+}
+func (ProcessRestartTool) Schema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"process": map[string]any{"type": "string"}},
+		"required":   []string{"process"},
+	}
+}
+func (t ProcessRestartTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Process string `json:"process"`
+	}
+	if err := json.Unmarshal(input, &args); err != nil {
+		return fmt.Sprintf("invalid input: %v", err), true, nil
+	}
+	if strings.TrimSpace(args.Process) == "" {
+		return "process is required", true, nil
+	}
+	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "process_restart", Process: strings.TrimSpace(args.Process)})
+	return renderSandboxResult(out), isErr, execErr
+}
+
+type ProcessLogsTool struct{ Deps *RunDependencies }
+
+func (ProcessLogsTool) Name() string { return "process_logs" }
+func (ProcessLogsTool) Description() string {
+	return "Read recent logs for a named Daytona sandbox process such as frontend, backend, expo_web, expo_go, or artifacts."
+}
+func (ProcessLogsTool) Schema() map[string]any {
+	return map[string]any{
+		"type":       "object",
+		"properties": map[string]any{"process": map[string]any{"type": "string"}},
+	}
+}
+func (t ProcessLogsTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Process string `json:"process"`
+	}
+	_ = json.Unmarshal(input, &args)
+	process := strings.TrimSpace(args.Process)
+	if process == "" {
+		process = "frontend"
+	}
+	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "process_logs", Process: process})
 	return renderSandboxResult(out), isErr, execErr
 }
 
@@ -280,7 +366,7 @@ type SandboxServeArtifactTool struct{ Deps *RunDependencies }
 
 func (SandboxServeArtifactTool) Name() string { return "sandbox_serve_artifact" }
 func (SandboxServeArtifactTool) Description() string {
-	return "Serve a file under /home/user/artifacts and return a public preview URL."
+	return "Serve a file under /workspace/artifacts and return a public preview URL."
 }
 func (SandboxServeArtifactTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}
@@ -297,7 +383,7 @@ func (t SandboxServeArtifactTool) Execute(ctx context.Context, rc *RunContext, i
 		return err.Error(), true, nil
 	}
 	if !sandboxPathInRoots(p, sandboxRootArtifacts) {
-		return "only files under /home/user/artifacts can be served publicly", true, nil
+		return "only files under /workspace/artifacts can be served publicly", true, nil
 	}
 	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "serve-artifact", Path: p})
 	return renderSandboxResult(out), isErr, execErr
@@ -307,7 +393,7 @@ type PreviewSetURLTool struct{ Deps *RunDependencies }
 
 func (PreviewSetURLTool) Name() string { return "preview_set_url" }
 func (PreviewSetURLTool) Description() string {
-	return "Set the user's active preview pane URL to an approved Wemob/E2B preview URL."
+	return "Set the user's active preview pane URL to an approved Wemob preview URL."
 }
 func (PreviewSetURLTool) Schema() map[string]any {
 	return map[string]any{
@@ -417,7 +503,7 @@ type PreviewOpenArtifactTool struct{ Deps *RunDependencies }
 
 func (PreviewOpenArtifactTool) Name() string { return "preview_open_artifact" }
 func (PreviewOpenArtifactTool) Description() string {
-	return "Serve an artifact under /home/user/artifacts and open it in the user's preview pane."
+	return "Serve an artifact under /workspace/artifacts and open it in the user's preview pane."
 }
 func (PreviewOpenArtifactTool) Schema() map[string]any {
 	return map[string]any{
@@ -442,7 +528,7 @@ func (t PreviewOpenArtifactTool) Execute(ctx context.Context, rc *RunContext, in
 		return err.Error(), true, nil
 	}
 	if !sandboxPathInRoots(p, sandboxRootArtifacts) {
-		return "only files under /home/user/artifacts can be opened as artifacts", true, nil
+		return "only files under /workspace/artifacts can be opened as artifacts", true, nil
 	}
 	out, isErr, execErr := sandboxControl(ctx, rc, SandboxControlRequest{Action: "serve-artifact", Path: p})
 	if execErr != nil || isErr {
@@ -473,8 +559,12 @@ func (t PreviewOpenArtifactTool) Execute(ctx context.Context, rc *RunContext, in
 func sandboxToolNames() []string {
 	names := []string{
 		"sandbox_status",
+		"sandbox_start",
+		"sandbox_sync",
 		"sandbox_exec",
 		"sandbox_read_logs",
+		"process_restart",
+		"process_logs",
 		"sandbox_serve_artifact",
 		"preview_set_url",
 		"preview_open_route",

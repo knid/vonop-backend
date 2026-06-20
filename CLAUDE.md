@@ -66,7 +66,7 @@ Go monolith (module `github.com/knid/wemob`) serving a REST API for the Wemob mo
   - `gitrepo.Service` — GitHub export and repo operations
   - `mcpclient.Service` — MCP (Model Context Protocol) client
   - `remoteconfig.Service` — Remote config for mobile apps
-  - `e2b.Service` — E2B sandbox environments
+  - `sandbox.Manager` — Daytona-backed sandbox preview and agent runtime control
   - `fal.Service` — FAL AI image generation
   - `caddy.Admin` — Caddy reverse proxy admin API
   - Additional: `giteabackup`, `integrations`, `jobstream`, `ota`, `storeauth`

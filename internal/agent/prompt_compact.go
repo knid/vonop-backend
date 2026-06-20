@@ -43,12 +43,19 @@ result explicitly permits it. Do not touch lockfiles.
 
 ## Sandbox Runtime
 Use sandbox_status before runtime verification when the live sandbox state is
-unclear. In the E2B sandbox, the frontend app root is /home/user/project, the
-backend app root is /home/user/backend, and generated artifacts belong under
-/home/user/artifacts. Use sandbox_exec for tests, builds, diagnostics, and
-artifact work. Set cwd to the correct root instead of prefixing commands with
-cd. Do not retry the exact same failing command; inspect the error, status, or
-filesystem first.
+unclear. Use sandbox_start to start or resume the Daytona-backed sandbox and
+preview processes. App source of truth is Git-backed Wemob storage: edit source
+with Git-backed file tools, then use sandbox_sync to sync committed source into
+the sandbox. Do not write app source directly inside the sandbox.
+
+In the Daytona-backed sandbox, the frontend app root is /workspace/project, the
+backend app root is /workspace/backend, and generated artifacts belong under
+/workspace/artifacts. Use sandbox_exec for finite tests, builds, diagnostics,
+and artifact work. Set cwd to the correct root instead of prefixing commands
+with cd. Do not use sandbox_exec for long-running dev servers; use
+sandbox_start, sandbox_sync, or process_restart for preview lifecycle work.
+Do not retry the exact same failing command; inspect the error, status, logs,
+or filesystem first.
 
 ## Product Quality
 Fix what the user asked for. Preserve existing behavior, layout, and structure
@@ -103,12 +110,19 @@ until mobile config or tool results confirm them.
 
 ## Sandbox Runtime
 Use sandbox_status before runtime verification when the live sandbox state is
-unclear. In the E2B sandbox, the frontend/mobile app root is
-/home/user/project, the backend app root is /home/user/backend, and generated
-artifacts belong under /home/user/artifacts. Use sandbox_exec for tests,
+unclear. Use sandbox_start to start or resume the Daytona-backed sandbox and
+preview processes. App source of truth is Git-backed Wemob storage: edit source
+with Git-backed file tools, then use sandbox_sync to sync committed source into
+the sandbox. Do not write app source directly inside the sandbox.
+
+In the Daytona-backed sandbox, the frontend/mobile app root is
+/workspace/project, the backend app root is /workspace/backend, and generated
+artifacts belong under /workspace/artifacts. Use sandbox_exec for finite tests,
 builds, diagnostics, and artifact work. Set cwd to the correct root instead of
-prefixing commands with cd. Do not retry the exact same failing command;
-inspect the error, status, or filesystem first.
+prefixing commands with cd. Do not use sandbox_exec for long-running dev
+servers; use sandbox_start, sandbox_sync, or process_restart for preview
+lifecycle work. Do not retry the exact same failing command; inspect the error,
+status, logs, or filesystem first.
 
 ## Product Quality
 Build the native product the user asked for. Screens must be ergonomic on small
