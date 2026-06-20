@@ -175,6 +175,58 @@ func (c *Controller) PushToGitHub(user *models.User, projectID uuid.UUID) (*mode
 	return export, nil
 }
 
+// PullFromGitHub fast-forwards the project repo from its exported GitHub repo.
+func (c *Controller) PullFromGitHub(user *models.User, projectID uuid.UUID) (*models.AppGitHubExport, error) {
+	token, err := c.decryptGitHubToken(user)
+	if err != nil {
+		return nil, err
+	}
+
+	export, err := c.DB.GetAppGitHubExportByProjectID(projectID.String())
+	if err != nil {
+		return nil, fmt.Errorf("project not exported to GitHub — export first")
+	}
+	if export.UserID != user.ID {
+		return nil, fmt.Errorf("not authorized")
+	}
+
+	repo, err := c.GitRepoService.Open(projectID.String())
+	if err != nil {
+		return nil, fmt.Errorf("failed to open project repo: %w", err)
+	}
+
+	branch, err := repo.CurrentBranch()
+	if err != nil {
+		branch = "main"
+	}
+
+	pullURL := fmt.Sprintf("https://x-access-token:%s@github.com/%s.git", token, export.RepoFullName)
+	if err := repo.PullFromURL(pullURL, branch); err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "could not read Username") || strings.Contains(errMsg, "401") || strings.Contains(errMsg, "403") {
+			return nil, fmt.Errorf("GITHUB_AUTH_EXPIRED")
+		}
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "404") {
+			c.DB.DeleteAppGitHubExport(projectID.String())
+			return nil, fmt.Errorf("GITHUB_REPO_NOT_FOUND")
+		}
+		if strings.Contains(errMsg, "Not possible to fast-forward") ||
+			strings.Contains(errMsg, "not possible to fast-forward") ||
+			strings.Contains(errMsg, "divergent") ||
+			strings.Contains(errMsg, "non-fast-forward") ||
+			strings.Contains(errMsg, "would be overwritten") {
+			return nil, fmt.Errorf("GITHUB_PULL_CONFLICT")
+		}
+		if strings.Contains(errMsg, "signal: killed") || strings.Contains(errMsg, "context deadline exceeded") {
+			return nil, fmt.Errorf("GITHUB_PULL_TIMEOUT")
+		}
+		return nil, fmt.Errorf("failed to pull from GitHub: %w", err)
+	}
+
+	export, _ = c.DB.GetAppGitHubExportByProjectID(projectID.String())
+	return export, nil
+}
+
 // RemoveGitHubExport deletes the export record for a project.
 func (c *Controller) RemoveGitHubExport(user *models.User, projectID uuid.UUID) error {
 	export, err := c.DB.GetAppGitHubExportByProjectID(projectID.String())

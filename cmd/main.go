@@ -1187,6 +1187,7 @@ func main() {
 						r.Get("/", httpViews.GetGitHubExport)
 						r.Post("/export", httpViews.ExportToGitHub)
 						r.Post("/push", httpViews.PushToGitHub)
+						r.Post("/pull", httpViews.PullFromGitHub)
 						r.Delete("/", httpViews.RemoveGitHubExport)
 					})
 

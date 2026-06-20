@@ -120,6 +120,8 @@
     "GENERATION_IN_PROGRESS": "A generation is already in progress.",
     "GITHUB_AUTH_EXPIRED": "GitHub authentication expired. Please reconnect.",
     "GITHUB_EXPORT_NOT_AVAILABLE": "GitHub export is not available on your plan.",
+    "GITHUB_PULL_CONFLICT": "GitHub changes could not be pulled because histories diverged.",
+    "GITHUB_PULL_TIMEOUT": "GitHub pull timed out.",
     "GITHUB_PUSH_REJECTED": "GitHub push was rejected.",
     "GITHUB_PUSH_TIMEOUT": "GitHub push timed out.",
     "GITHUB_REPO_EXISTS": "A repository with this name already exists.",
