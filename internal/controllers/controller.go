@@ -191,49 +191,76 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 		return c.llmProvider()
 	}
 
-	providerName, model := c.parseProviderModel(providerModel)
+	providerName, model, flagReasoning := c.parseProviderModel(providerModel)
+	reasoning := c.reasoningConfig()
+	if flagReasoning != nil {
+		reasoning = flagReasoning
+	}
 	fastModel := c.SecretManager.GetSecret("WEBSITE_BUILDER_FAST_MODEL")
 
 	var p *utils.LLMProvider
 	switch providerName {
 	case "anthropic":
-		p = &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
+		p = &utils.LLMProvider{Name: "anthropic", BaseURL: "https://api.anthropic.com/v1", APIKey: c.SecretManager.GetSecret("ANTHROPIC_API_KEY"), DefaultReasoning: reasoning, FastModelOverride: fastModel, ConfiguredModel: model}
 	case "moonshot":
-		moonshotReasoning := c.reasoningConfig()
+		moonshotReasoning := reasoning
 		if !c.RemoteConfig.GetBool(remoteconfig.AIMoonshotThinkingEnabled, remoteconfig.Global) {
 			moonshotReasoning = nil
 		}
 		p = &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel, ConfiguredModel: model}
 	default:
-		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: c.reasoningConfig(), FastModelOverride: fastModel, ConfiguredModel: model}
+		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: reasoning, FastModelOverride: fastModel, ConfiguredModel: model}
 	}
 
 	// Every non-OpenRouter primary gets an OpenRouter fallback.
 	if !p.IsOpenRouter() {
-		c.attachOpenRouterFallback(p, fastModel)
+		c.attachOpenRouterFallbackWithReasoning(p, fastModel, reasoning)
 	}
 
-	slog.Info("LLM provider resolved per user", "user_id", user.ID, "tier", tier, "provider", p.Name, "model", model)
+	reasoningEffort := ""
+	if reasoning != nil {
+		reasoningEffort = reasoning.Effort
+	}
+	slog.Info("LLM provider resolved per user", "user_id", user.ID, "tier", tier, "provider", p.Name, "model", model, "reasoning_effort", reasoningEffort)
 	return p
 }
 
-// parseProviderModel splits a "provider/model" string into provider name and
-// bare model ID. Known providers: anthropic, moonshot, openrouter.
+// parseProviderModel splits a "provider/model[;reasoning_effort]" string into
+// provider name, bare model ID, and an optional reasoning override. Known
+// providers: anthropic, moonshot, openrouter.
 // If the first segment is not a known provider, the whole string is treated as
 // an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash", "google/gemini-2.5-flash-lite").
-func (c *Controller) parseProviderModel(providerModel string) (provider, model string) {
+func (c *Controller) parseProviderModel(providerModel string) (provider, model string, reasoning *utils.ReasoningConfig) {
 	providerModel = strings.TrimSpace(strings.ToLower(providerModel))
+	if base, suffix, ok := strings.Cut(providerModel, ";"); ok {
+		providerModel = strings.TrimSpace(base)
+		effort := strings.TrimSpace(suffix)
+		if isReasoningEffort(effort) {
+			reasoning = &utils.ReasoningConfig{Effort: effort}
+		} else if effort != "" {
+			slog.Warn("Ignoring invalid builder model reasoning effort", "provider_model", providerModel, "reasoning_effort", effort)
+		}
+	}
 	parts := strings.SplitN(providerModel, "/", 2)
 	if len(parts) != 2 {
-		return "openrouter", providerModel
+		return "openrouter", providerModel, reasoning
 	}
 
 	switch parts[0] {
 	case "anthropic", "moonshot", "openrouter":
-		return parts[0], parts[1]
+		return parts[0], parts[1], reasoning
 	default:
 		// First segment is a vendor namespace on OpenRouter (e.g. "deepseek/...")
-		return "openrouter", providerModel
+		return "openrouter", providerModel, reasoning
+	}
+}
+
+func isReasoningEffort(effort string) bool {
+	switch effort {
+	case "xhigh", "high", "medium", "low", "minimal", "none":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -241,6 +268,10 @@ func (c *Controller) parseProviderModel(providerModel string) (provider, model s
 // provider when OPENROUTER_API_KEY is configured. The fallback model is read
 // from LLM_FALLBACK_MODEL (default: anthropic/claude-sonnet-4.6).
 func (c *Controller) attachOpenRouterFallback(primary *utils.LLMProvider, fastModel string) {
+	c.attachOpenRouterFallbackWithReasoning(primary, fastModel, c.reasoningConfig())
+}
+
+func (c *Controller) attachOpenRouterFallbackWithReasoning(primary *utils.LLMProvider, fastModel string, reasoning *utils.ReasoningConfig) {
 	openRouterKey := c.SecretManager.GetSecret("OPENROUTER_API_KEY")
 	if openRouterKey == "" {
 		slog.Info("LLM overload fallback disabled — OPENROUTER_API_KEY not set")
@@ -254,7 +285,7 @@ func (c *Controller) attachOpenRouterFallback(primary *utils.LLMProvider, fastMo
 		Name:              "openrouter",
 		BaseURL:           "https://openrouter.ai/api/v1",
 		APIKey:            openRouterKey,
-		DefaultReasoning:  c.reasoningConfig(),
+		DefaultReasoning:  reasoning,
 		FastModelOverride: fastModel,
 	}
 	primary.FallbackModel = fallbackModel
@@ -283,7 +314,8 @@ func (c *Controller) AnthropicProvider() *utils.LLMProvider {
 }
 
 // reasoningConfig returns the ReasoningConfig from the LLM_REASONING_EFFORT secret.
-// Set it in Infisical to control thinking mode: "none", "low", "medium", "high".
+// Set it in Infisical to control thinking mode: "none", "minimal", "low",
+// "medium", "high", or "xhigh".
 // Leave empty/unset to let the model use its default behavior.
 func (c *Controller) reasoningConfig() *utils.ReasoningConfig {
 	effort := c.SecretManager.GetSecret("LLM_REASONING_EFFORT")
