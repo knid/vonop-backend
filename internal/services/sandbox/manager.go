@@ -338,10 +338,13 @@ func (m *Manager) Stop(ctx context.Context, project *models.AppProject) error {
 	return provider.Stop(ctx, sandboxID)
 }
 
-func (m *Manager) RestartProcess(ctx context.Context, project *models.AppProject, name ProcessName) error {
+func (m *Manager) RestartProcess(ctx context.Context, project *models.AppProject, name ProcessName, env map[string]string) error {
 	provider, sandboxID, spec, err := m.processSpec(project, name)
 	if err != nil {
 		return err
+	}
+	if name != ProcessArtifacts {
+		spec.Env = mergeProcessEnv(spec.Env, env)
 	}
 	if err := provider.StopProcess(ctx, sandboxID, name); err != nil {
 		return fmt.Errorf("stop process %s: %w", name, err)

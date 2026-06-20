@@ -213,7 +213,7 @@ func (p ProvisionDatabaseTool) Execute(ctx context.Context, rc *RunContext, inpu
 	// against the existing @/lib/db and use execute_sql for ad-hoc queries.
 	if p.Deps.NeonConnString != nil {
 		if cs, _ := p.Deps.NeonConnString(rc.Project.ID.String()); cs != "" {
-			return "this project already has a wemob db connected — import { db } from '@/lib/db' and use execute_sql for ad-hoc queries; do not call provision_database again", true, nil
+			return "database already exists. Do not call provision_database again. Import { db } from '@/lib/db' for compiled queries and use execute_sql for ad-hoc database work. If the preview backend reports DATABASE_URL is missing, that is a sandbox env sync problem — run sandbox_start or sandbox_sync/process_restart rather than provisioning another database.", true, nil
 		}
 	}
 

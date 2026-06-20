@@ -24,7 +24,15 @@ func (c *Controller) StartSandbox(ctx context.Context, project *models.AppProjec
 	if err != nil {
 		return nil, err
 	}
+	return c.startSandboxWithFiles(ctx, project, files)
+}
+
+func (c *Controller) startSandboxWithFiles(ctx context.Context, project *models.AppProject, files map[string]string) (*sandbox.Status, error) {
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
+	}
 	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
 	status, err := c.SandboxManager.Start(ctx, project, files, envVars)
 	if err != nil {
 		return nil, err
@@ -43,6 +51,14 @@ func (c *Controller) SyncSandbox(ctx context.Context, project *models.AppProject
 	if err != nil {
 		return err
 	}
+	return c.syncSandboxWithFiles(ctx, project, files)
+}
+
+func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.AppProject, files map[string]string) error {
+	if c.SandboxManager == nil {
+		return fmt.Errorf("sandbox manager is not configured")
+	}
+	addSandboxEnvFiles(project, files, c.CollectAllEnvVars(project))
 	return c.SandboxManager.Sync(ctx, project, files)
 }
 
@@ -88,4 +104,29 @@ func (c *Controller) sandboxSourceFiles(project *models.AppProject) (map[string]
 		return mobileFiles, nil
 	}
 	return fileMap, nil
+}
+
+func addSandboxEnvFiles(project *models.AppProject, files map[string]string, envVars map[string]string) {
+	if project == nil || files == nil {
+		return
+	}
+	dotEnv := BuildDotEnvLocal(envVars)
+	for _, path := range sandboxEnvFilePaths(project) {
+		files[path] = dotEnv
+	}
+}
+
+func sandboxEnvFilePaths(project *models.AppProject) []string {
+	if project == nil {
+		return nil
+	}
+	switch {
+	case project.UsesSplitWebRuntime(), project.FrontendRuntime == models.FrontendRuntimeNone:
+		if project.BackendEnabled || project.FrontendRuntime == models.FrontendRuntimeNone {
+			return []string{"backend/.env.local"}
+		}
+	case project.ProjectType != models.ProjectTypeMobileAppNative:
+		return []string{".env.local"}
+	}
+	return nil
 }

@@ -14,8 +14,8 @@ function getDb(): ReturnType<typeof drizzle> {
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(
-      "DATABASE_URL is not set. Ecommerce apps require a Neon database — " +
-        "run provision_database once to seed the tenant schema.",
+      "DATABASE_URL is not set. The backend preview is missing server env vars — " +
+        "restart or resync the sandbox preview rather than provisioning a second database.",
     );
   }
   const client = neon(connectionString);

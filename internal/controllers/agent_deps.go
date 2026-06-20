@@ -162,22 +162,33 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	switch req.Action {
 	case "status":
 		status, err := c.SandboxManager.Status(ctx, project)
-		return agentSandboxStatusMap(project, status), err
+		out := agentSandboxStatusMap(project, status)
+		out["env_status"] = sandboxEnvStatus(c.CollectAllEnvVars(project))
+		return out, err
 	case "start":
-		status, err := c.StartSandbox(ctx, project)
-		return agentSandboxStatusMap(project, status), err
+		var (
+			status *sandboxService.Status
+			err    error
+		)
+		if len(req.Files) > 0 {
+			status, err = c.startSandboxWithFiles(ctx, project, copySandboxFiles(req.Files))
+		} else {
+			status, err = c.StartSandbox(ctx, project)
+		}
+		out := agentSandboxStatusMap(project, status)
+		out["env_status"] = sandboxEnvStatus(c.CollectAllEnvVars(project))
+		return out, err
 	case "sync":
-		err := c.SyncSandbox(ctx, project)
+		var err error
+		if len(req.Files) > 0 {
+			err = c.syncSandboxWithFiles(ctx, project, copySandboxFiles(req.Files))
+		} else {
+			err = c.SyncSandbox(ctx, project)
+		}
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
 	case "exec":
 		stdout, stderr, exitCode, err := c.SandboxManager.Execute(ctx, project, req.Command, req.Cwd, req.TimeoutMs)
-		out := map[string]any{
-			"stdout":     stdout,
-			"stderr":     stderr,
-			"exit_code":  exitCode,
-			"sandbox_id": project.SandboxID,
-		}
-		return out, err
+		return sandboxExecOutput(stdout, stderr, exitCode, project.SandboxID, err), err
 	case "logs", "process_logs":
 		logs, err := c.SandboxManager.ProcessLogs(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)), 200)
 		if err != nil {
@@ -185,7 +196,7 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		}
 		return map[string]any{"logs": logs, "sandbox_id": project.SandboxID}, nil
 	case "restart_process", "process_restart":
-		err := c.SandboxManager.RestartProcess(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)))
+		err := c.SandboxManager.RestartProcess(ctx, project, sandboxProcessName(firstNonEmptySandboxValue(req.Process, req.Target)), c.CollectAllEnvVars(project))
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
 	case "open_route", "preview_open_route":
 		target, err := c.SandboxManager.OpenRoute(ctx, project, req.Route, "agent")
@@ -210,6 +221,45 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 	default:
 		return nil, fmt.Errorf("unsupported sandbox action %q", req.Action)
 	}
+}
+
+func copySandboxFiles(files map[string]string) map[string]string {
+	if files == nil {
+		return nil
+	}
+	copied := make(map[string]string, len(files))
+	for path, content := range files {
+		copied[path] = content
+	}
+	return copied
+}
+
+func sandboxExecOutput(stdout, stderr string, exitCode int, sandboxID string, execErr error) map[string]any {
+	out := map[string]any{
+		"stdout":     stdout,
+		"stderr":     stderr,
+		"exit_code":  exitCode,
+		"sandbox_id": sandboxID,
+	}
+	if execErr != nil {
+		out["error"] = execErr.Error()
+		if exitCode == 0 {
+			out["exit_code"] = -1
+		}
+	}
+	return out
+}
+
+func sandboxEnvStatus(envVars map[string]string) map[string]string {
+	out := make(map[string]string, len(envVars))
+	for key, value := range envVars {
+		if value != "" {
+			out[key] = "set"
+		} else {
+			out[key] = "unset"
+		}
+	}
+	return out
 }
 
 func structToMap(v any) map[string]any {
