@@ -11,7 +11,11 @@ import (
 	"github.com/knid/wemob/internal/utils"
 )
 
-const previewDomainSuffix = ".preview.wemob.app"
+const (
+	previewDomainSuffix              = ".preview.wemob.app"
+	daytonaSkipPreviewWarningHeader  = "X-Daytona-Skip-Preview-Warning"
+	daytonaSkipPreviewWarningEnabled = "true"
+)
 
 func parsePreviewHost(host string) (slug string, kind sandbox.PreviewKind) {
 	host = strings.ToLower(strings.TrimSpace(strings.Split(host, ":")[0]))
@@ -108,14 +112,19 @@ func (v *HttpViews) HandlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	baseDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		baseDirector(req)
-		req.Host = target.Host
-		req.Header.Set("X-Forwarded-Host", host)
+		setPreviewProxyHeaders(req, target.Host, host)
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Warn("preview proxy upstream failed", "error", proxyErr, "slug", slug, "kind", kind)
 		utils.JSONError(rw, "PREVIEW_UPSTREAM_FAILED", "preview upstream failed", http.StatusBadGateway, nil)
 	}
 	proxy.ServeHTTP(w, proxyReq)
+}
+
+func setPreviewProxyHeaders(req *http.Request, targetHost, previewHost string) {
+	req.Host = targetHost
+	req.Header.Set("X-Forwarded-Host", previewHost)
+	req.Header.Set(daytonaSkipPreviewWarningHeader, daytonaSkipPreviewWarningEnabled)
 }
 
 func previewURLForKind(status *sandbox.Status, kind sandbox.PreviewKind) string {

@@ -1,6 +1,7 @@
 package views
 
 import (
+	"net/http"
 	"testing"
 
 	"github.com/knid/wemob/internal/services/sandbox"
@@ -69,5 +70,24 @@ func TestPreviewURLForKindFallsBackForApp(t *testing.T) {
 
 	if got := previewURLForKind(status, sandbox.PreviewApp); got != "https://backend.example.test" {
 		t.Fatalf("app fallback preview URL = %q", got)
+	}
+}
+
+func TestSetPreviewProxyHeadersSkipsDaytonaWarning(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "https://sandbox.example.test/", nil)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+
+	setPreviewProxyHeaders(req, "sandbox.example.test", "todo.preview.wemob.app")
+
+	if req.Host != "sandbox.example.test" {
+		t.Fatalf("request host = %q", req.Host)
+	}
+	if got := req.Header.Get("X-Forwarded-Host"); got != "todo.preview.wemob.app" {
+		t.Fatalf("X-Forwarded-Host = %q", got)
+	}
+	if got := req.Header.Get(daytonaSkipPreviewWarningHeader); got != daytonaSkipPreviewWarningEnabled {
+		t.Fatalf("%s = %q", daytonaSkipPreviewWarningHeader, got)
 	}
 }
