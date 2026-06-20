@@ -127,6 +127,7 @@ type SandboxControlRequest struct {
 
 type SandboxControlFn func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error)
 type PreviewURLSetter func(ctx context.Context, project *models.AppProject, url, label, kind string) error
+type SandboxFileSyncer func(ctx context.Context, project *models.AppProject, paths []string) error
 
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
@@ -269,6 +270,7 @@ type RunDependencies struct {
 	TriggerWebDeploy      WebDeployTrigger
 	SandboxControl        SandboxControlFn
 	SetPreviewURL         PreviewURLSetter
+	SyncSandboxFiles      SandboxFileSyncer
 	RecordLLMUsage        LLMUsageRecorder
 	RecordLLMError        LLMErrorRecorder
 	RecordLangfuseScore   LangfuseScoreRecorder

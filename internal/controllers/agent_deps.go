@@ -126,6 +126,9 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		SetPreviewURL: func(ctx context.Context, project *models.AppProject, url, label, kind string) error {
 			return c.setPreviewURLForAgent(ctx, project, url, label, kind)
 		},
+		SyncSandboxFiles: func(ctx context.Context, project *models.AppProject, paths []string) error {
+			return c.SyncSandbox(ctx, project)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},

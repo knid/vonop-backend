@@ -23,6 +23,7 @@ type FinalizeSuccessInput struct {
 	Run             *models.AppAgentRun
 	Emitter         EventEmitter
 	FileMap         *SafeFileMap
+	BuildState      *BuildState
 	Parts           []models.ChatMessagePart
 	Tracker         *utils.TokenTracker
 	RunStart        time.Time
@@ -43,6 +44,7 @@ func (f RunFinalizer) Success(input FinalizeSuccessInput) error {
 			input.Run,
 			input.Emitter,
 			input.FileMap,
+			input.BuildState,
 			input.Parts,
 			input.Tracker,
 			input.RunStart,
