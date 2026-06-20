@@ -15,6 +15,27 @@ import (
 	"github.com/knid/wemob/internal/models"
 )
 
+const (
+	vitePreviewConfigPath = "frontend/vite.config.preview.ts"
+	vitePreviewConfig     = `import { defineConfig, mergeConfig } from "vite";
+import baseConfig from "./vite.config";
+
+export default mergeConfig(
+  baseConfig,
+  defineConfig({
+    server: {
+      proxy: {
+        "/api": {
+          target: "http://127.0.0.1:3001",
+          changeOrigin: true,
+        },
+      },
+    },
+  }),
+);
+`
+)
+
 type Manager struct {
 	provider ProviderClient
 }
@@ -162,6 +183,7 @@ func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files ma
 }
 
 func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimePlan, files map[string]string) error {
+	files = withManagedPreviewFiles(plan, files)
 	deltas := make([]FileDelta, 0, len(files))
 	for p, content := range files {
 		cleanPath, err := cleanFilePath(p)
@@ -179,6 +201,30 @@ func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimeP
 		return fmt.Errorf("sync sandbox files: %w", err)
 	}
 	return nil
+}
+
+func withManagedPreviewFiles(plan RuntimePlan, files map[string]string) map[string]string {
+	if !needsVitePreviewProxy(plan) {
+		return files
+	}
+	copied := make(map[string]string, len(files)+1)
+	for path, content := range files {
+		copied[path] = content
+	}
+	copied[vitePreviewConfigPath] = vitePreviewConfig
+	return copied
+}
+
+func needsVitePreviewProxy(plan RuntimePlan) bool {
+	if !plan.BackendEnabled || plan.Previews[PreviewBackend] == 0 {
+		return false
+	}
+	for _, spec := range plan.Processes {
+		if spec.Name == ProcessFrontend && spec.Cwd == ProjectRoot+"/frontend" {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, route, setBy string) (*PreviewTarget, error) {
