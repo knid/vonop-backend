@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -2373,8 +2374,8 @@ func StreamWithTools(
 				go func() {
 					defer func() {
 						if r := recover(); r != nil {
-							slog.Error("tool callback panicked", "tool", toolName, "panic", r)
-							ch <- executedToolCall{"", fmt.Errorf("tool %s panicked: %v", toolName, r)}
+							slog.Error("tool callback panicked", "tool", toolName, "panic", r, "stack", string(debug.Stack()))
+							ch <- executedToolCall{fmt.Sprintf("Error: tool %s panicked: %v", toolName, r), nil}
 						}
 					}()
 					r, e := executor(toolCtx, toolName, toolArgs)

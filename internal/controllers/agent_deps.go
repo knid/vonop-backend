@@ -269,6 +269,9 @@ func structToMap(v any) map[string]any {
 	b, _ := json.Marshal(v)
 	out := map[string]any{}
 	_ = json.Unmarshal(b, &out)
+	if out == nil {
+		return map[string]any{}
+	}
 	return out
 }
 
