@@ -4,49 +4,35 @@ package agent
 // generation runs (project.Status == "draft"). These work-order rules don't
 // apply to chat-mode edits.
 const BasePromptWebFirstGen = `## First Generation Role
-For first generation only, build production-grade web applications: SaaS apps,
-dashboards, storefronts, sites, blogs, and workflow tools. Use React,
-TypeScript, and Tailwind in the project runtime. Designs must be specific to
-the user's domain, responsive, accessible, and free of overlapping text or
-broken states.
+For first generation only, build the requested web app in controlled phases.
+Default phase is UI scaffold only: create DESIGN.md, write the main visible UI,
+use stub/local data, and stop once the requested surface is coherent.
 
-## Work Order: Design Brief + Layout & Home First (CRITICAL — viewable-on-credit-exhaust)
+Do not add database, backend API, auth, admin workflows, image generation, or
+integrations unless the user explicitly asks for them or the active project
+addendum requires them for the requested behavior.
+
+## Work Order: Design Brief + UI Scaffold First
 If DESIGN.md does not exist, your VERY FIRST assistant turn MUST include
 create_design with concrete values for register, design_direction,
 color_system, typography, layout, components, imagery, and accessibility.
 Do not create DESIGN.md with write_files unless create_design is unavailable.
 
-If app/layout.tsx or app/page.tsx does not exist, that same first assistant
-turn MUST also include write_files for app/layout.tsx and app/page.tsx. Keep
-tool arguments valid JSON by writing smaller files or splitting large work
-across multiple structured tool calls.
-DESIGN.md, layout, and home go in the SAME first turn when all are missing.
-All other pages, components, sections, route handlers, and assets come AFTER.
+Plan the file set before writing. Batch many small files in each write_files call,
+up to the tool limit. Do not write one file per round. Keep each
+individual file reasonably small; split large components into smaller files,
+but still batch those files together.
 
-This rule does NOT require rewriting app/layout.tsx or app/page.tsx when both
-already exist (continuing an existing project, ecommerce template, or
-chat-mode edit). But if DESIGN.md is missing during first generation, create it
-before broad visual work.
+Existing starter files such as frontend/src/App.tsx, frontend/src/index.css,
+frontend/index.html, frontend/src/main.tsx, and frontend/src/lib/api.ts may
+already exist. Update them intentionally with overwrite=true plus a reason when
+a full replacement is intended, or use multi_edit for targeted changes.
 
-## Work Order: UI First, Wiring Second (CRITICAL — viewable-on-credit-exhaust)
-After layout + home land, finish the entire visible UI/product surface BEFORE any
-backend wiring. Use inline stub data so every requested page, component,
-navigation path, form, loading state, empty state, and error state renders as a
-complete product surface before database/API/auth/payment wiring begins.
+Use grep, list_files, and read_file_range before broad reads. Do not use read_files as the default inspection tool. Do not re-read files you just wrote
+unless a tool error, build error, or exact-string edit requires a fresh view.
 
-Run order for a new project:
-  1. DESIGN.md + app/layout.tsx + app/page.tsx (Design Brief + Layout & Home First)
-  2. Every other page + component with stubs   (this rule)
-  3. Image generation                          (Images Last, below)
-  4. Database / API routes / integrations      (only if requested)
-
-This rule does NOT apply when:
-- The user explicitly asks for backend / DB / integration work first
-  ("hook up Stripe now", "switch the stubs to real data").
-- The project already has the UI built and the request is a wiring task.
-- A project architecture addendum says backend is required by default for the
-  requested product behavior, such as content management, admin workflows,
-  contact submissions, persistence, auth, or cross-device data.
+Stop after one focused verification pass when the UI scaffold is coherent. Do
+not keep calling tools only to improve confidence.
 
 ## Work Order: Images Last
 Write all page structure and content FIRST. Do not call generate_image until

@@ -173,7 +173,7 @@ type ReadFilesTool struct{}
 
 func (ReadFilesTool) Name() string { return "read_files" }
 func (ReadFilesTool) Description() string {
-	return "Read one or more files in a single call. Pass an array of project-relative paths (even a single path). Returns each file's content delimited by '===== <path> =====' headers, or an error line for paths that fail. Always use this instead of individual file reads — same semantics, one round-trip."
+	return "Read full contents of one or more small files in a single call. Do not use as the default inspection tool. Prefer grep, list_files, or read_file_range first when locating code or preparing targeted edits. Use read_files only when full file content is required for the next edit, and avoid reading files you just wrote unless a tool or build error requires it."
 }
 func (ReadFilesTool) Schema() map[string]any {
 	return map[string]any{
@@ -504,7 +504,7 @@ type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite one or more files in one call. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for exact-string replacements, including multi-file batches."
+	return "Create or fully overwrite one or more files in one call. Batch many small new files in one call. Do not write one file per round when several files are known. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for exact-string replacements, including multi-file batches."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{
