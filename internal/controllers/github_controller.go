@@ -84,7 +84,8 @@ func (c *Controller) ExportToGitHub(user *models.User, projectID uuid.UUID, req 
 		return nil, fmt.Errorf("project already exported to GitHub as %s — disconnect first to re-export", existing.RepoFullName)
 	}
 
-	repoResp, err := utils.CreateGitHubRepo(token, req.RepoName, req.Description, req.Private)
+	private := req.PrivateRepo()
+	repoResp, err := utils.CreateGitHubRepo(token, req.RepoName, req.Description, private)
 	if err != nil {
 		if err.Error() == "GITHUB_REPO_EXISTS" {
 			return nil, fmt.Errorf("GITHUB_REPO_EXISTS")
@@ -112,7 +113,7 @@ func (c *Controller) ExportToGitHub(user *models.User, projectID uuid.UUID, req 
 		UserID:       user.ID,
 		RepoFullName: repoResp.FullName,
 		RepoURL:      repoResp.HTMLURL,
-		Private:      req.Private,
+		Private:      private,
 	}
 	if _, err := c.DB.CreateAppGitHubExport(export); err != nil {
 		return nil, fmt.Errorf("failed to save export record: %w", err)
