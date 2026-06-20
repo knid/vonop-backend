@@ -17,6 +17,7 @@ type fakeProvider struct {
 	started          []ProcessName
 	stopped          []ProcessName
 	startProcessErr  error
+	startedSpecs     []ProcessSpec
 	previews         map[int]string
 	previewErr       error
 	processStatesErr error
@@ -66,6 +67,7 @@ func (f *fakeProvider) StartProcess(ctx context.Context, sandboxID string, spec 
 		return f.startProcessErr
 	}
 	f.started = append(f.started, spec.Name)
+	f.startedSpecs = append(f.startedSpecs, spec)
 	return nil
 }
 

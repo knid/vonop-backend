@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ const (
 	defaultDisk        = 3072
 	defaultExecTimeout = 30 * time.Second
 )
+
+var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 type sdkClient interface {
 	Create(ctx context.Context, params any, opts ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error)
@@ -705,6 +708,9 @@ func processSessionID(name sandbox.ProcessName) string {
 
 func processCommand(spec sandbox.ProcessSpec) string {
 	command := spec.Command
+	if len(spec.Env) > 0 {
+		command = envExports(spec.Env) + command
+	}
 	if spec.Cwd != "" {
 		command = "cd " + shellQuote(spec.Cwd) + " && " + command
 	}
@@ -713,6 +719,25 @@ func processCommand(spec sandbox.ProcessSpec) string {
 		command = "mkdir -p " + shellQuote(dir) + " && (" + command + ") > " + shellQuote(spec.LogPath) + " 2>&1"
 	}
 	return "bash -lc " + shellQuote(command)
+}
+
+func envExports(env map[string]string) string {
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		if envNamePattern.MatchString(key) {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, key := range keys {
+		b.WriteString("export ")
+		b.WriteString(key)
+		b.WriteString("=")
+		b.WriteString(shellQuote(env[key]))
+		b.WriteString(" && ")
+	}
+	return b.String()
 }
 
 func shellQuote(value string) string {

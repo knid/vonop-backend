@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -35,6 +36,42 @@ func TestRuntimePlanNextJS(t *testing.T) {
 	}
 	if plan.Previews[PreviewApp] != 3000 {
 		t.Fatalf("app preview port = %d", plan.Previews[PreviewApp])
+	}
+}
+
+func TestRuntimePlanNodeHeapFitsDefaultSandboxMemory(t *testing.T) {
+	projects := []*models.AppProject{
+		func() *models.AppProject {
+			p := testProject()
+			p.FrontendRuntime = models.FrontendRuntimeNextJSLegacy
+			return p
+		}(),
+		func() *models.AppProject {
+			p := testProject()
+			p.FrontendRuntime = models.FrontendRuntimeViteReact
+			p.BackendEnabled = true
+			p.BackendRuntime = models.BackendRuntimeNextJSAPI
+			return p
+		}(),
+		func() *models.AppProject {
+			p := testProject()
+			p.ProjectType = models.ProjectTypeMobileAppNative
+			return p
+		}(),
+	}
+	for _, project := range projects {
+		plan := BuildRuntimePlan(project)
+		for _, process := range plan.Processes {
+			if process.Name == ProcessArtifacts {
+				continue
+			}
+			if !strings.Contains(process.Command, "--max-old-space-size=768") {
+				t.Fatalf("process %s command does not cap Node heap for 1GB sandbox: %q", process.Name, process.Command)
+			}
+			if strings.Contains(process.Command, "--max-old-space-size=3072") {
+				t.Fatalf("process %s still requests 3GB heap: %q", process.Name, process.Command)
+			}
+		}
 	}
 }
 

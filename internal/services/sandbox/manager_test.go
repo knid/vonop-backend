@@ -42,6 +42,28 @@ func TestManagerStartCreatesSyncsAndStartsProcesses(t *testing.T) {
 	}
 }
 
+func TestManagerStartPropagatesEnvToProcesses(t *testing.T) {
+	fp := newFakeProvider()
+	m := NewManager(fp)
+	project := managerProject()
+	env := map[string]string{
+		"API_KEY":          "secret",
+		"NEXT_PUBLIC_FLAG": "enabled",
+	}
+
+	if _, err := m.Start(context.Background(), project, map[string]string{"package.json": "{}"}, env); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fp.startedSpecs) == 0 {
+		t.Fatalf("no process specs started")
+	}
+	got := fp.startedSpecs[0].Env
+	if got["API_KEY"] != "secret" || got["NEXT_PUBLIC_FLAG"] != "enabled" {
+		t.Fatalf("process env = %#v", got)
+	}
+}
+
 func TestManagerOpenRouteUpdatesPreviewTarget(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)

@@ -288,6 +288,40 @@ func TestProcessCommandWrapsCWDAndLogs(t *testing.T) {
 	}
 }
 
+func TestProcessCommandExportsEnv(t *testing.T) {
+	exports := envExports(map[string]string{
+		"API_KEY": "a'b",
+		"EMPTY":   "",
+	})
+	for _, want := range []string{
+		"export API_KEY='a'\"'\"'b'",
+		"export EMPTY=''",
+	} {
+		if !strings.Contains(exports, want) {
+			t.Fatalf("envExports missing %q in %q", want, exports)
+		}
+	}
+
+	got := processCommand(sandbox.ProcessSpec{
+		Command: "npm run dev",
+		Cwd:     "/workspace/project",
+		Env: map[string]string{
+			"API_KEY": "a'b",
+			"EMPTY":   "",
+		},
+	})
+
+	for _, want := range []string{
+		"export API_KEY",
+		"export EMPTY",
+		"npm run dev",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("processCommand missing %q in %q", want, got)
+		}
+	}
+}
+
 func TestShellQuoteEscapesSingleQuotes(t *testing.T) {
 	got := shellQuote("don't")
 	want := "'don'\"'\"'t'"

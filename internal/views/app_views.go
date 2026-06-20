@@ -544,7 +544,6 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	appID := chi.URLParam(r, "appId")
-	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
 	project, err := v.Controller.GetAppProject(appID, user)
 	if err != nil {
 		utils.JSONErrorCode(w, constants.ErrNotFound, http.StatusNotFound, nil)
@@ -558,6 +557,11 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 	}
 	validate := validator.New()
 	if err := req.Validate(validate); err != nil {
+		utils.ValidationError(w, err)
+		return
+	}
+	fid, err := appFileUpdatePath(r, req)
+	if err != nil {
 		utils.ValidationError(w, err)
 		return
 	}
@@ -581,6 +585,17 @@ func (v *HttpViews) UpdateAppFile(w http.ResponseWriter, r *http.Request) {
 		Content:  req.Content,
 		FileType: controllers.InferFileType(fid),
 	}, http.StatusOK)
+}
+
+func appFileUpdatePath(r *http.Request, req requests.AppFileUpdateRequest) (string, error) {
+	if req.FilePath != "" {
+		return req.FilePath, nil
+	}
+	fid, _ := url.PathUnescape(chi.URLParam(r, "fid"))
+	if fid == "" {
+		return "", fmt.Errorf("file_path is required")
+	}
+	return fid, nil
 }
 
 // DELETE /v2/apps/{appId}/files/{fid} — Delete a file

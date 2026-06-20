@@ -1099,6 +1099,7 @@ func main() {
 					// Files (code-first CRUD)
 					r.Get("/files/{platform}", httpViews.GetAppFiles)
 					r.Post("/files", httpViews.CreateAppFile)
+					r.Put("/files", httpViews.UpdateAppFile)
 					r.Put("/files/{fid}", httpViews.UpdateAppFile)
 					r.Delete("/files/{fid}", httpViews.DeleteAppFile)
 

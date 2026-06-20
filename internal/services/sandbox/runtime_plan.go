@@ -7,6 +7,7 @@ const (
 	BackendRoot   = "/workspace/backend"
 	ArtifactsRoot = "/workspace/artifacts"
 	TmpRoot       = "/tmp"
+	nodeHeapFlag  = "export NODE_OPTIONS='--max-old-space-size=768' && "
 )
 
 func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
@@ -33,7 +34,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		plan.Processes = append(plan.Processes,
 			ProcessSpec{
 				Name:        ProcessExpoWeb,
-				Command:     "export NODE_OPTIONS='--max-old-space-size=3072' && CI=1 npx expo start --web --clear --port 8081",
+				Command:     nodeHeapFlag + "CI=1 npx expo start --web --clear --port 8081",
 				Cwd:         ProjectRoot,
 				Port:        8081,
 				Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:8081"},
@@ -42,7 +43,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 			},
 			ProcessSpec{
 				Name:        ProcessExpoGo,
-				Command:     "export EXPO_GO_MODE=1 && export NODE_OPTIONS='--max-old-space-size=3072' && CI=1 npx expo start --clear --port 19000",
+				Command:     "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "CI=1 npx expo start --clear --port 19000",
 				Cwd:         ProjectRoot,
 				Port:        19000,
 				Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:19000"},
@@ -66,7 +67,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		}
 		plan.Processes = append(plan.Processes, ProcessSpec{
 			Name:        ProcessFrontend,
-			Command:     "export NODE_OPTIONS='--max-old-space-size=3072' && npm run dev -- --config vite.config.preview.ts --host 0.0.0.0 --port 3000",
+			Command:     nodeHeapFlag + "npm run dev -- --config vite.config.preview.ts --host 0.0.0.0 --port 3000",
 			Cwd:         frontendRoot,
 			Port:        3000,
 			Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:3000"},
@@ -78,7 +79,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		plan.Previews[PreviewApp] = 3000
 		plan.Processes = append(plan.Processes, ProcessSpec{
 			Name:        ProcessFrontend,
-			Command:     "export NODE_OPTIONS='--max-old-space-size=3072' && npm run dev -- --hostname 0.0.0.0 --port 3000",
+			Command:     nodeHeapFlag + "npm run dev -- --hostname 0.0.0.0 --port 3000",
 			Cwd:         ProjectRoot,
 			Port:        3000,
 			Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:3000"},
@@ -103,7 +104,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 func backendProcess() ProcessSpec {
 	return ProcessSpec{
 		Name:        ProcessBackend,
-		Command:     "export NODE_OPTIONS='--max-old-space-size=3072' && npm run dev -- -p 3001",
+		Command:     nodeHeapFlag + "npm run dev -- -p 3001",
 		Cwd:         BackendRoot,
 		Port:        3001,
 		Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:3001"},

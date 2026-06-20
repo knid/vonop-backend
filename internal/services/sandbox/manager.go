@@ -52,6 +52,7 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		if spec.Name == ProcessArtifacts {
 			continue
 		}
+		spec.Env = mergeProcessEnv(spec.Env, env)
 		if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
 			return nil, fmt.Errorf("start process %s: %w", spec.Name, err)
 		}
@@ -60,6 +61,20 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		project.SandboxID = sandboxID
 	}
 	return m.Status(ctx, project)
+}
+
+func mergeProcessEnv(base, extra map[string]string) map[string]string {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(base)+len(extra))
+	for key, value := range base {
+		merged[key] = value
+	}
+	for key, value := range extra {
+		merged[key] = value
+	}
+	return merged
 }
 
 func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Status, error) {
