@@ -2,6 +2,7 @@ package daytona
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -13,17 +14,23 @@ import (
 type fakeClient struct {
 	sb               *fakeSandbox
 	lastCreateParams any
+	createErr        error
+	getIDOrName      string
 }
 
 func (c *fakeClient) Create(_ context.Context, params any, _ ...func(*sdkoptions.CreateSandbox)) (sandboxHandle, error) {
 	c.lastCreateParams = params
+	if c.createErr != nil {
+		return nil, c.createErr
+	}
 	if c.sb != nil {
 		return c.sb, nil
 	}
 	return newFakeSandbox(), nil
 }
 
-func (c *fakeClient) Get(context.Context, string) (sandboxHandle, error) {
+func (c *fakeClient) Get(_ context.Context, idOrName string) (sandboxHandle, error) {
+	c.getIDOrName = idOrName
 	if c.sb != nil {
 		return c.sb, nil
 	}
@@ -31,14 +38,15 @@ func (c *fakeClient) Get(context.Context, string) (sandboxHandle, error) {
 }
 
 type fakeSandbox struct {
-	id      string
-	state   string
-	reason  *string
-	fs      *fakeFileSystem
-	process *fakeProcess
-	preview map[int]string
-	started bool
-	stopped bool
+	id       string
+	state    string
+	reason   *string
+	fs       *fakeFileSystem
+	process  *fakeProcess
+	preview  map[int]string
+	started  bool
+	startErr error
+	stopped  bool
 }
 
 func newFakeSandbox() *fakeSandbox {
@@ -56,7 +64,7 @@ func (s *fakeSandbox) State() string        { return s.state }
 func (s *fakeSandbox) ErrorReason() *string { return s.reason }
 func (s *fakeSandbox) Start(context.Context) error {
 	s.started = true
-	return nil
+	return s.startErr
 }
 func (s *fakeSandbox) Stop(context.Context) error {
 	s.stopped = true
@@ -204,6 +212,40 @@ func TestCreateUsesDefaultMachineResources(t *testing.T) {
 	}
 	if params.Resources.Disk != 3 {
 		t.Fatalf("Disk = %d, want 3", params.Resources.Disk)
+	}
+}
+
+func TestCreateReturnsExistingSandboxOnNameConflict(t *testing.T) {
+	existing := newFakeSandbox()
+	existing.id = "existing-daytona"
+	client := &fakeClient{
+		sb:        existing,
+		createErr: errors.New("Conflict: Sandbox with name wemob-app-123 already exists"),
+	}
+	provider := NewWithClient(client, "")
+
+	id, err := provider.Create(context.Background(), sandbox.RuntimePlan{AppID: "app-123"})
+	if err != nil {
+		t.Fatalf("Create returned error: %v", err)
+	}
+	if id != "existing-daytona" {
+		t.Fatalf("sandbox ID = %q, want existing-daytona", id)
+	}
+	if client.getIDOrName != "wemob-app-123" {
+		t.Fatalf("Get called with %q, want sandbox name", client.getIDOrName)
+	}
+}
+
+func TestStartTreatsStateChangeConflictAsAlreadyStarting(t *testing.T) {
+	sb := newFakeSandbox()
+	sb.startErr = errors.New("Conflict: Sandbox state change in progress")
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
+
+	if err := provider.Start(context.Background(), "sandbox-123"); err != nil {
+		t.Fatalf("Start returned error: %v", err)
+	}
+	if !sb.started {
+		t.Fatal("expected Start to be called")
 	}
 }
 

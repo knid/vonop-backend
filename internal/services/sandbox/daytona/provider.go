@@ -23,6 +23,8 @@ const (
 	defaultMemory      = 1
 	defaultDisk        = 3
 	defaultExecTimeout = 30 * time.Second
+	startWaitTimeout   = 45 * time.Second
+	startPollInterval  = 750 * time.Millisecond
 )
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -240,6 +242,13 @@ func (p *Provider) Create(ctx context.Context, plan sandbox.RuntimePlan) (string
 		},
 	}, sdkoptions.WithWaitForStart(false))
 	if err != nil {
+		if isCreateNameConflict(err) {
+			existing, getErr := p.get(ctx, name)
+			if getErr == nil {
+				return existing.ID(), nil
+			}
+			return "", fmt.Errorf("create daytona sandbox: name conflict for %s, get existing: %w", name, getErr)
+		}
 		return "", fmt.Errorf("create daytona sandbox: %w", err)
 	}
 	if created == nil || created.ID() == "" {
@@ -272,6 +281,9 @@ func (p *Provider) Start(ctx context.Context, sandboxID string) error {
 		return err
 	}
 	if err := sb.Start(ctx); err != nil {
+		if isStateChangeInProgress(err) {
+			return p.waitUntilStarted(ctx, sandboxID)
+		}
 		return fmt.Errorf("start daytona sandbox %s: %w", sandboxID, err)
 	}
 	return nil
@@ -639,6 +651,51 @@ func sandboxName(plan sandbox.RuntimePlan) string {
 	appID = strings.ToLower(appID)
 	replacer := strings.NewReplacer("_", "-", "/", "-", " ", "-")
 	return "wemob-" + replacer.Replace(appID)
+}
+
+func isCreateNameConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "conflict") &&
+		strings.Contains(msg, "sandbox with name") &&
+		strings.Contains(msg, "already exists")
+}
+
+func isStateChangeInProgress(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "conflict") &&
+		strings.Contains(msg, "state change in progress")
+}
+
+func (p *Provider) waitUntilStarted(ctx context.Context, sandboxID string) error {
+	ctx, cancel := context.WithTimeout(ctx, startWaitTimeout)
+	defer cancel()
+	ticker := time.NewTicker(startPollInterval)
+	defer ticker.Stop()
+	for {
+		sb, err := p.get(ctx, sandboxID)
+		if err != nil {
+			return err
+		}
+		state, _ := mapState(sb.State())
+		switch state {
+		case sandbox.StateReady:
+			return nil
+		case sandbox.StateCreating, sandbox.StateStarting:
+		default:
+			return fmt.Errorf("sandbox %s state is %s while waiting for start", sandboxID, state)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("wait for daytona sandbox %s to start: %w", sandboxID, ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func mapState(state string) (sandbox.State, string) {
