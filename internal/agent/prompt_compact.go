@@ -54,6 +54,10 @@ backend app root is /workspace/backend, and generated artifacts belong under
 and artifact work. Set cwd to the correct root instead of prefixing commands
 with cd. Do not use sandbox_exec for long-running dev servers; use
 sandbox_start, sandbox_sync, or process_restart for preview lifecycle work.
+To show generated files such as PDFs, reports, or HTML artifacts, create them
+under /workspace/artifacts and call preview_open_artifact with the absolute
+path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona
+preview URLs to preview_set_url.
 Do not retry the exact same failing command; inspect the error, status, logs,
 or filesystem first.
 
@@ -123,6 +127,10 @@ prefixing commands with cd. Do not use sandbox_exec for long-running dev
 servers; use sandbox_start, sandbox_sync, or process_restart for preview
 lifecycle work. Do not retry the exact same failing command; inspect the error,
 status, logs, or filesystem first.
+To show generated files such as PDFs, reports, or HTML artifacts, create them
+under /workspace/artifacts and call preview_open_artifact with the absolute
+path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona
+preview URLs to preview_set_url.
 
 ## Product Quality
 Build the native product the user asked for. Screens must be ergonomic on small

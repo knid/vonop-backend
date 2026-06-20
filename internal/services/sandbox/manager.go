@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -200,6 +201,9 @@ func (m *Manager) OpenRoute(ctx context.Context, project *models.AppProject, rou
 	if err != nil {
 		return nil, err
 	}
+	if stableBase := StablePreviewBaseURL(project, plan.DefaultPreview); stableBase != "" {
+		base = stableBase
+	}
 	u, err := url.Parse(base)
 	if err != nil {
 		return nil, err
@@ -243,6 +247,9 @@ func (m *Manager) OpenArtifact(ctx context.Context, project *models.AppProject, 
 	if err != nil {
 		return nil, err
 	}
+	if stableBase := StablePreviewBaseURL(project, PreviewArtifacts); stableBase != "" {
+		base = stableBase
+	}
 	u, err := url.Parse(base)
 	if err != nil {
 		return nil, err
@@ -263,6 +270,64 @@ func (m *Manager) OpenArtifact(ctx context.Context, project *models.AppProject, 
 		SetBy:     setBy,
 		UpdatedAt: time.Now().UTC(),
 	}, nil
+}
+
+const (
+	previewDomain     = "preview.wemob.app"
+	maxDNSLabelLength = 63
+)
+
+func StablePreviewBaseURL(project *models.AppProject, kind PreviewKind) string {
+	label := StablePreviewLabel(project, kind)
+	if label == "" {
+		return ""
+	}
+	return "https://" + label + "." + previewDomain
+}
+
+func StablePreviewLabel(project *models.AppProject, kind PreviewKind) string {
+	if project == nil {
+		return ""
+	}
+	suffix, ok := previewKindSuffix(kind)
+	if !ok {
+		return ""
+	}
+	if kind == PreviewApp || kind == PreviewRoute {
+		return idPreviewLabel(project, suffix)
+	}
+	slug := strings.TrimSpace(project.Slug)
+	if slug != "" && len(slug)+len(suffix) <= maxDNSLabelLength {
+		return slug + suffix
+	}
+	return idPreviewLabel(project, suffix)
+}
+
+func idPreviewLabel(project *models.AppProject, suffix string) string {
+	if project.ID == uuid.Nil {
+		return ""
+	}
+	id := project.ID.String()
+	label := "id-" + id + suffix
+	if len(label) > maxDNSLabelLength {
+		return ""
+	}
+	return label
+}
+
+func previewKindSuffix(kind PreviewKind) (string, bool) {
+	switch kind {
+	case PreviewBackend:
+		return "-backend", true
+	case PreviewExpo:
+		return "-expo", true
+	case PreviewArtifacts:
+		return "-artifacts", true
+	case PreviewApp, PreviewRoute:
+		return "-app", true
+	default:
+		return "", false
+	}
 }
 
 func (m *Manager) Stop(ctx context.Context, project *models.AppProject) error {

@@ -366,10 +366,10 @@ type SandboxServeArtifactTool struct{ Deps *RunDependencies }
 
 func (SandboxServeArtifactTool) Name() string { return "sandbox_serve_artifact" }
 func (SandboxServeArtifactTool) Description() string {
-	return "Serve a file under /workspace/artifacts and return a public preview URL."
+	return "Serve a file under /workspace/artifacts and return its public Wemob preview URL. The path must be absolute, for example /workspace/artifacts/report.pdf."
 }
 func (SandboxServeArtifactTool) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}}, "required": []string{"path"}}
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "description": "Absolute sandbox path under /workspace/artifacts, for example /workspace/artifacts/report.pdf."}}, "required": []string{"path"}}
 }
 func (t SandboxServeArtifactTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
 	var args struct {
@@ -449,13 +449,15 @@ func (t PreviewOpenRouteTool) Execute(ctx context.Context, rc *RunContext, input
 	if err := json.Unmarshal(input, &args); err != nil {
 		return fmt.Sprintf("invalid input: %v", err), true, nil
 	}
-	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "status"})
+	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{Action: "open_route", Route: args.Route})
 	if err != nil || isErr {
 		return renderSandboxResult(out), true, err
 	}
-	baseURL, _ := previewBaseURLForProject(rc, out)
-	targetURL, err := joinPreviewRoute(baseURL, args.Route)
-	if err != nil {
+	targetURL, _ := out["url"].(string)
+	if targetURL == "" {
+		return renderSandboxResult(out), true, nil
+	}
+	if err := allowedPreviewURL(targetURL); err != nil {
 		return err.Error(), true, nil
 	}
 	if rc == nil || rc.Deps == nil || rc.Deps.SetPreviewURL == nil || rc.Project == nil {
@@ -503,13 +505,13 @@ type PreviewOpenArtifactTool struct{ Deps *RunDependencies }
 
 func (PreviewOpenArtifactTool) Name() string { return "preview_open_artifact" }
 func (PreviewOpenArtifactTool) Description() string {
-	return "Serve an artifact under /workspace/artifacts and open it in the user's preview pane."
+	return "Serve an artifact under /workspace/artifacts and open it in the user's preview pane. The path must be absolute, for example /workspace/artifacts/report.pdf."
 }
 func (PreviewOpenArtifactTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":  map[string]any{"type": "string"},
+			"path":  map[string]any{"type": "string", "description": "Absolute sandbox path under /workspace/artifacts, for example /workspace/artifacts/report.pdf."},
 			"label": map[string]any{"type": "string"},
 		},
 		"required": []string{"path"},

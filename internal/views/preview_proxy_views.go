@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/sandbox"
 	"github.com/knid/wemob/internal/utils"
 )
@@ -39,6 +40,8 @@ func parsePreviewHost(host string) (slug string, kind sandbox.PreviewKind) {
 		return nonEmptySlug(strings.TrimSuffix(label, "-expo")), sandbox.PreviewExpo
 	case strings.HasSuffix(label, "-artifacts"):
 		return nonEmptySlug(strings.TrimSuffix(label, "-artifacts")), sandbox.PreviewArtifacts
+	case strings.HasPrefix(label, "id-") && strings.HasSuffix(label, "-app"):
+		return nonEmptySlug(strings.TrimSuffix(label, "-app")), sandbox.PreviewApp
 	default:
 		return label, sandbox.PreviewApp
 	}
@@ -77,7 +80,7 @@ func (v *HttpViews) HandlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		utils.JSONError(w, "PREVIEW_UNAVAILABLE", "preview is unavailable", http.StatusServiceUnavailable, nil)
 		return
 	}
-	project, err := v.Controller.DB.GetAppProjectBySlug(slug)
+	project, err := v.previewProjectForRef(slug)
 	if err != nil || project == nil {
 		utils.JSONError(w, "PREVIEW_NOT_FOUND", "preview not found", http.StatusNotFound, nil)
 		return
@@ -119,6 +122,13 @@ func (v *HttpViews) HandlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 		utils.JSONError(rw, "PREVIEW_UPSTREAM_FAILED", "preview upstream failed", http.StatusBadGateway, nil)
 	}
 	proxy.ServeHTTP(w, proxyReq)
+}
+
+func (v *HttpViews) previewProjectForRef(ref string) (*models.AppProject, error) {
+	if strings.HasPrefix(ref, "id-") {
+		return v.Controller.DB.GetAppProjectByID(strings.TrimPrefix(ref, "id-"))
+	}
+	return v.Controller.DB.GetAppProjectBySlug(ref)
 }
 
 func setPreviewProxyHeaders(req *http.Request, targetHost, previewHost string) {

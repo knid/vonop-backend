@@ -106,6 +106,20 @@ func TestSandboxExecSchemaDocumentsRuntimeLayout(t *testing.T) {
 	}
 }
 
+func TestArtifactToolSchemasRequireAbsoluteArtifactPaths(t *testing.T) {
+	for _, schema := range []map[string]any{
+		(SandboxServeArtifactTool{}).Schema(),
+		(PreviewOpenArtifactTool{}).Schema(),
+	} {
+		joined := fmt.Sprint(schema)
+		for _, want := range []string{"/workspace/artifacts", "Absolute sandbox path"} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("expected artifact schema to document %q in %#v", want, schema)
+			}
+		}
+	}
+}
+
 func TestAllowedPreviewURL(t *testing.T) {
 	if err := allowedPreviewURL("https://3000-sbx.preview.wemob.app/report.pdf"); err != nil {
 		t.Fatalf("preview URL rejected: %v", err)
@@ -118,6 +132,35 @@ func TestAllowedPreviewURL(t *testing.T) {
 	}
 	if err := allowedPreviewURL("http://3000-sbx.preview.wemob.app/report.pdf"); err == nil {
 		t.Fatal("expected non-https URL to be rejected")
+	}
+}
+
+func TestPreviewOpenRouteUsesManagedStableURL(t *testing.T) {
+	deps := &RunDependencies{
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			if req.Action != "open_route" {
+				t.Fatalf("action: got %q want open_route", req.Action)
+			}
+			if req.Route != "/report" {
+				t.Fatalf("route: got %q", req.Route)
+			}
+			return map[string]any{"url": "https://todo.preview.wemob.app/report"}, nil
+		},
+		SetPreviewURL: func(ctx context.Context, project *models.AppProject, url, label, kind string) error {
+			if url != "https://todo.preview.wemob.app/report" || kind != "app" {
+				t.Fatalf("preview target = %q %q", url, kind)
+			}
+			return nil
+		},
+	}
+	rc := &RunContext{Project: &models.AppProject{Settings: map[string]any{}}, User: &models.User{}, Deps: deps}
+
+	result, isErr, err := (PreviewOpenRouteTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"route":"/report"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("Execute returned isErr=true: %s", result)
 	}
 }
 
