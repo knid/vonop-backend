@@ -16,6 +16,17 @@ func TestShouldCacheToolResult_DoesNotCacheFailedExactStringEdits(t *testing.T) 
 	}
 }
 
+func TestShouldCacheToolResult_DoesNotCacheWrappedFailedExactStringEdits(t *testing.T) {
+	result := `<tool_output tool="multi_edit">{"changed":false,"path":"app/page.tsx","error_code":"stale_read","error":"must read current file before editing: app/page.tsx","next_step":"read_file_range"}</tool_output>`
+
+	if shouldCacheToolResult("multi_edit", result) {
+		t.Fatal("wrapped failed multi_edit stale_read result must not be cached")
+	}
+	if instruction := exactStringEditRecoveryInstruction("multi_edit", result); instruction == "" {
+		t.Fatal("wrapped failed multi_edit stale_read result should trigger recovery instruction")
+	}
+}
+
 func TestShouldCacheToolResult_CachesSuccessfulAndReadResults(t *testing.T) {
 	if !shouldCacheToolResult("read_files", "content") {
 		t.Fatal("read results should still be cacheable")

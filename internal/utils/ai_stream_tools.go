@@ -27,7 +27,7 @@ func shouldCacheToolResult(toolName string, result string) bool {
 			Changed   *bool  `json:"changed"`
 			ErrorCode string `json:"error_code"`
 		}
-		if json.Unmarshal([]byte(result), &payload) == nil && payload.Changed != nil && !*payload.Changed {
+		if json.Unmarshal([]byte(unwrapToolOutputResult(result)), &payload) == nil && payload.Changed != nil && !*payload.Changed {
 			switch payload.ErrorCode {
 			case "old_string_not_found", "old_string_ambiguous", "stale_read", "old_string_empty":
 				return false
@@ -35,6 +35,18 @@ func shouldCacheToolResult(toolName string, result string) bool {
 		}
 	}
 	return true
+}
+
+func unwrapToolOutputResult(result string) string {
+	const closeTag = "</tool_output>"
+	if !strings.HasPrefix(result, "<tool_output ") || !strings.HasSuffix(result, closeTag) {
+		return result
+	}
+	start := strings.Index(result, ">")
+	if start < 0 {
+		return result
+	}
+	return result[start+1 : len(result)-len(closeTag)]
 }
 
 func exactStringEditRecoveryInstruction(toolName string, result string) string {
