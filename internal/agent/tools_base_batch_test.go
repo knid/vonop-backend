@@ -30,6 +30,34 @@ func TestReadFilesTool_ReturnsContentsForAllPaths(t *testing.T) {
 	}
 }
 
+func TestReadFilesToolDescriptionDiscouragesDefaultInspection(t *testing.T) {
+	desc := ReadFilesTool{}.Description()
+	for _, required := range []string{
+		"Do not use as the default inspection tool",
+		"Prefer grep, list_files, or read_file_range first",
+		"avoid reading files you just wrote",
+	} {
+		if !strings.Contains(desc, required) {
+			t.Fatalf("read_files description missing %q: %s", required, desc)
+		}
+	}
+	if strings.Contains(desc, "Always use this instead of individual file reads") {
+		t.Fatalf("read_files description still over-promotes broad reads: %s", desc)
+	}
+}
+
+func TestWriteFilesToolDescriptionEncouragesBatching(t *testing.T) {
+	desc := WriteFilesTool{}.Description()
+	for _, required := range []string{
+		"Batch many small new files in one call",
+		"Do not write one file per round",
+	} {
+		if !strings.Contains(desc, required) {
+			t.Fatalf("write_files description missing %q: %s", required, desc)
+		}
+	}
+}
+
 func TestReadFilesTool_MarksFilesAsReadForLaterEdits(t *testing.T) {
 	rc := newPathScopeTestRC(models.ProjectTypeApp)
 	rc.FileMap.Set("app/page.tsx", "hello old")

@@ -349,14 +349,20 @@ func TestBuildSystemMessages_FirstGenWebIncludesWorkOrders(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, true)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "Design Brief + Layout & Home First") {
-		t.Error("expected first-gen web to include design brief + layout/home work order")
+	if !strings.Contains(joined, "Design Brief + UI Scaffold First") {
+		t.Error("expected first-gen web to include design brief + UI scaffold work order")
 	}
 	if !strings.Contains(joined, "DESIGN.md") {
 		t.Error("expected first-gen web to require DESIGN.md")
 	}
-	if !strings.Contains(joined, "UI First, Wiring Second") {
-		t.Error("expected first-gen web to include UI First work order")
+	if !strings.Contains(joined, "Default phase is UI scaffold only") {
+		t.Error("expected first-gen web to default to UI scaffold only")
+	}
+	if !strings.Contains(joined, "Batch many small files in each write_files call") {
+		t.Error("expected first-gen web to include batching guidance")
+	}
+	if !strings.Contains(joined, "Do not use read_files as the default inspection tool") {
+		t.Error("expected first-gen web to discourage read_files as default")
 	}
 	if strings.Contains(joined, "EDITING DISCIPLINE") {
 		t.Error("first-gen web must NOT include chat editing discipline")

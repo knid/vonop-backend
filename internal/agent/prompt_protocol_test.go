@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -67,4 +68,46 @@ func TestAgentBasePromptsDescribeDaytonaSandboxRuntime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWebFirstGenPromptEmphasizesBatchedUiScaffold(t *testing.T) {
+	required := []string{
+		"Default phase is UI scaffold only",
+		"Plan the file set before writing",
+		"Batch many small files in each write_files call",
+		"Do not use read_files as the default inspection tool",
+		"Do not re-read files you just wrote",
+	}
+	for _, text := range required {
+		if !strings.Contains(BasePromptWebFirstGen, text) {
+			t.Fatalf("BasePromptWebFirstGen missing batching/scope guidance %q", text)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"build production-grade web applications",
+		"finish the entire visible UI/product surface BEFORE any",
+		"Keep tool arguments valid JSON by writing smaller files",
+	} {
+		if strings.Contains(BasePromptWebFirstGen, forbidden) {
+			t.Fatalf("BasePromptWebFirstGen still carries over-broad first-gen guidance %q", forbidden)
+		}
+	}
+}
+
+func TestWebBuilderFoundationBatchesSmallFiles(t *testing.T) {
+	if strings.Count(webBuilderFoundationSkillForTests(), "NEVER write files larger than ~15KB") != 0 {
+		t.Fatal("web-builder foundation must not repeat the old single-file-biased 15KB warning")
+	}
+	if !strings.Contains(webBuilderFoundationSkillForTests(), "Keep each individual file under ~15KB when practical, but batch many small files in one write_files call") {
+		t.Fatal("web-builder foundation must tell the model to batch many small files")
+	}
+}
+
+func webBuilderFoundationSkillForTests() string {
+	b, err := os.ReadFile("skills/web/web-builder-foundation/SKILL.md")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
