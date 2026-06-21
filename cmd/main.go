@@ -155,6 +155,15 @@ func createSchema(db *bun.DB) error {
 	return nil
 }
 
+func mountAppSandboxRoutes(r chi.Router, httpViews views.HttpViews) {
+	r.Get("/sandbox", httpViews.GetAppSandbox)
+	r.Put("/sandbox", httpViews.SetAppSandbox)
+	r.Post("/sandbox/start", httpViews.StartAppSandbox)
+	r.Get("/sandbox/status", httpViews.GetAppSandboxStatus)
+	r.Post("/sandbox/sync", httpViews.SyncSandbox)
+	r.Post("/sandbox/open-route", httpViews.OpenSandboxRoute)
+}
+
 func seedPlans(db *database.Database, sm secret.SecretManager) {
 	type planDef struct {
 		Name          string
@@ -1157,6 +1166,7 @@ func main() {
 					r.Get("/preview/status", httpViews.GetAppPreviewStatus)
 					r.Get("/preview/events", httpViews.StreamAppPreviewEvents)
 					r.Post("/preview/restart", httpViews.RestartAppPreview)
+					mountAppSandboxRoutes(r, httpViews)
 
 					// Deploy
 					r.Route("/deploy", func(r chi.Router) {

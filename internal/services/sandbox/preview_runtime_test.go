@@ -145,3 +145,25 @@ func TestPreviewSupervisorScriptSkipsProcessesWithoutPackageJSON(t *testing.T) {
 		}
 	}
 }
+
+func TestPreviewSupervisorScriptWritesErrorOnInstallOrReadinessFailure(t *testing.T) {
+	script := BuildPreviewSupervisorScript(PreviewRuntime{
+		Root:        ProjectRoot,
+		InstallDirs: []string{ProjectRoot},
+		Main:        "web",
+		Processes: []PreviewProcess{
+			{Name: "web", Cwd: ProjectRoot, Port: 3000, Command: "npm run dev"},
+		},
+	})
+
+	for _, want := range []string{
+		"write_error()",
+		"trap 'write_error",
+		"write_error \"preview did not become ready",
+		"write_error \"preview process exited",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("supervisor script missing %q:\n%s", want, script)
+		}
+	}
+}

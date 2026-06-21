@@ -91,6 +91,51 @@ func TestManagerPreviewStatusMissingWhenSupervisorStateAbsent(t *testing.T) {
 	}
 }
 
+func TestManagerEnsurePreviewRestartsStoppedSandbox(t *testing.T) {
+	fp := newFakeProvider()
+	fp.statusState = StateStopped
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+
+	status, err := manager.EnsurePreview(context.Background(), project, map[string]string{
+		"package.json": `{"scripts":{"dev":"next dev"}}`,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if fp.startCalls != 1 {
+		t.Fatalf("start calls = %d, want 1", fp.startCalls)
+	}
+	if status.State != PreviewStarting && status.State != PreviewReady {
+		t.Fatalf("state = %q, want starting or ready", status.State)
+	}
+}
+
+func TestManagerPreviewStatusReportsDeadSupervisorProcess(t *testing.T) {
+	fp := newFakeProvider()
+	fp.executeStdout = `{"state":"ready","updated_at":"2026-06-20T00:00:00Z"}`
+	fp.processStates = map[ProcessName]ProcessState{
+		ProcessFrontend: {Name: ProcessFrontend, Status: ProcessStopped, Port: 3000},
+	}
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+
+	status, err := manager.PreviewStatus(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if status.State != PreviewError {
+		t.Fatalf("state = %q, want %q", status.State, PreviewError)
+	}
+	if !strings.Contains(status.Error, "web process is stopped") {
+		t.Fatalf("error = %q, want stopped process detail", status.Error)
+	}
+}
+
 func TestManagerPreviewLogsFiltersByTarget(t *testing.T) {
 	fp := newFakeProvider()
 	manager := NewManager(fp)
