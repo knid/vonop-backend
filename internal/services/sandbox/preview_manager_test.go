@@ -128,7 +128,7 @@ func TestManagerSyncDeltasDeletesRemovedFilesAndRestartsPreview(t *testing.T) {
 	err := manager.SyncDeltas(context.Background(), project, []FileDelta{
 		{Path: "frontend/src/App.tsx", Content: "export default function App() { return null }"},
 		{Path: "frontend/src/old.tsx", Delete: true},
-	})
+	}, map[string]string{"EXPO_PUBLIC_API_URL": "https://example.test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,5 +155,30 @@ func TestManagerSyncDeltasDeletesRemovedFilesAndRestartsPreview(t *testing.T) {
 	}
 	if len(fp.started) != 1 || fp.started[0] != ProcessPreview {
 		t.Fatalf("started = %#v, want preview restart", fp.started)
+	}
+	if got := fp.startedSpecs[0].Env["EXPO_PUBLIC_API_URL"]; got != "https://example.test" {
+		t.Fatalf("preview restart env = %#v", fp.startedSpecs[0].Env)
+	}
+}
+
+func TestManagerSyncRestartsPreviewWithEnv(t *testing.T) {
+	fp := newFakeProvider()
+	fp.executeStdout = `{"state":"ready","updated_at":"2026-06-20T00:00:00Z"}`
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+
+	err := manager.Sync(context.Background(), project, map[string]string{
+		"package.json": `{"scripts":{"dev":"next dev"}}`,
+	}, map[string]string{"NEXT_PUBLIC_FLAG": "enabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fp.started) != 1 || fp.started[0] != ProcessPreview {
+		t.Fatalf("started = %#v, want preview restart", fp.started)
+	}
+	if got := fp.startedSpecs[0].Env["NEXT_PUBLIC_FLAG"]; got != "enabled" {
+		t.Fatalf("preview restart env = %#v", fp.startedSpecs[0].Env)
 	}
 }

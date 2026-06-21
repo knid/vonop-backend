@@ -226,7 +226,7 @@ func TestManagerMethodsRejectNilProject(t *testing.T) {
 			return err
 		},
 		"Sync": func() error {
-			return m.Sync(context.Background(), nil, nil)
+			return m.Sync(context.Background(), nil, nil, nil)
 		},
 		"OpenRoute": func() error {
 			_, err := m.OpenRoute(context.Background(), nil, "/", "test")
@@ -267,7 +267,7 @@ func TestManagerMethodsRejectNilProvider(t *testing.T) {
 		"Sync": func() error {
 			project := managerProject()
 			project.SandboxID = "sandbox-1"
-			return NewManager(nil).Sync(context.Background(), project, nil)
+			return NewManager(nil).Sync(context.Background(), project, nil, nil)
 		},
 		"OpenRoute": func() error {
 			project := managerProject()
@@ -293,7 +293,7 @@ func TestManagerMethodsRejectNilProvider(t *testing.T) {
 		},
 		"NilManagerSync": func() error {
 			var m *Manager
-			return m.Sync(context.Background(), managerProject(), nil)
+			return m.Sync(context.Background(), managerProject(), nil, nil)
 		},
 		"NilManagerOpenRoute": func() error {
 			var m *Manager
@@ -375,7 +375,7 @@ func TestManagerSyncRejectsUnsafePaths(t *testing.T) {
 		t.Run(unsafePath, func(t *testing.T) {
 			fp := newFakeProvider()
 			m := NewManager(fp)
-			err := m.Sync(context.Background(), project, map[string]string{unsafePath: "x"})
+			err := m.Sync(context.Background(), project, map[string]string{unsafePath: "x"}, nil)
 			if err == nil || !strings.Contains(err.Error(), "unsafe file path") {
 				t.Fatalf("err = %v", err)
 			}
@@ -396,7 +396,7 @@ func TestManagerSyncSortsAndNormalizesPaths(t *testing.T) {
 		"./z.txt":        "z",
 		"dir//file.txt":  "dir",
 		"alpha/file.txt": "alpha",
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

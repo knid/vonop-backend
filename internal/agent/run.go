@@ -938,7 +938,7 @@ func finaliseSuccess(
 			fileMap, buildState, userMessage)
 	}
 	if finalCommit != "" && finalCommit != run.PreCommit {
-		syncSandboxAfterCommit(ctx, deps, project, buildState)
+		syncSandboxAfterCommit(ctx, deps, repo, project, buildState, run.PreCommit)
 	}
 
 	// 1b. Auto-deploy the backend/ subtree if this turn touched it.
@@ -1306,7 +1306,7 @@ func finaliseFailureV2(
 			if partialCommit != run.PreCommit {
 				run.FinalCommit = partialCommit
 				checkpointCommit = partialCommit
-				syncSandboxAfterCommit(ctx, deps, project, buildState)
+				syncSandboxAfterCommit(ctx, deps, repo, project, buildState, run.PreCommit)
 				emitter.Emit(EventCheckpoint, CheckpointEvent{
 					RunID:  run.ID,
 					Commit: partialCommit,

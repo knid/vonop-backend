@@ -132,15 +132,17 @@ func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppPr
 	if len(deltas) == 0 {
 		return nil
 	}
-	return c.SandboxManager.SyncDeltas(ctx, project, deltas)
+	envVars := c.CollectAllEnvVars(project)
+	return c.SandboxManager.SyncDeltas(ctx, project, deltas, envVars)
 }
 
 func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.AppProject, files map[string]string) error {
 	if c.SandboxManager == nil {
 		return fmt.Errorf("sandbox manager is not configured")
 	}
-	addSandboxEnvFiles(project, files, c.CollectAllEnvVars(project))
-	return c.SandboxManager.Sync(ctx, project, files)
+	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
+	return c.SandboxManager.Sync(ctx, project, files, envVars)
 }
 
 func (c *Controller) OpenSandboxRoute(ctx context.Context, project *models.AppProject, route, setBy string) (*sandbox.PreviewTarget, error) {
