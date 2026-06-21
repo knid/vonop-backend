@@ -450,6 +450,53 @@ func TestStartAndStopProcessUseNamedSessions(t *testing.T) {
 	}
 }
 
+func TestStartProcessPreviewCleansPreviewPortsBeforeSessionRestart(t *testing.T) {
+	sb := newFakeSandbox()
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
+	spec := sandbox.ProcessSpec{
+		Name:    sandbox.ProcessPreview,
+		Command: "bash /tmp/wemob-preview.sh",
+		Cwd:     sandbox.ProjectRoot,
+		Port:    3000,
+	}
+
+	if err := provider.StartProcess(context.Background(), "sandbox-123", spec); err != nil {
+		t.Fatalf("StartProcess returned error: %v", err)
+	}
+
+	if len(sb.process.executedCommands) == 0 {
+		t.Fatalf("expected preview port cleanup command")
+	}
+	cleanup := sb.process.executedCommands[0]
+	for _, want := range []string{"3000/tcp", "3001/tcp", "3004/tcp", "8081/tcp", "19000/tcp"} {
+		if !strings.Contains(cleanup, want) {
+			t.Fatalf("cleanup command missing %q: %s", want, cleanup)
+		}
+	}
+	if len(sb.process.sessionCommands) != 1 {
+		t.Fatalf("session commands = %#v", sb.process.sessionCommands)
+	}
+}
+
+func TestStopProcessPreviewCleansPreviewPorts(t *testing.T) {
+	sb := newFakeSandbox()
+	provider := NewWithClient(&fakeClient{sb: sb}, "")
+
+	if err := provider.StopProcess(context.Background(), "sandbox-123", sandbox.ProcessPreview); err != nil {
+		t.Fatalf("StopProcess returned error: %v", err)
+	}
+
+	if len(sb.process.executedCommands) == 0 {
+		t.Fatalf("expected preview port cleanup command")
+	}
+	cleanup := sb.process.executedCommands[0]
+	for _, want := range []string{"3000/tcp", "3001/tcp", "3004/tcp", "8081/tcp", "19000/tcp"} {
+		if !strings.Contains(cleanup, want) {
+			t.Fatalf("cleanup command missing %q: %s", want, cleanup)
+		}
+	}
+}
+
 func TestPreviewURLReturnsProviderLink(t *testing.T) {
 	sb := newFakeSandbox()
 	provider := NewWithClient(&fakeClient{sb: sb}, "")

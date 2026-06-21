@@ -402,6 +402,7 @@ func (p *Provider) StartProcess(ctx context.Context, sandboxID string, spec sand
 	}
 	sessionID := processSessionID(spec.Name)
 	_ = sb.Process().DeleteSession(ctx, sessionID)
+	p.cleanupProcessPorts(ctx, sandboxID, spec.Name)
 	if err := sb.Process().CreateSession(ctx, sessionID); err != nil {
 		return fmt.Errorf("create process session %s: %w", spec.Name, err)
 	}
@@ -422,13 +423,23 @@ func (p *Provider) StopProcess(ctx context.Context, sandboxID string, name sandb
 	}
 	sessionID := processSessionID(name)
 	deleteErr := sb.Process().DeleteSession(ctx, sessionID)
-	if port, ok := fallbackPort(name); ok {
-		_, _, _, _ = p.Execute(ctx, sandboxID, fmt.Sprintf("bash -lc %s", shellQuote(fmt.Sprintf("fuser -k %d/tcp 2>/dev/null || true", port))), "", 10000)
-	}
+	p.cleanupProcessPorts(ctx, sandboxID, name)
 	if deleteErr != nil {
 		return fmt.Errorf("stop process %s: %w", name, deleteErr)
 	}
 	return nil
+}
+
+func (p *Provider) cleanupProcessPorts(ctx context.Context, sandboxID string, name sandbox.ProcessName) {
+	ports := fallbackPorts(name)
+	if len(ports) == 0 {
+		return
+	}
+	args := make([]string, 0, len(ports))
+	for _, port := range ports {
+		args = append(args, fmt.Sprintf("%d/tcp", port))
+	}
+	_, _, _, _ = p.Execute(ctx, sandboxID, fmt.Sprintf("bash -lc %s", shellQuote(fmt.Sprintf("fuser -k %s 2>/dev/null || true", strings.Join(args, " ")))), "", 10000)
 }
 
 func (p *Provider) ProcessLogs(ctx context.Context, sandboxID string, spec sandbox.ProcessSpec, lines int) (*sandbox.LogsResult, error) {
@@ -807,20 +818,22 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func fallbackPort(name sandbox.ProcessName) (int, bool) {
+func fallbackPorts(name sandbox.ProcessName) []int {
 	switch name {
 	case sandbox.ProcessFrontend:
-		return 3000, true
+		return []int{3000}
 	case sandbox.ProcessBackend:
-		return 3001, true
+		return []int{3001}
 	case sandbox.ProcessExpoWeb:
-		return 8081, true
+		return []int{8081}
 	case sandbox.ProcessExpoGo:
-		return 19000, true
+		return []int{19000}
 	case sandbox.ProcessArtifacts:
-		return 7000, true
+		return []int{7000}
+	case sandbox.ProcessPreview:
+		return []int{3000, 3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 8081, 19000}
 	default:
-		return 0, false
+		return nil
 	}
 }
 

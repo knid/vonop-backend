@@ -115,7 +115,7 @@ func TestManagerPreviewLogsFiltersByTarget(t *testing.T) {
 	}
 }
 
-func TestManagerSyncDeltasDeletesRemovedFilesAndRestartsPreview(t *testing.T) {
+func TestManagerSyncDeltasSyncsSourceWithoutRestartingPreview(t *testing.T) {
 	fp := newFakeProvider()
 	fp.executeStdout = `{"state":"ready","updated_at":"2026-06-20T00:00:00Z"}`
 	manager := NewManager(fp)
@@ -149,6 +149,37 @@ func TestManagerSyncDeltasDeletesRemovedFilesAndRestartsPreview(t *testing.T) {
 	}
 	if !sawPreviewConfig {
 		t.Fatalf("managed Vite preview config was not synced: %#v", fp.files)
+	}
+	if sawSupervisorScript {
+		t.Fatalf("preview supervisor script should not be synced for source-only changes: %#v", fp.files)
+	}
+	if len(fp.started) != 0 {
+		t.Fatalf("started = %#v, want no preview restart", fp.started)
+	}
+}
+
+func TestManagerSyncDeltasRestartsPreviewForPackageChanges(t *testing.T) {
+	fp := newFakeProvider()
+	fp.executeStdout = `{"state":"ready","updated_at":"2026-06-20T00:00:00Z"}`
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	err := manager.SyncDeltas(context.Background(), project, []FileDelta{
+		{Path: "frontend/package.json", Content: `{"scripts":{"dev":"vite"}}`},
+	}, map[string]string{"EXPO_PUBLIC_API_URL": "https://example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawSupervisorScript bool
+	for _, file := range fp.files {
+		if file.Path == "tmp/wemob-preview.sh" && strings.Contains(file.Content, "write_state starting") {
+			sawSupervisorScript = true
+		}
 	}
 	if !sawSupervisorScript {
 		t.Fatalf("preview supervisor script was not synced: %#v", fp.files)

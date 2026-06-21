@@ -429,7 +429,7 @@ func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, de
 	}
 	plan := BuildRuntimePlan(project)
 	runtime := BuildPreviewRuntime(project)
-	restartPreview := m.hasPreviewSupervisor(ctx, project)
+	restartPreview := previewRestartRequired(deltas) && m.hasPreviewSupervisor(ctx, project)
 	if needsVitePreviewProxy(plan) {
 		deltas = append(deltas, FileDelta{Path: vitePreviewConfigPath, Content: vitePreviewConfig})
 	}
@@ -449,6 +449,42 @@ func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, de
 		}
 	}
 	return nil
+}
+
+func previewRestartRequired(deltas []FileDelta) bool {
+	for _, delta := range deltas {
+		if previewRestartRequiredPath(delta.Path) {
+			return true
+		}
+	}
+	return false
+}
+
+func previewRestartRequiredPath(filePath string) bool {
+	p := path.Clean(strings.ReplaceAll(strings.TrimSpace(filePath), "\\", "/"))
+	if p == "." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") {
+		return false
+	}
+	base := path.Base(p)
+	switch base {
+	case ".env", ".env.local", ".env.development", ".env.development.local",
+		".env.production", ".env.production.local", ".env.test", ".env.test.local",
+		"package.json", "package-lock.json", "npm-shrinkwrap.json",
+		"pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+		".npmrc", ".yarnrc", ".yarnrc.yml",
+		"jsconfig.json", "postcss.config.js", "postcss.config.cjs", "postcss.config.mjs",
+		"postcss.config.ts", "tailwind.config.js", "tailwind.config.cjs",
+		"tailwind.config.mjs", "tailwind.config.ts":
+		return true
+	}
+	if strings.HasPrefix(base, ".env.") {
+		return true
+	}
+	if strings.HasPrefix(base, "next.config.") || strings.HasPrefix(base, "vite.config.") ||
+		strings.HasPrefix(base, "tsconfig") && strings.HasSuffix(base, ".json") {
+		return true
+	}
+	return false
 }
 
 func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimePlan, files map[string]string) error {

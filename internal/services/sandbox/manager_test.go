@@ -415,6 +415,37 @@ func TestManagerSyncSortsAndNormalizesPaths(t *testing.T) {
 	}
 }
 
+func TestPreviewRestartRequiredPath(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"frontend/src/App.tsx", false},
+		{"backend/app/api/counter/route.ts", false},
+		{"frontend/src/index.css", false},
+		{"frontend/public/logo.svg", false},
+		{"frontend/package.json", true},
+		{"backend/package-lock.json", true},
+		{"frontend/.env.local", true},
+		{"backend/.env.development.local", true},
+		{"frontend/vite.config.ts", true},
+		{"frontend/vite.config.preview.ts", true},
+		{"backend/next.config.mjs", true},
+		{"frontend/tsconfig.json", true},
+		{"frontend/tsconfig.node.json", true},
+		{"frontend/tailwind.config.ts", true},
+		{"frontend/postcss.config.mjs", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			if got := previewRestartRequiredPath(tc.path); got != tc.want {
+				t.Fatalf("previewRestartRequiredPath(%q) = %v, want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestManagerStatusDegradesOnPreviewFailure(t *testing.T) {
 	fp := newFakeProvider()
 	fp.previewErr = errors.New("preview unavailable")
