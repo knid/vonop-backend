@@ -42,10 +42,8 @@ func (e *AppLimitError) Error() string {
 
 // CreateDraftAppProject creates a new app project in "draft" status — no
 // generation is kicked off. Used by the home composer flow, which creates the
-// project (with a fast local name) and redirects the user to the AI studio
-// immediately. The real LLM-generated name is applied in the background.
-// The studio then kicks off the initial generation through the normal chat
-// endpoint. This avoids making the user wait on the home page.
+// project after generating its display name/slug. The studio then kicks off
+// the initial generation through the normal chat endpoint.
 func (c *Controller) CreateDraftAppProject(ctx context.Context, user *models.User, req requests.GenerateAppRequest) (*models.AppProject, error) {
 	project, err := c.CreateAppProject(ctx, user, req)
 	if err != nil {
@@ -125,11 +123,10 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
-	// Use a fast local fallback for name/slug so the create request returns
-	// instantly. The real LLM name generation runs in the background (see
-	// refineProjectNameAsync) and patches the project shortly after creation.
-	// This lets the home composer redirect to the AI studio without waiting.
-	name, slug := fallbackNameAndSlug(req.Prompt)
+	// Generate the app name before persisting the project so the canonical
+	// slug is derived from the generated name, not the raw user prompt. The
+	// helper still falls back locally when name generation is unavailable.
+	name, slug := c.generateAppNameAndSlug(ctx, req.Prompt, user, "")
 
 	// Reuse the org we already resolved for the quota gate above. Avoids a
 	// second RequireOrgIDForUser call (and its DB roundtrip).
@@ -170,12 +167,6 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		slog.Error("Failed to create app project", "error", err)
 		return nil, fmt.Errorf("failed to create project")
 	}
-
-	// Kick off async LLM name generation. The project was created with a
-	// fast local fallback name so the caller (home composer) can redirect
-	// to the AI studio immediately. The goroutine will update the real name
-	// (and a nicer slug if it is still safe to do so) in the background.
-	go c.refineProjectNameAsync(project.ID, req.Prompt, user)
 
 	// Initialize git repo for this project
 	if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {

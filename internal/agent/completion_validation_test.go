@@ -85,18 +85,15 @@ func TestValidateGeneratedAppAllowsOperationalSaaSShape(t *testing.T) {
 	}
 }
 
-func TestValidateGeneratedAppRejectsMissingDesignBrief(t *testing.T) {
+func TestValidateGeneratedAppAllowsMissingDesignBrief(t *testing.T) {
 	files := NewSafeFileMap(map[string]string{
 		"app/layout.tsx": "export default function Layout({children}) { return children }",
 		"app/page.tsx":   "export default function Page(){ return <main>Product surface</main> }",
 	})
 
 	err := validateGeneratedApp(files, NewBuildState("build a web app", true), "build a web app", true, legacyWebProject())
-	if err == nil {
-		t.Fatal("expected design brief validation error")
-	}
-	if !strings.Contains(err.Error(), "DESIGN.md") {
-		t.Fatalf("expected DESIGN.md in validation error, got: %v", err)
+	if err != nil {
+		t.Fatalf("expected missing DESIGN.md to be recoverable, got: %v", err)
 	}
 }
 

@@ -26,6 +26,10 @@ const slugMaxBaseLen = 50
 // PostHog traces and token usage records. Pass "" if unknown.
 func (c *Controller) generateAppNameAndSlug(ctx context.Context, prompt string, user *models.User, projectRef string) (string, string) {
 	provider := c.llmProviderForUser(user)
+	if provider == nil || strings.TrimSpace(provider.APIKey) == "" {
+		slog.Warn("LLM name generation skipped, falling back to truncated prompt", "reason", "missing_api_key")
+		return fallbackNameAndSlug(prompt)
+	}
 	model := provider.FastModel()
 
 	tracker := utils.NewTokenTracker()

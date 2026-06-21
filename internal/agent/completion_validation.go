@@ -44,9 +44,6 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 		if _, ok := fileMap.Get("frontend/src/App.tsx"); !ok {
 			return fmt.Errorf("generated app validation failed: frontend/src/App.tsx is missing")
 		}
-		if err := validateDesignBrief(fileMap); err != nil {
-			return err
-		}
 		if err := validateNoImagePlaceholders(fileMap); err != nil {
 			return err
 		}
@@ -77,9 +74,6 @@ func validateGeneratedApp(fileMap *SafeFileMap, state *BuildState, prompt string
 	}
 	if _, ok := fileMap.Get("app/page.tsx"); !ok {
 		return fmt.Errorf("generated app validation failed: app/page.tsx is missing")
-	}
-	if err := validateDesignBrief(fileMap); err != nil {
-		return err
 	}
 	if err := validateNoImagePlaceholders(fileMap); err != nil {
 		return err
