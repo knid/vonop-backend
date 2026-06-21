@@ -114,3 +114,46 @@ func TestManagerPreviewLogsFiltersByTarget(t *testing.T) {
 		t.Fatalf("web log path should not be tailed for backend target: %q", command)
 	}
 }
+
+func TestManagerSyncDeltasDeletesRemovedFilesAndRestartsPreview(t *testing.T) {
+	fp := newFakeProvider()
+	fp.executeStdout = `{"state":"ready","updated_at":"2026-06-20T00:00:00Z"}`
+	manager := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-test"
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	err := manager.SyncDeltas(context.Background(), project, []FileDelta{
+		{Path: "frontend/src/App.tsx", Content: "export default function App() { return null }"},
+		{Path: "frontend/src/old.tsx", Delete: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawDelete, sawPreviewConfig, sawSupervisorScript bool
+	for _, file := range fp.files {
+		switch file.Path {
+		case "frontend/src/old.tsx":
+			sawDelete = file.Delete
+		case "frontend/vite.config.preview.ts":
+			sawPreviewConfig = !file.Delete && strings.Contains(file.Content, `"/api"`)
+		case "tmp/wemob-preview.sh":
+			sawSupervisorScript = !file.Delete && strings.Contains(file.Content, "write_state starting")
+		}
+	}
+	if !sawDelete {
+		t.Fatalf("deleted file delta was not synced: %#v", fp.files)
+	}
+	if !sawPreviewConfig {
+		t.Fatalf("managed Vite preview config was not synced: %#v", fp.files)
+	}
+	if !sawSupervisorScript {
+		t.Fatalf("preview supervisor script was not synced: %#v", fp.files)
+	}
+	if len(fp.started) != 1 || fp.started[0] != ProcessPreview {
+		t.Fatalf("started = %#v, want preview restart", fp.started)
+	}
+}

@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/knid/wemob/internal/models"
@@ -108,6 +110,31 @@ func (c *Controller) SyncSandbox(ctx context.Context, project *models.AppProject
 	return c.syncSandboxWithFiles(ctx, project, files)
 }
 
+func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppProject, paths []string) error {
+	if c.SandboxManager == nil {
+		return fmt.Errorf("sandbox manager is not configured")
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	files, err := c.sandboxSourceFiles(project)
+	if err != nil {
+		return err
+	}
+	deltas := make([]sandbox.FileDelta, 0, len(paths))
+	for _, p := range normalizeSandboxChangedPaths(project, paths) {
+		if content, ok := files[p]; ok {
+			deltas = append(deltas, sandbox.FileDelta{Path: p, Content: content})
+			continue
+		}
+		deltas = append(deltas, sandbox.FileDelta{Path: p, Delete: true})
+	}
+	if len(deltas) == 0 {
+		return nil
+	}
+	return c.SandboxManager.SyncDeltas(ctx, project, deltas)
+}
+
 func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.AppProject, files map[string]string) error {
 	if c.SandboxManager == nil {
 		return fmt.Errorf("sandbox manager is not configured")
@@ -183,4 +210,30 @@ func sandboxEnvFilePaths(project *models.AppProject) []string {
 		return []string{".env.local"}
 	}
 	return nil
+}
+
+func normalizeSandboxChangedPaths(project *models.AppProject, paths []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(strings.ReplaceAll(p, "\\", "/"))
+		if p == "" {
+			continue
+		}
+		if project != nil && project.ProjectType == models.ProjectTypeMobileAppNative {
+			if !strings.HasPrefix(p, "mobile/") {
+				continue
+			}
+			p = strings.TrimPrefix(p, "mobile/")
+			if p == "" {
+				continue
+			}
+		}
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -122,16 +122,7 @@ func (m *Manager) EnsurePreview(ctx context.Context, project *models.AppProject,
 	if err := m.syncFiles(ctx, sandboxID, plan, copied); err != nil {
 		return nil, err
 	}
-	spec := ProcessSpec{
-		Name:        ProcessPreview,
-		Command:     "bash /tmp/wemob-preview.sh",
-		Cwd:         runtime.Root,
-		Port:        runtime.Port(runtime.Main),
-		Probe:       ReadinessProbe{Type: "http", URL: fmt.Sprintf("http://localhost:%d", runtime.Port(runtime.Main))},
-		AutoRestart: true,
-	}
-	spec.Env = mergeProcessEnv(spec.Env, env)
-	if err := provider.StartProcess(ctx, sandboxID, spec); err != nil {
+	if err := m.startPreviewSupervisor(ctx, provider, sandboxID, runtime, env); err != nil {
 		return nil, fmt.Errorf("start preview supervisor: %w", err)
 	}
 	return m.previewStatus(ctx, project, runtime, PreviewStarting, "")
@@ -409,7 +400,55 @@ func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files ma
 	if _, _, err := m.startedProject(project); err != nil {
 		return err
 	}
-	return m.syncFiles(ctx, project.SandboxID, BuildRuntimePlan(project), files)
+	runtime := BuildPreviewRuntime(project)
+	restartPreview := m.hasPreviewSupervisor(ctx, project)
+	if restartPreview {
+		if files == nil {
+			files = map[string]string{}
+		}
+		files["tmp/wemob-preview.sh"] = BuildPreviewSupervisorScript(runtime)
+	}
+	if err := m.syncFiles(ctx, project.SandboxID, BuildRuntimePlan(project), files); err != nil {
+		return err
+	}
+	if restartPreview {
+		provider, err := m.providerClient()
+		if err != nil {
+			return err
+		}
+		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, nil); err != nil {
+			return fmt.Errorf("restart preview supervisor: %w", err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, deltas []FileDelta) error {
+	if _, _, err := m.startedProject(project); err != nil {
+		return err
+	}
+	plan := BuildRuntimePlan(project)
+	runtime := BuildPreviewRuntime(project)
+	restartPreview := m.hasPreviewSupervisor(ctx, project)
+	if needsVitePreviewProxy(plan) {
+		deltas = append(deltas, FileDelta{Path: vitePreviewConfigPath, Content: vitePreviewConfig})
+	}
+	if restartPreview {
+		deltas = append(deltas, FileDelta{Path: "tmp/wemob-preview.sh", Content: BuildPreviewSupervisorScript(runtime)})
+	}
+	if err := m.syncFileDeltas(ctx, project.SandboxID, plan, deltas); err != nil {
+		return err
+	}
+	if restartPreview {
+		provider, err := m.providerClient()
+		if err != nil {
+			return err
+		}
+		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, nil); err != nil {
+			return fmt.Errorf("restart preview supervisor: %w", err)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimePlan, files map[string]string) error {
@@ -431,6 +470,50 @@ func (m *Manager) syncFiles(ctx context.Context, sandboxID string, plan RuntimeP
 		return fmt.Errorf("sync sandbox files: %w", err)
 	}
 	return nil
+}
+
+func (m *Manager) syncFileDeltas(ctx context.Context, sandboxID string, plan RuntimePlan, deltas []FileDelta) error {
+	byPath := make(map[string]FileDelta, len(deltas))
+	for _, delta := range deltas {
+		cleanPath, err := cleanFilePath(delta.Path)
+		if err != nil {
+			return err
+		}
+		delta.Path = cleanPath
+		byPath[cleanPath] = delta
+	}
+	cleaned := make([]FileDelta, 0, len(byPath))
+	for _, delta := range byPath {
+		cleaned = append(cleaned, delta)
+	}
+	sort.Slice(cleaned, func(i, j int) bool { return cleaned[i].Path < cleaned[j].Path })
+	provider, err := m.providerClient()
+	if err != nil {
+		return err
+	}
+	if err := provider.WriteFiles(ctx, sandboxID, cleaned, plan); err != nil {
+		return fmt.Errorf("sync sandbox files: %w", err)
+	}
+	return nil
+}
+
+func (m *Manager) hasPreviewSupervisor(ctx context.Context, project *models.AppProject) bool {
+	_, _, ok := m.previewSupervisorState(ctx, project)
+	return ok
+}
+
+func (m *Manager) startPreviewSupervisor(ctx context.Context, provider ProviderClient, sandboxID string, runtime PreviewRuntime, env map[string]string) error {
+	mainPort := runtime.Port(runtime.Main)
+	spec := ProcessSpec{
+		Name:        ProcessPreview,
+		Command:     "bash /tmp/wemob-preview.sh",
+		Cwd:         runtime.Root,
+		Port:        mainPort,
+		Probe:       ReadinessProbe{Type: "http", URL: fmt.Sprintf("http://localhost:%d", mainPort)},
+		AutoRestart: true,
+	}
+	spec.Env = mergeProcessEnv(spec.Env, env)
+	return provider.StartProcess(ctx, sandboxID, spec)
 }
 
 func withManagedPreviewFiles(plan RuntimePlan, files map[string]string) map[string]string {
