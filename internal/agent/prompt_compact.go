@@ -42,16 +42,18 @@ Do not mutate locked/template-managed files unless the active skill or tool
 result explicitly permits it. Do not touch lockfiles.
 
 ## Sandbox Runtime
-Use sandbox_status before runtime verification when the live sandbox state is
+Use preview_status before runtime verification when the live sandbox state is
 unclear. App source of truth is Git-backed Wemob storage: edit source with
-Git-backed file tools, not by writing app source directly inside the sandbox.
+Git-backed file tools, not by writing app source directly inside the sandbox
+or with sandbox_exec.
 
 In the Daytona-backed sandbox, the frontend app root is /workspace/project, the
 backend app root is /workspace/backend, and generated artifacts belong under
 /workspace/artifacts. Use sandbox_exec for finite tests, builds, diagnostics,
-and artifact work. Set cwd to the correct root instead of prefixing commands
-with cd. Do not use sandbox_exec for long-running dev servers; use
-process_restart for preview lifecycle work.
+curl, pandoc, and artifact work. Set cwd to the correct root instead of
+prefixing commands with cd. Do not use sandbox_exec for long-running dev
+servers or source file create/update/delete work; use process_restart for
+preview lifecycle work and Git-backed file tools for source files.
 To show generated files such as PDFs, reports, or HTML artifacts, create them
 under /workspace/artifacts and call preview_open_artifact with the absolute
 path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona
@@ -111,17 +113,20 @@ build retries when available. Do not assume native capabilities are enabled
 until mobile config or tool results confirm them.
 
 ## Sandbox Runtime
-Use sandbox_status before runtime verification when the live sandbox state is
+Use preview_status before runtime verification when the live sandbox state is
 unclear. App source of truth is Git-backed Wemob storage: edit source with
-Git-backed file tools, not by writing app source directly inside the sandbox.
+Git-backed file tools, not by writing app source directly inside the sandbox
+or with sandbox_exec.
 
 In the Daytona-backed sandbox, the frontend/mobile app root is
 /workspace/project, the backend app root is /workspace/backend, and generated
 artifacts belong under /workspace/artifacts. Use sandbox_exec for finite tests,
-builds, diagnostics, and artifact work. Set cwd to the correct root instead of
-prefixing commands with cd. Do not use sandbox_exec for long-running dev
-servers; use process_restart for preview lifecycle work. Do not retry the exact
-same failing command; inspect the error, status, logs, or filesystem first.
+builds, diagnostics, curl, pandoc, and artifact work. Set cwd to the correct
+root instead of prefixing commands with cd. Do not use sandbox_exec for
+long-running dev servers or source file create/update/delete work; use
+process_restart for preview lifecycle work and Git-backed file tools for
+source files. Do not retry the exact same failing command; inspect the error,
+status, logs, or filesystem first.
 To show generated files such as PDFs, reports, or HTML artifacts, create them
 under /workspace/artifacts and call preview_open_artifact with the absolute
 path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona

@@ -52,14 +52,18 @@ func TestBuildSystemMessages_IncludesSandboxRuntimeGuidance(t *testing.T) {
 		"/workspace/project",
 		"/workspace/backend",
 		"/workspace/artifacts",
-		"sandbox_status",
+		"preview_status",
 		"sandbox_exec",
+		"Git-backed file tools",
 		"Set cwd",
 		"Do not retry the exact same failing command",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expected sandbox runtime guidance to contain %q", want)
 		}
+	}
+	if strings.Contains(joined, "sandbox_status") {
+		t.Fatal("sandbox runtime guidance must not advertise nonexistent sandbox_status tool")
 	}
 }
 

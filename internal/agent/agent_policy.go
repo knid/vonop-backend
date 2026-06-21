@@ -145,7 +145,7 @@ var skillRuntimeToolNames = []string{"list_skills", "search_skills", "load_skill
 
 func ClassifyToolRisk(toolName string) string {
 	switch toolName {
-	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search", "list_skills", "search_skills", "load_skill", "sandbox_status", "sandbox_read_logs", "process_logs":
+	case "read_files", "list_files", "grep", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "web_search", "list_skills", "search_skills", "load_skill", "preview_status", "preview_logs", "process_logs":
 		return ToolRiskLow
 	case "write_file", "write_files", "edit_file", "multi_edit", "generate_image", "process_restart", "sandbox_serve_artifact", "preview_set_url", "preview_open_route", "preview_open_artifact":
 		return ToolRiskMedium
