@@ -3,6 +3,9 @@ package controllers
 import (
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/knid/wemob/internal/models"
 )
 
 func TestInjectViteStaticScripts(t *testing.T) {
@@ -40,5 +43,25 @@ func TestStripPreviewSubtree(t *testing.T) {
 	}
 	if _, ok := got["backend/package.json"]; ok {
 		t.Fatalf("stripped frontend files must not include backend files: %#v", got)
+	}
+}
+
+func TestNormalizeSandboxChangedPathsForMobilePreview(t *testing.T) {
+	project := &models.AppProject{ID: uuid.New(), ProjectType: models.ProjectTypeMobileAppNative}
+
+	got := normalizeSandboxChangedPaths(project, []string{
+		"mobile/app/index.tsx",
+		"backend/app/api/route.ts",
+		"mobile/app/index.tsx",
+		`mobile\package.json`,
+	})
+	want := []string{"app/index.tsx", "package.json"}
+	if len(got) != len(want) {
+		t.Fatalf("paths = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("paths = %#v, want %#v", got, want)
+		}
 	}
 }

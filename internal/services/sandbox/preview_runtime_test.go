@@ -101,3 +101,28 @@ func TestPreviewSupervisorScriptContainsSingleSessionProcessControl(t *testing.T
 		}
 	}
 }
+
+func TestPreviewSupervisorScriptSkipsProcessesWithoutPackageJSON(t *testing.T) {
+	runtime := PreviewRuntime{
+		Root: ProjectRoot,
+		Main: "web",
+		Processes: []PreviewProcess{
+			{Name: "backend", Cwd: BackendRoot, Port: 3001, Command: "npm run dev -- -p 3001"},
+			{Name: "web", Cwd: ProjectRoot + "/frontend", Port: 3000, Command: "npm run dev -- --port 3000"},
+		},
+	}
+
+	script := BuildPreviewSupervisorScript(runtime)
+
+	for _, want := range []string{
+		"started_processes=0",
+		"if test -f '/workspace/backend/package.json'; then",
+		"started_processes=$((started_processes + 1))",
+		"skipped: /workspace/backend/package.json not found",
+		"if test \"$started_processes\" -eq 0; then",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script missing %q:\n%s", want, script)
+		}
+	}
+}

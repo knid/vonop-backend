@@ -98,14 +98,25 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 		b.WriteString(fmt.Sprintf("(cd %s && test ! -f package.json || npm install)\n", shellQuotePath(dir)))
 	}
 	b.WriteString("write_state starting\n")
+	b.WriteString("started_processes=0\n")
 	for _, process := range runtime.Processes {
 		cwd := process.Cwd
 		if cwd == "" {
 			cwd = runtime.Root
 		}
 		logPath := fmt.Sprintf("/workspace/.wemob/logs/%s.log", process.Name)
-		b.WriteString(fmt.Sprintf("(cd %s && %s) > %s 2>&1 &\n", shellQuotePath(cwd), process.Command, shellQuotePath(logPath)))
+		packagePath := strings.TrimRight(cwd, "/") + "/package.json"
+		b.WriteString(fmt.Sprintf("if test -f %s; then\n", shellQuotePath(packagePath)))
+		b.WriteString(fmt.Sprintf("  (cd %s && %s) > %s 2>&1 &\n", shellQuotePath(cwd), process.Command, shellQuotePath(logPath)))
+		b.WriteString("  started_processes=$((started_processes + 1))\n")
+		b.WriteString("else\n")
+		b.WriteString(fmt.Sprintf("  printf 'skipped: %s not found\\n' > %s\n", packagePath, shellQuotePath(logPath)))
+		b.WriteString("fi\n")
 	}
+	b.WriteString("if test \"$started_processes\" -eq 0; then\n")
+	b.WriteString("  write_state error\n")
+	b.WriteString("  exit 0\n")
+	b.WriteString("fi\n")
 	mainPort := runtime.Port(runtime.Main)
 	if mainPort > 0 {
 		b.WriteString("for i in $(seq 1 90); do\n")
