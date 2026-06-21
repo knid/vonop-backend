@@ -18,7 +18,7 @@ func (v *HttpViews) EnsureAppPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status, err := v.Controller.PreviewStatus(r.Context(), project)
-	if err == nil && status.State == sandbox.PreviewMissing {
+	if err == nil && shouldEnsurePreview(status.State) {
 		status, err = v.Controller.EnsurePreview(r.Context(), project)
 	}
 	if err != nil {
@@ -67,7 +67,7 @@ func (v *HttpViews) StreamAppPreviewEvents(w http.ResponseWriter, r *http.Reques
 	utils.SetSSEHeaders(w)
 
 	status, err := v.Controller.PreviewStatus(r.Context(), project)
-	if err == nil && status.State == sandbox.PreviewMissing {
+	if err == nil && shouldEnsurePreview(status.State) {
 		status, err = v.Controller.EnsurePreview(r.Context(), project)
 	}
 	if err != nil {
@@ -132,6 +132,15 @@ func (v *HttpViews) StreamAppPreviewEvents(w http.ResponseWriter, r *http.Reques
 				})
 			}
 		}
+	}
+}
+
+func shouldEnsurePreview(state sandbox.PreviewState) bool {
+	switch state {
+	case sandbox.PreviewMissing, sandbox.PreviewStopped, sandbox.PreviewError:
+		return true
+	default:
+		return false
 	}
 }
 

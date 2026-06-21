@@ -172,6 +172,12 @@ func (m *Manager) PreviewStatus(ctx context.Context, project *models.AppProject)
 		state = PreviewMissing
 		msg = "preview supervisor has not started"
 	}
+	if state == PreviewReady {
+		if processMsg := previewRuntimeProcessError(runtime, st.Processes); processMsg != "" {
+			state = PreviewError
+			msg = processMsg
+		}
+	}
 	return m.previewStatus(ctx, project, runtime, state, msg)
 }
 
@@ -326,6 +332,33 @@ func previewKindForRuntime(runtime PreviewRuntime) PreviewKind {
 		return PreviewExpo
 	}
 	return PreviewApp
+}
+
+func previewRuntimeProcessError(runtime PreviewRuntime, processes map[ProcessName]ProcessState) string {
+	if len(processes) == 0 {
+		return ""
+	}
+	mainPort := runtime.Port(runtime.Main)
+	if mainPort <= 0 {
+		return ""
+	}
+	for _, state := range processes {
+		if state.Port != mainPort {
+			continue
+		}
+		if state.Status == ProcessReady {
+			return ""
+		}
+		name := runtime.Main
+		if name == "" {
+			name = string(state.Name)
+		}
+		if state.LastError != "" {
+			return fmt.Sprintf("%s process is %s: %s", name, state.Status, state.LastError)
+		}
+		return fmt.Sprintf("%s process is %s", name, state.Status)
+	}
+	return ""
 }
 
 func shellQuoteForBash(value string) string {

@@ -26,6 +26,7 @@ type fakeProvider struct {
 	startedSpecs     []ProcessSpec
 	previews         map[int]string
 	previewErr       error
+	processStates    map[ProcessName]ProcessState
 	processStatesErr error
 }
 
@@ -94,6 +95,9 @@ func (f *fakeProvider) ProcessLogs(ctx context.Context, sandboxID string, spec P
 func (f *fakeProvider) ProcessStates(ctx context.Context, sandboxID string, plan RuntimePlan) (map[ProcessName]ProcessState, error) {
 	if f.processStatesErr != nil {
 		return nil, f.processStatesErr
+	}
+	if f.processStates != nil {
+		return f.processStates, nil
 	}
 	out := map[ProcessName]ProcessState{}
 	for _, spec := range plan.Processes {
