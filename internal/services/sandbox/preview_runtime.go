@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -93,6 +94,13 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 	b.WriteString("  jobs -pr | xargs -r kill 2>/dev/null || true\n")
 	b.WriteString("}\n")
 	b.WriteString("trap cleanup EXIT\n")
+	if runtimeNeedsVitePreviewConfig(runtime) {
+		configPath := path.Join(ProjectRoot, vitePreviewConfigPath)
+		b.WriteString(fmt.Sprintf("mkdir -p %s\n", shellQuotePath(path.Dir(configPath))))
+		b.WriteString(fmt.Sprintf("cat > %s <<'WEMOB_VITE_PREVIEW_CONFIG'\n", shellQuotePath(configPath)))
+		b.WriteString(vitePreviewConfig)
+		b.WriteString("WEMOB_VITE_PREVIEW_CONFIG\n")
+	}
 	b.WriteString("write_state installing\n")
 	for _, dir := range uniqueInstallDirs(runtime.InstallDirs) {
 		b.WriteString(fmt.Sprintf("(cd %s && test ! -f package.json || npm install)\n", shellQuotePath(dir)))
@@ -129,6 +137,15 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 	}
 	b.WriteString("wait -n\n")
 	return b.String()
+}
+
+func runtimeNeedsVitePreviewConfig(runtime PreviewRuntime) bool {
+	for _, process := range runtime.Processes {
+		if process.Cwd == ProjectRoot+"/frontend" && strings.Contains(process.Command, "vite.config.preview.ts") {
+			return true
+		}
+	}
+	return false
 }
 
 func uniqueInstallDirs(dirs []string) []string {

@@ -54,6 +54,25 @@ func TestBuildPreviewRuntimeSplitWeb(t *testing.T) {
 	}
 }
 
+func TestPreviewSupervisorScriptWritesManagedVitePreviewConfig(t *testing.T) {
+	project := previewRuntimeProject()
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	script := BuildPreviewSupervisorScript(BuildPreviewRuntime(project))
+
+	for _, want := range []string{
+		"cat > '/workspace/project/frontend/vite.config.preview.ts'",
+		`target: "http://127.0.0.1:3001"`,
+		"npm run dev -- --config vite.config.preview.ts",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("script missing %q:\n%s", want, script)
+		}
+	}
+}
+
 func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 	project := previewRuntimeProject()
 	project.ProjectType = models.ProjectTypeMobileAppNative
