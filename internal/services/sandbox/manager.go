@@ -396,7 +396,7 @@ func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Stat
 	return st, nil
 }
 
-func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files map[string]string) error {
+func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files map[string]string, env map[string]string) error {
 	if _, _, err := m.startedProject(project); err != nil {
 		return err
 	}
@@ -416,14 +416,14 @@ func (m *Manager) Sync(ctx context.Context, project *models.AppProject, files ma
 		if err != nil {
 			return err
 		}
-		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, nil); err != nil {
+		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, env); err != nil {
 			return fmt.Errorf("restart preview supervisor: %w", err)
 		}
 	}
 	return nil
 }
 
-func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, deltas []FileDelta) error {
+func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, deltas []FileDelta, env map[string]string) error {
 	if _, _, err := m.startedProject(project); err != nil {
 		return err
 	}
@@ -444,7 +444,7 @@ func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, de
 		if err != nil {
 			return err
 		}
-		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, nil); err != nil {
+		if err := m.startPreviewSupervisor(ctx, provider, project.SandboxID, runtime, env); err != nil {
 			return fmt.Errorf("restart preview supervisor: %w", err)
 		}
 	}
