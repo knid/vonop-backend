@@ -104,9 +104,11 @@ type WebDeployTrigger func(ctx context.Context, project *models.AppProject, user
 
 // SandboxControlRequest is an agent-runtime request for the backend-owned
 // Daytona-backed preview control plane. App source files remain backed by Git.
-// The exposed agent tools are intentionally read-only: preview status and
-// recent preview logs. Other fields are legacy controller plumbing until the
-// old sandbox API is fully deleted.
+// The exposed agent tools are constrained to preview status/logs and finite
+// command execution. Source writes stay disabled here: the agent must use the
+// Git-backed file tools, then backend syncs changed files to the sandbox.
+// Other fields are legacy controller plumbing until the old sandbox API is
+// fully deleted.
 type SandboxControlRequest struct {
 	Action     string            `json:"action"`
 	Command    string            `json:"command,omitempty"`

@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
+
+	"github.com/knid/wemob/internal/models"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 )
 
 func registerSandboxTools(r *Registry, deps *RunDependencies) {
 	r.Register(PreviewStatusTool{Deps: deps})
 	r.Register(PreviewLogsTool{Deps: deps})
+	r.Register(SandboxExecTool{Deps: deps})
 }
 
 func sandboxControl(ctx context.Context, rc *RunContext, req SandboxControlRequest) (map[string]any, bool, error) {
@@ -87,8 +92,179 @@ func (t PreviewLogsTool) Execute(ctx context.Context, rc *RunContext, input json
 	return renderSandboxResult(out), isErr, err
 }
 
+type SandboxExecTool struct{ Deps *RunDependencies }
+
+func (SandboxExecTool) Name() string { return "sandbox_exec" }
+func (SandboxExecTool) Description() string {
+	return "Run one finite command inside the Daytona preview sandbox for builds, tests, diagnostics, curl, pandoc, or artifact work. Do not use this to create, update, or delete app source files; use the Git-backed file tools for source changes."
+}
+func (SandboxExecTool) Schema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []any{"command"},
+		"properties": map[string]any{
+			"command": map[string]any{"type": "string", "description": "One finite command, for example npm run build, npx tsc --noEmit, curl -I http://localhost:3000, or pandoc input.md -o /workspace/artifacts/out.pdf."},
+			"cwd": map[string]any{
+				"type":        "string",
+				"description": "Working directory alias or absolute workspace path. Use frontend, backend, project, artifacts, or an absolute path under /workspace/project, /workspace/backend, /workspace/artifacts, or /tmp.",
+			},
+			"timeout_ms": map[string]any{"type": "number", "description": "Optional timeout in milliseconds. Defaults to 30000 and is capped at 120000."},
+		},
+	}
+}
+func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json.RawMessage) (string, bool, error) {
+	var args struct {
+		Command   string `json:"command"`
+		Cwd       string `json:"cwd"`
+		TimeoutMs int    `json:"timeout_ms"`
+	}
+	_ = json.Unmarshal(input, &args)
+	command := strings.TrimSpace(args.Command)
+	if command == "" {
+		return "command is required", true, nil
+	}
+	if msg := validateSandboxExecCommand(command); msg != "" {
+		return msg, true, nil
+	}
+	var project *models.AppProject
+	if rc != nil {
+		project = rc.Project
+	}
+	cwd, msg := normalizeSandboxExecCwd(project, args.Cwd)
+	if msg != "" {
+		return msg, true, nil
+	}
+	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{
+		Action:    "exec",
+		Command:   command,
+		Cwd:       cwd,
+		TimeoutMs: clampSandboxExecTimeout(args.TimeoutMs),
+	})
+	out = truncateSandboxExecOutput(out)
+	return renderSandboxResult(out), isErr, err
+}
+
 func sandboxToolNames() []string {
-	names := []string{"preview_status", "preview_logs"}
+	names := []string{"preview_status", "preview_logs", "sandbox_exec"}
 	sort.Strings(names)
 	return names
+}
+
+const (
+	sandboxExecDefaultTimeoutMs = 30000
+	sandboxExecMaxTimeoutMs     = 120000
+	sandboxExecOutputLimit      = 12000
+)
+
+func validateSandboxExecCommand(command string) string {
+	lower := strings.ToLower(strings.TrimSpace(command))
+	if strings.ContainsAny(command, "\r\n") {
+		return "sandbox_exec accepts one finite command per call; do not pass multi-line shell scripts"
+	}
+	if strings.Contains(command, ">") || strings.Contains(command, "<") {
+		return "sandbox_exec must not use shell redirection to create or change files; use Git-backed file tools for source files and write artifacts under /workspace/artifacts with command flags such as -o"
+	}
+	fields := strings.Fields(lower)
+	if len(fields) == 0 {
+		return "command is required"
+	}
+	blockedFirstWords := map[string]string{
+		"rm":       "delete files",
+		"mv":       "move or rename files",
+		"cp":       "copy files",
+		"touch":    "create files",
+		"mkdir":    "create directories",
+		"rmdir":    "delete directories",
+		"tee":      "write files",
+		"truncate": "modify files",
+		"bash":     "wrap commands in a shell",
+		"sh":       "wrap commands in a shell",
+		"zsh":      "wrap commands in a shell",
+	}
+	if reason, ok := blockedFirstWords[fields[0]]; ok {
+		return fmt.Sprintf("sandbox_exec must not %s; use the Git-backed file tools for source changes and call finite commands directly", reason)
+	}
+	if strings.Contains(lower, " sed -i") || strings.HasPrefix(lower, "sed -i") ||
+		strings.Contains(lower, " perl -pi") || strings.HasPrefix(lower, "perl -pi") {
+		return "sandbox_exec must not mutate files in place; use the Git-backed file tools for source changes"
+	}
+	return ""
+}
+
+func normalizeSandboxExecCwd(project *models.AppProject, cwd string) (string, string) {
+	clean := strings.TrimSpace(cwd)
+	if clean == "" || clean == "default" {
+		return defaultSandboxExecCwd(project), ""
+	}
+	switch clean {
+	case "project":
+		return sandboxService.ProjectRoot, ""
+	case "frontend", "web":
+		if project != nil && project.UsesSplitWebRuntime() {
+			return sandboxService.ProjectRoot + "/frontend", ""
+		}
+		return sandboxService.ProjectRoot, ""
+	case "mobile":
+		return sandboxService.ProjectRoot, ""
+	case "backend", "api":
+		return sandboxService.BackendRoot, ""
+	case "artifacts", "artifact":
+		return sandboxService.ArtifactsRoot, ""
+	}
+	if !strings.HasPrefix(clean, "/") {
+		return "", "cwd must be one of: frontend, backend, project, artifacts, or an absolute workspace path"
+	}
+	clean = path.Clean(clean)
+	if clean == sandboxService.ProjectRoot || strings.HasPrefix(clean, sandboxService.ProjectRoot+"/") ||
+		clean == sandboxService.BackendRoot || strings.HasPrefix(clean, sandboxService.BackendRoot+"/") ||
+		clean == sandboxService.ArtifactsRoot || strings.HasPrefix(clean, sandboxService.ArtifactsRoot+"/") ||
+		clean == "/tmp" || strings.HasPrefix(clean, "/tmp/") {
+		return clean, ""
+	}
+	return "", "cwd must stay under /workspace/project, /workspace/backend, /workspace/artifacts, or /tmp"
+}
+
+func defaultSandboxExecCwd(project *models.AppProject) string {
+	if project == nil {
+		return sandboxService.ProjectRoot
+	}
+	if project.ProjectType == models.ProjectTypeApp && project.FrontendRuntime == models.FrontendRuntimeNone {
+		return sandboxService.BackendRoot
+	}
+	if project.UsesSplitWebRuntime() {
+		return sandboxService.ProjectRoot + "/frontend"
+	}
+	return sandboxService.ProjectRoot
+}
+
+func clampSandboxExecTimeout(timeoutMs int) int {
+	if timeoutMs <= 0 {
+		return sandboxExecDefaultTimeoutMs
+	}
+	if timeoutMs > sandboxExecMaxTimeoutMs {
+		return sandboxExecMaxTimeoutMs
+	}
+	return timeoutMs
+}
+
+func truncateSandboxExecOutput(out map[string]any) map[string]any {
+	if out == nil {
+		return nil
+	}
+	copied := make(map[string]any, len(out))
+	for key, value := range out {
+		if s, ok := value.(string); ok && (key == "stdout" || key == "stderr") {
+			copied[key] = truncateSandboxExecString(s)
+			continue
+		}
+		copied[key] = value
+	}
+	return copied
+}
+
+func truncateSandboxExecString(value string) string {
+	if len(value) <= sandboxExecOutputLimit {
+		return value
+	}
+	return value[:sandboxExecOutputLimit] + "\n... truncated ..."
 }
