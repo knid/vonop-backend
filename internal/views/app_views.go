@@ -111,11 +111,8 @@ func (v *HttpViews) GetAppAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /v2/apps
-// Creates a draft app project and returns immediately (using a fast local
-// fallback for the project name). The real LLM name is generated and patched
-// in the background so the home composer can redirect the user to the AI
-// studio with zero waiting. The studio then starts the initial generation
-// via the normal chat flow.
+// Creates a draft app project after resolving its generated name/slug. The
+// studio then starts the initial generation via the normal chat flow.
 func (v *HttpViews) CreateApp(w http.ResponseWriter, r *http.Request) {
 	user, err := v.Controller.GetUserFromReq(r)
 	if err != nil {

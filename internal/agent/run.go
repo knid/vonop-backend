@@ -426,7 +426,7 @@ func Run(
 	) error {
 		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
 			code, failureMessage, wrapped, tracker, runStart,
-			fileMap, buildState, message)
+			fileMap, buildState, message, nil)
 	}
 
 	// Bind the credit checker to the run's token tracker.
@@ -539,9 +539,12 @@ func Run(
 		wrapped error,
 	) error {
 		lastDeductedCredits = chargeFinalCreditDelta(context.Background(), deps, emitter, runID, turn, tracker, deductAction, project.ID.String(), lastDeductedCredits)
+		partsMu.Lock()
+		failureParts := append([]models.ChatMessagePart(nil), parts...)
+		partsMu.Unlock()
 		return finaliseFailureV2(failureCtx, deps, repo, run, project, emitter, phase,
 			code, failureMessage, wrapped, tracker, runStart,
-			fileMap, buildState, message)
+			fileMap, buildState, message, failureParts)
 	}
 
 	// Budget check before entering the loop.
@@ -935,7 +938,7 @@ func finaliseSuccess(
 		return finaliseFailureV2(ctx, deps, repo, run, project, emitter, "commit",
 			CodeGitError, "failed to write and commit files", err,
 			tracker, runStart,
-			fileMap, buildState, userMessage)
+			fileMap, buildState, userMessage, parts)
 	}
 	if finalCommit != "" && finalCommit != run.PreCommit {
 		syncSandboxAfterCommit(ctx, deps, repo, project, buildState, run.PreCommit)
@@ -1294,6 +1297,7 @@ func finaliseFailureV2(
 	fileMap *SafeFileMap,
 	buildState *BuildState,
 	originalUserMessage string,
+	failureParts []models.ChatMessagePart,
 ) error {
 	// 1. Attempt to commit partial progress so the user isn't left with
 	// nothing when a run fails mid-loop (credits exhausted, timeout, etc.).
@@ -1340,9 +1344,15 @@ func finaliseFailureV2(
 		fallbackText = "Generation failed. Partial progress was saved as a checkpoint."
 	}
 
-	fallbackParts, _ := json.Marshal([]models.ChatMessagePart{
-		{Type: "text", Text: fallbackText},
-	})
+	persistedParts := append([]models.ChatMessagePart(nil), failureParts...)
+	if len(persistedParts) == 0 {
+		persistedParts = []models.ChatMessagePart{{Type: "text", Text: fallbackText}}
+	}
+	toolCallsJSON, _ := json.Marshal(partsToToolCalls(persistedParts))
+	partsJSON, _ := json.Marshal(persistedParts)
+	if len(partsJSON) == 0 {
+		partsJSON = []byte("[]")
+	}
 	orphanMsg := &models.AppChatMessage{
 		AppProjectID: run.AppProjectID,
 		RunID:        &run.ID,
@@ -1350,8 +1360,8 @@ func finaliseFailureV2(
 		Content:      fallbackText,
 		Images:       []byte("[]"),
 		Attachments:  []byte("[]"),
-		ToolCalls:    []byte("[]"),
-		Parts:        fallbackParts,
+		ToolCalls:    toolCallsJSON,
+		Parts:        partsJSON,
 		ErrorKind:    errorKind,
 	}
 	if _, err := deps.DB.InsertChatMessage(orphanMsg); err != nil {
