@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -111,6 +112,63 @@ func TestSandboxExecToolRejectsSourceMutationCommands(t *testing.T) {
 	}
 	if !strings.Contains(result, "file tools") {
 		t.Fatalf("expected file tool guidance, got: %s", result)
+	}
+}
+
+func TestSandboxExecToolHonorsProjectKillSwitch(t *testing.T) {
+	called := false
+	deps := &RunDependencies{
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			called = true
+			return nil, nil
+		},
+	}
+	rc := &RunContext{
+		Project: &models.AppProject{ProjectType: models.ProjectTypeApp, Settings: map[string]any{constants.AgentSettingAllowSandboxExec: false}},
+		User:    &models.User{},
+		Deps:    deps,
+	}
+
+	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"npm run build"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !isErr {
+		t.Fatalf("expected tool error, got success: %s", result)
+	}
+	if called {
+		t.Fatal("sandbox control should not be called when sandbox exec is disabled")
+	}
+	if !strings.Contains(result, constants.AgentSettingAllowSandboxExec) {
+		t.Fatalf("expected kill-switch guidance, got: %s", result)
+	}
+}
+
+func TestSandboxExecToolRejectsChainedAndShellWrappedMutations(t *testing.T) {
+	rc := &RunContext{Project: &models.AppProject{ProjectType: models.ProjectTypeApp}, User: &models.User{}, Deps: &RunDependencies{
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			t.Fatalf("sandbox control should not be called for %q", req.Command)
+			return nil, nil
+		},
+	}}
+
+	for _, input := range []string{
+		`{"command":"npm test; rm -rf src","cwd":"project"}`,
+		`{"command":"npm test && touch src/x","cwd":"project"}`,
+		`{"command":"CI=1 sh -c 'touch src/x'","cwd":"project"}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			result, isErr, err := (SandboxExecTool{}).Execute(context.Background(), rc, json.RawMessage(input))
+			if err != nil {
+				t.Fatalf("Execute returned error: %v", err)
+			}
+			if !isErr {
+				t.Fatalf("expected tool error, got success: %s", result)
+			}
+			if !strings.Contains(result, "Git-backed file tools") {
+				t.Fatalf("expected file tool guidance, got: %s", result)
+			}
+		})
 	}
 }
 

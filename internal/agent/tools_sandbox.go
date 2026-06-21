@@ -8,14 +8,17 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 )
 
-func registerSandboxTools(r *Registry, deps *RunDependencies) {
+func registerSandboxTools(r *Registry, deps *RunDependencies, project *models.AppProject) {
 	r.Register(PreviewStatusTool{Deps: deps})
 	r.Register(PreviewLogsTool{Deps: deps})
-	r.Register(SandboxExecTool{Deps: deps})
+	if sandboxExecAllowed(project) {
+		r.Register(SandboxExecTool{Deps: deps})
+	}
 }
 
 func sandboxControl(ctx context.Context, rc *RunContext, req SandboxControlRequest) (map[string]any, bool, error) {
@@ -130,6 +133,9 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 	if rc != nil {
 		project = rc.Project
 	}
+	if !sandboxExecAllowed(project) {
+		return fmt.Sprintf("sandbox_exec is disabled by project setting %q", constants.AgentSettingAllowSandboxExec), true, nil
+	}
 	cwd, msg := normalizeSandboxExecCwd(project, args.Cwd)
 	if msg != "" {
 		return msg, true, nil
@@ -161,11 +167,18 @@ func validateSandboxExecCommand(command string) string {
 	if strings.ContainsAny(command, "\r\n") {
 		return "sandbox_exec accepts one finite command per call; do not pass multi-line shell scripts"
 	}
+	if containsShellControl(lower) {
+		return "sandbox_exec must not use shell chaining, pipes, command substitution, or background operators; use one finite command and Git-backed file tools for source changes"
+	}
 	if strings.Contains(command, ">") || strings.Contains(command, "<") {
 		return "sandbox_exec must not use shell redirection to create or change files; use Git-backed file tools for source files and write artifacts under /workspace/artifacts with command flags such as -o"
 	}
 	fields := strings.Fields(lower)
 	if len(fields) == 0 {
+		return "command is required"
+	}
+	firstCommand := firstNonEnvAssignmentField(fields)
+	if firstCommand == "" {
 		return "command is required"
 	}
 	blockedFirstWords := map[string]string{
@@ -181,7 +194,7 @@ func validateSandboxExecCommand(command string) string {
 		"sh":       "wrap commands in a shell",
 		"zsh":      "wrap commands in a shell",
 	}
-	if reason, ok := blockedFirstWords[fields[0]]; ok {
+	if reason, ok := blockedFirstWords[firstCommand]; ok {
 		return fmt.Sprintf("sandbox_exec must not %s; use the Git-backed file tools for source changes and call finite commands directly", reason)
 	}
 	if strings.Contains(lower, " sed -i") || strings.HasPrefix(lower, "sed -i") ||
@@ -189,6 +202,55 @@ func validateSandboxExecCommand(command string) string {
 		return "sandbox_exec must not mutate files in place; use the Git-backed file tools for source changes"
 	}
 	return ""
+}
+
+func sandboxExecAllowed(project *models.AppProject) bool {
+	if project == nil || project.Settings == nil {
+		return true
+	}
+	if allowed, ok := project.Settings[constants.AgentSettingAllowSandboxExec].(bool); ok {
+		return allowed
+	}
+	return true
+}
+
+func containsShellControl(command string) bool {
+	for _, token := range []string{";", "&&", "||", "|", "`", "$("} {
+		if strings.Contains(command, token) {
+			return true
+		}
+	}
+	return false
+}
+
+func firstNonEnvAssignmentField(fields []string) string {
+	for _, field := range fields {
+		if isShellEnvAssignment(field) {
+			continue
+		}
+		return field
+	}
+	return ""
+}
+
+func isShellEnvAssignment(field string) bool {
+	idx := strings.IndexByte(field, '=')
+	if idx <= 0 {
+		return false
+	}
+	key := field[:idx]
+	for i, r := range key {
+		if i == 0 {
+			if r != '_' && (r < 'a' || r > 'z') {
+				return false
+			}
+			continue
+		}
+		if r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeSandboxExecCwd(project *models.AppProject, cwd string) (string, string) {

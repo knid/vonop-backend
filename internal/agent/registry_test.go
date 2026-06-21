@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 )
 
@@ -89,6 +90,24 @@ func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 		if names[name] {
 			t.Fatalf("%s must not be exposed", name)
 		}
+	}
+}
+
+func TestBuildRegistryFor_OmitsSandboxExecWhenDisabled(t *testing.T) {
+	registry := BuildRegistryFor(&models.AppProject{
+		ProjectType: models.ProjectTypeApp,
+		Settings:    map[string]any{constants.AgentSettingAllowSandboxExec: false},
+	}, &RunDependencies{}, "")
+
+	names := map[string]bool{}
+	for _, name := range registry.Names() {
+		names[name] = true
+	}
+	if names["sandbox_exec"] {
+		t.Fatal("sandbox_exec must not be exposed when agent_allow_sandbox_exec=false")
+	}
+	if !names["preview_status"] || !names["preview_logs"] {
+		t.Fatalf("preview tools should remain exposed, names=%v", registry.Names())
 	}
 }
 
