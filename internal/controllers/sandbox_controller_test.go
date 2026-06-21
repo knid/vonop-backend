@@ -75,6 +75,30 @@ func TestSandboxExecOutputMarksInfrastructureError(t *testing.T) {
 	}
 }
 
+func TestAdoptLatestSandboxIDCopiesPersistedIDWhenCurrentProjectIsStale(t *testing.T) {
+	project := &models.AppProject{ID: uuid.New()}
+	latest := &models.AppProject{ID: project.ID, SandboxID: "daytona-live"}
+
+	if !adoptLatestSandboxID(project, latest) {
+		t.Fatalf("expected sandbox id to be adopted")
+	}
+	if project.SandboxID != "daytona-live" {
+		t.Fatalf("sandbox id = %q", project.SandboxID)
+	}
+}
+
+func TestAdoptLatestSandboxIDDoesNotOverwriteExistingID(t *testing.T) {
+	project := &models.AppProject{ID: uuid.New(), SandboxID: "daytona-current"}
+	latest := &models.AppProject{ID: project.ID, SandboxID: "daytona-new"}
+
+	if adoptLatestSandboxID(project, latest) {
+		t.Fatalf("did not expect sandbox id to be adopted")
+	}
+	if project.SandboxID != "daytona-current" {
+		t.Fatalf("sandbox id = %q", project.SandboxID)
+	}
+}
+
 func containsAll(s string, wants []string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {

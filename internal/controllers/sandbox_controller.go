@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/sandbox"
 )
@@ -103,6 +104,7 @@ func (c *Controller) SyncSandbox(ctx context.Context, project *models.AppProject
 	if c.SandboxManager == nil {
 		return fmt.Errorf("sandbox manager is not configured")
 	}
+	c.refreshSandboxID(ctx, project)
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
 		return err
@@ -117,6 +119,7 @@ func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppPr
 	if len(paths) == 0 {
 		return nil
 	}
+	c.refreshSandboxID(ctx, project)
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
 		return err
@@ -143,6 +146,25 @@ func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.A
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
 	return c.SandboxManager.Sync(ctx, project, files, envVars)
+}
+
+func (c *Controller) refreshSandboxID(_ context.Context, project *models.AppProject) {
+	if c == nil || c.DB == nil || project == nil || project.SandboxID != "" || project.ID == uuid.Nil {
+		return
+	}
+	latest, err := c.DB.GetAppProjectByID(project.ID.String())
+	if err != nil || latest == nil || latest.SandboxID == "" {
+		return
+	}
+	adoptLatestSandboxID(project, latest)
+}
+
+func adoptLatestSandboxID(project, latest *models.AppProject) bool {
+	if project == nil || latest == nil || project.SandboxID != "" || latest.SandboxID == "" {
+		return false
+	}
+	project.SandboxID = latest.SandboxID
+	return true
 }
 
 func (c *Controller) OpenSandboxRoute(ctx context.Context, project *models.AppProject, route, setBy string) (*sandbox.PreviewTarget, error) {
