@@ -93,7 +93,7 @@ func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 	}
 }
 
-func TestBuildRegistryFor_OmitsSandboxExecWhenDisabled(t *testing.T) {
+func TestBuildRegistryFor_ExposesSandboxExecForAllProjects(t *testing.T) {
 	registry := BuildRegistryFor(&models.AppProject{
 		ProjectType: models.ProjectTypeApp,
 		Settings:    map[string]any{constants.AgentSettingAllowSandboxExec: false},
@@ -103,8 +103,8 @@ func TestBuildRegistryFor_OmitsSandboxExecWhenDisabled(t *testing.T) {
 	for _, name := range registry.Names() {
 		names[name] = true
 	}
-	if names["sandbox_exec"] {
-		t.Fatal("sandbox_exec must not be exposed when agent_allow_sandbox_exec=false")
+	if !names["sandbox_exec"] {
+		t.Fatal("sandbox_exec must be exposed for every project")
 	}
 	if !names["preview_status"] || !names["preview_logs"] {
 		t.Fatalf("preview tools should remain exposed, names=%v", registry.Names())

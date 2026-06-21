@@ -115,12 +115,12 @@ func TestSandboxExecToolRejectsSourceMutationCommands(t *testing.T) {
 	}
 }
 
-func TestSandboxExecToolHonorsProjectKillSwitch(t *testing.T) {
+func TestSandboxExecToolIgnoresLegacyKillSwitch(t *testing.T) {
 	called := false
 	deps := &RunDependencies{
 		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
 			called = true
-			return nil, nil
+			return map[string]any{"stdout": "ok", "exit_code": 0}, nil
 		},
 	}
 	rc := &RunContext{
@@ -133,14 +133,14 @@ func TestSandboxExecToolHonorsProjectKillSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute returned error: %v", err)
 	}
-	if !isErr {
-		t.Fatalf("expected tool error, got success: %s", result)
+	if isErr {
+		t.Fatalf("Execute returned isErr=true: %s", result)
 	}
-	if called {
-		t.Fatal("sandbox control should not be called when sandbox exec is disabled")
+	if !called {
+		t.Fatal("sandbox control should be called because sandbox_exec is available for every project")
 	}
-	if !strings.Contains(result, constants.AgentSettingAllowSandboxExec) {
-		t.Fatalf("expected kill-switch guidance, got: %s", result)
+	if !strings.Contains(result, "ok") {
+		t.Fatalf("expected sandbox output, got: %s", result)
 	}
 }
 

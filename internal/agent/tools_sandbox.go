@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 )
@@ -16,9 +15,7 @@ import (
 func registerSandboxTools(r *Registry, deps *RunDependencies, project *models.AppProject) {
 	r.Register(PreviewStatusTool{Deps: deps})
 	r.Register(PreviewLogsTool{Deps: deps})
-	if sandboxExecAllowed(project) {
-		r.Register(SandboxExecTool{Deps: deps})
-	}
+	r.Register(SandboxExecTool{Deps: deps})
 }
 
 func sandboxControl(ctx context.Context, rc *RunContext, req SandboxControlRequest) (map[string]any, bool, error) {
@@ -133,9 +130,6 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 	if rc != nil {
 		project = rc.Project
 	}
-	if !sandboxExecAllowed(project) {
-		return fmt.Sprintf("sandbox_exec is disabled by project setting %q", constants.AgentSettingAllowSandboxExec), true, nil
-	}
 	cwd, msg := normalizeSandboxExecCwd(project, args.Cwd)
 	if msg != "" {
 		return msg, true, nil
@@ -202,16 +196,6 @@ func validateSandboxExecCommand(command string) string {
 		return "sandbox_exec must not mutate files in place; use the Git-backed file tools for source changes"
 	}
 	return ""
-}
-
-func sandboxExecAllowed(project *models.AppProject) bool {
-	if project == nil || project.Settings == nil {
-		return true
-	}
-	if allowed, ok := project.Settings[constants.AgentSettingAllowSandboxExec].(bool); ok {
-		return allowed
-	}
-	return true
 }
 
 func containsShellControl(command string) bool {
