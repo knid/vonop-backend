@@ -21,7 +21,8 @@ Do not create DESIGN.md with write_files unless create_design is unavailable.
 Plan the file set before writing. Batch many small files in each write_files call,
 up to the tool limit. Do not write one file per round. Keep each
 individual file reasonably small; split large components into smaller files,
-but still batch those files together.
+but still batch those new files together. Wire new files into existing
+entrypoints with multi_edit instead of rewriting the whole existing file.
 
 Existing starter files such as frontend/src/App.tsx, frontend/src/index.css,
 frontend/index.html, frontend/src/main.tsx, and frontend/src/lib/api.ts may

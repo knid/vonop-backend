@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/knid/wemob/internal/models"
 )
@@ -107,6 +108,83 @@ func SkillAllowedToolsGuardrail(rc *RunContext, toolName string, input json.RawM
 		return AllowTool()
 	}
 	return BlockTool(fmt.Sprintf("tool %q is not allowed by the active skill tool allowlist", toolName))
+}
+
+func PackageScriptToolGuardrail(rc *RunContext, toolName string, input json.RawMessage) ToolGuardrailDecision {
+	switch toolName {
+	case "write_files", "edit_file", "multi_edit":
+	default:
+		return AllowTool()
+	}
+	if removesPackageBuildTypecheck(rc, input) {
+		return BlockTool("Do not change package.json scripts to work around sandbox/build visibility errors. Verify Git-backed files are synced to the sandbox first, then rerun or restart the preview. package.json scripts must keep existing typecheck/build verification unless the user explicitly asks to change them.")
+	}
+	return AllowTool()
+}
+
+func removesPackageBuildTypecheck(rc *RunContext, input json.RawMessage) bool {
+	var payload any
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return false
+	}
+	return packageScriptMutationDropsTypecheck(rc, payload, "")
+}
+
+func packageScriptMutationDropsTypecheck(rc *RunContext, value any, inheritedPath string) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		path := inheritedPath
+		if p, ok := v["path"].(string); ok {
+			path = p
+		}
+		if packageJSONPath(path) {
+			if oldString, _ := v["old_string"].(string); oldString != "" {
+				newString, _ := v["new_string"].(string)
+				if dropsTypecheck(oldString, newString) {
+					return true
+				}
+			}
+			if content, _ := v["content"].(string); content != "" {
+				if existingPackageBuildHadTypecheck(rc, path) && strings.Contains(content, `"scripts"`) && strings.Contains(content, `"build"`) && !strings.Contains(content, "tsc --noEmit") {
+					return true
+				}
+			}
+		}
+		for key, child := range v {
+			if key == "path" {
+				continue
+			}
+			if packageScriptMutationDropsTypecheck(rc, child, path) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if packageScriptMutationDropsTypecheck(rc, child, inheritedPath) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func packageJSONPath(path string) bool {
+	lower := strings.ToLower(strings.TrimSpace(path))
+	return lower == "package.json" || strings.HasSuffix(lower, "/package.json")
+}
+
+func existingPackageBuildHadTypecheck(rc *RunContext, path string) bool {
+	if rc == nil || rc.FileMap == nil {
+		return false
+	}
+	existing, ok := rc.FileMap.Get(path)
+	return ok && strings.Contains(existing, `"build"`) && strings.Contains(existing, "tsc --noEmit")
+}
+
+func dropsTypecheck(oldString, newString string) bool {
+	return strings.Contains(oldString, "tsc --noEmit") &&
+		!strings.Contains(newString, "tsc --noEmit") &&
+		(strings.Contains(oldString, `"build"`) || strings.Contains(newString, `"build"`))
 }
 
 func ValidateAgentOutput(profile *AgentProfile, fileMap *SafeFileMap, state *BuildState, prompt string, isFirstGen bool, project *models.AppProject, skills []SkillFile) error {
