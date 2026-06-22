@@ -23,7 +23,7 @@ const (
 	defaultMemory      = 1
 	defaultDisk        = 3
 	defaultAutoStop    = 60
-	defaultAutoDelete  = -1
+	defaultAutoDelete  = 10
 	defaultExecTimeout = 30 * time.Second
 	startWaitTimeout   = 45 * time.Second
 	startPollInterval  = 750 * time.Millisecond

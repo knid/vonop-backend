@@ -216,8 +216,8 @@ func TestCreateUsesDefaultMachineResources(t *testing.T) {
 	if params.AutoStopInterval == nil || *params.AutoStopInterval != 60 {
 		t.Fatalf("AutoStopInterval = %#v, want 60", params.AutoStopInterval)
 	}
-	if params.AutoDeleteInterval == nil || *params.AutoDeleteInterval != -1 {
-		t.Fatalf("AutoDeleteInterval = %#v, want -1", params.AutoDeleteInterval)
+	if params.AutoDeleteInterval == nil || *params.AutoDeleteInterval != 10 {
+		t.Fatalf("AutoDeleteInterval = %#v, want 10", params.AutoDeleteInterval)
 	}
 }
 
