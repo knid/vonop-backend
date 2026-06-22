@@ -12,6 +12,7 @@ import (
 	"time"
 
 	daytonasdk "github.com/daytonaio/daytona/libs/sdk-go/pkg/daytona"
+	sdkerrors "github.com/daytonaio/daytona/libs/sdk-go/pkg/errors"
 	sdkoptions "github.com/daytonaio/daytona/libs/sdk-go/pkg/options"
 	sdktypes "github.com/daytonaio/daytona/libs/sdk-go/pkg/types"
 	"github.com/knid/wemob/internal/services/sandbox"
@@ -622,6 +623,9 @@ func (p *Provider) get(ctx context.Context, sandboxID string) (sandboxHandle, er
 	}
 	sb, err := p.client.Get(ctx, sandboxID)
 	if err != nil {
+		if isDaytonaNotFound(err) {
+			return nil, fmt.Errorf("get daytona sandbox %s: %w", sandboxID, sandbox.ErrSandboxMissing)
+		}
 		return nil, fmt.Errorf("get daytona sandbox %s: %w", sandboxID, err)
 	}
 	if sb == nil {
@@ -687,6 +691,11 @@ func isStateChangeInProgress(err error) bool {
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "conflict") &&
 		strings.Contains(msg, "state change in progress")
+}
+
+func isDaytonaNotFound(err error) bool {
+	var notFound *sdkerrors.DaytonaNotFoundError
+	return errors.As(err, &notFound)
 }
 
 func (p *Provider) waitUntilStarted(ctx context.Context, sandboxID string) error {

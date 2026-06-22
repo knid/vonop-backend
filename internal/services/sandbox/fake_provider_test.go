@@ -10,9 +10,11 @@ type fakeProvider struct {
 	createErr        error
 	statusState      State
 	statusLastError  string
+	statusErr        error
 	files            []FileDelta
 	startCalls       int
 	startErr         error
+	startErrs        []error
 	writeErr         error
 	executed         []string
 	executeCwds      []string
@@ -39,6 +41,9 @@ func (f *fakeProvider) Create(ctx context.Context, plan RuntimePlan) (string, er
 }
 
 func (f *fakeProvider) GetStatus(ctx context.Context, sandboxID string, plan RuntimePlan) (*Status, error) {
+	if f.statusErr != nil {
+		return nil, f.statusErr
+	}
 	state := f.statusState
 	if state == "" {
 		state = StateReady
@@ -48,6 +53,11 @@ func (f *fakeProvider) GetStatus(ctx context.Context, sandboxID string, plan Run
 
 func (f *fakeProvider) Start(ctx context.Context, sandboxID string) error {
 	f.startCalls++
+	if len(f.startErrs) > 0 {
+		err := f.startErrs[0]
+		f.startErrs = f.startErrs[1:]
+		return err
+	}
 	return f.startErr
 }
 

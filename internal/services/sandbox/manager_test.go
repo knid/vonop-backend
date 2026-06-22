@@ -42,6 +42,48 @@ func TestManagerStartCreatesSyncsAndStartsProcesses(t *testing.T) {
 	}
 }
 
+func TestManagerStartRecreatesStoredSandboxWhenProviderReportsMissing(t *testing.T) {
+	fp := newFakeProvider()
+	fp.sandboxID = "daytona-recreated"
+	fp.startErrs = []error{ErrSandboxMissing}
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-stale"
+
+	status, err := m.Start(context.Background(), project, map[string]string{"package.json": "{}"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SandboxID != "daytona-recreated" {
+		t.Fatalf("status sandbox id = %q", status.SandboxID)
+	}
+	if project.SandboxID != "daytona-recreated" {
+		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	}
+	if fp.startCalls != 2 {
+		t.Fatalf("start calls = %d, want 2", fp.startCalls)
+	}
+}
+
+func TestManagerPreviewStatusTreatsStoredMissingSandboxAsMissing(t *testing.T) {
+	fp := newFakeProvider()
+	fp.statusErr = ErrSandboxMissing
+	m := NewManager(fp)
+	project := managerProject()
+	project.SandboxID = "daytona-stale"
+
+	status, err := m.PreviewStatus(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != PreviewMissing {
+		t.Fatalf("preview state = %q, want %q", status.State, PreviewMissing)
+	}
+	if project.SandboxID != "" {
+		t.Fatalf("project sandbox id = %q, want cleared", project.SandboxID)
+	}
+}
+
 func TestManagerStartPropagatesEnvToProcesses(t *testing.T) {
 	fp := newFakeProvider()
 	m := NewManager(fp)

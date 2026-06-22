@@ -67,7 +67,20 @@ func (m *Manager) Start(ctx context.Context, project *models.AppProject, files m
 		}
 	}
 	if err := provider.Start(ctx, sandboxID); err != nil {
-		return nil, fmt.Errorf("start sandbox: %w", err)
+		if !errors.Is(err, ErrSandboxMissing) {
+			return nil, fmt.Errorf("start sandbox: %w", err)
+		}
+		sandboxID, err = provider.Create(ctx, plan)
+		if err != nil {
+			return nil, fmt.Errorf("create replacement sandbox: %w", err)
+		}
+		if sandboxID == "" {
+			return nil, errors.New("create replacement sandbox: empty sandbox id")
+		}
+		newSandbox = true
+		if err := provider.Start(ctx, sandboxID); err != nil {
+			return nil, fmt.Errorf("start replacement sandbox: %w", err)
+		}
 	}
 	if err := m.syncFiles(ctx, sandboxID, plan, files); err != nil {
 		return nil, err
@@ -112,7 +125,20 @@ func (m *Manager) EnsurePreview(ctx context.Context, project *models.AppProject,
 		project.SandboxID = sandboxID
 	}
 	if err := provider.Start(ctx, sandboxID); err != nil {
-		return nil, fmt.Errorf("start sandbox: %w", err)
+		if !errors.Is(err, ErrSandboxMissing) {
+			return nil, fmt.Errorf("start sandbox: %w", err)
+		}
+		sandboxID, err = provider.Create(ctx, plan)
+		if err != nil {
+			return nil, fmt.Errorf("create replacement sandbox: %w", err)
+		}
+		if sandboxID == "" {
+			return nil, errors.New("create replacement sandbox: empty sandbox id")
+		}
+		project.SandboxID = sandboxID
+		if err := provider.Start(ctx, sandboxID); err != nil {
+			return nil, fmt.Errorf("start replacement sandbox: %w", err)
+		}
 	}
 	files = withManagedPreviewFiles(plan, files)
 	copied := make(map[string]string, len(files)+1)
@@ -151,8 +177,10 @@ func (m *Manager) PreviewStatus(ctx context.Context, project *models.AppProject)
 	switch st.State {
 	case StateReady, StateDegraded:
 		state = PreviewReady
-	case StateStopped, StateArchived, StateMissing:
+	case StateStopped, StateArchived:
 		state = PreviewStopped
+	case StateMissing:
+		state = PreviewMissing
 	case StateError:
 		state = PreviewError
 		msg = st.LastError
@@ -411,6 +439,10 @@ func (m *Manager) Status(ctx context.Context, project *models.AppProject) (*Stat
 	plan := BuildRuntimePlan(project)
 	st, err := provider.GetStatus(ctx, project.SandboxID, plan)
 	if err != nil {
+		if errors.Is(err, ErrSandboxMissing) {
+			project.SandboxID = ""
+			return &Status{Provider: ProviderDaytona, State: StateMissing}, nil
+		}
 		return nil, err
 	}
 	if st == nil {
