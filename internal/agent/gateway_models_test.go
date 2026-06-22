@@ -1,8 +1,11 @@
 package agent
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/knid/wemob/internal/constants"
 )
 
 func TestGatewayAllowedModelsByTypeCanonicalizesAliases(t *testing.T) {
@@ -40,5 +43,25 @@ func TestRenderGatewayImageModelsBlock(t *testing.T) {
 	got := renderGatewayImageModelsBlock(gatewayAllowedImageModels(deps))
 	if !strings.Contains(got, "fal-ai/nano-banana-2") || !strings.Contains(got, "(default)") {
 		t.Fatalf("image model block missing expected content: %q", got)
+	}
+}
+
+func TestGatewayCatalogIncludesRequestedBuilderModels(t *testing.T) {
+	glm := constants.GatewayChatModelByID("z-ai/glm-5.2")
+	if glm == nil {
+		t.Fatal("expected z-ai/glm-5.2 in chat catalog")
+	}
+	if slices.Contains(glm.Capabilities, "vision") {
+		t.Fatalf("z-ai/glm-5.2 should be text-only, got capabilities %#v", glm.Capabilities)
+	}
+
+	for _, id := range []string{"moonshotai/kimi-k2.7-code", "kimi-k2.6"} {
+		model := constants.GatewayChatModelByID(id)
+		if model == nil {
+			t.Fatalf("expected %s in chat catalog", id)
+		}
+		if !slices.Contains(model.Capabilities, "vision") {
+			t.Fatalf("%s should support vision, got capabilities %#v", id, model.Capabilities)
+		}
 	}
 }
