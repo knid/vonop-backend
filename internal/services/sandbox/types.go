@@ -137,14 +137,17 @@ const (
 )
 
 type PreviewStatus struct {
-	AppID     string         `json:"app_id"`
-	SandboxID string         `json:"sandbox_id,omitempty"`
-	State     PreviewState   `json:"state"`
-	URL       string         `json:"url,omitempty"`
-	Ports     map[string]int `json:"ports,omitempty"`
-	LogsTail  string         `json:"logs_tail,omitempty"`
-	Error     string         `json:"error,omitempty"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	AppID           string         `json:"app_id"`
+	SandboxID       string         `json:"sandbox_id,omitempty"`
+	State           PreviewState   `json:"state"`
+	URL             string         `json:"url,omitempty"`
+	Ports           map[string]int `json:"ports,omitempty"`
+	LogsTail        string         `json:"logs_tail,omitempty"`
+	Error           string         `json:"error,omitempty"`
+	SourceRevision  string         `json:"source_revision,omitempty"`
+	SandboxRevision string         `json:"sandbox_revision,omitempty"`
+	SyncStale       bool           `json:"sync_stale,omitempty"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 type PreviewEvent struct {

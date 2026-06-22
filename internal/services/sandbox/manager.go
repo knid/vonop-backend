@@ -18,6 +18,7 @@ import (
 
 const (
 	vitePreviewConfigPath = "frontend/vite.config.preview.ts"
+	SyncRevisionPath      = "tmp/wemob-sync-revision"
 	vitePreviewConfig     = `import { defineConfig, mergeConfig } from "vite";
 import baseConfig from "./vite.config";
 
@@ -234,16 +235,33 @@ func (m *Manager) previewStatus(ctx context.Context, project *models.AppProject,
 		}
 	}
 	logs, _ := m.previewLogs(ctx, project, runtime, "", 80)
+	sandboxRevision := m.readSandboxSyncRevision(ctx, project)
 	return &PreviewStatus{
-		AppID:     project.ID.String(),
-		SandboxID: project.SandboxID,
-		State:     state,
-		URL:       url,
-		Ports:     previewRuntimePorts(runtime),
-		LogsTail:  logs,
-		Error:     msg,
-		UpdatedAt: time.Now().UTC(),
+		AppID:           project.ID.String(),
+		SandboxID:       project.SandboxID,
+		State:           state,
+		URL:             url,
+		Ports:           previewRuntimePorts(runtime),
+		LogsTail:        logs,
+		Error:           msg,
+		SandboxRevision: sandboxRevision,
+		UpdatedAt:       time.Now().UTC(),
 	}, nil
+}
+
+func (m *Manager) readSandboxSyncRevision(ctx context.Context, project *models.AppProject) string {
+	if project == nil || project.SandboxID == "" {
+		return ""
+	}
+	provider, err := m.providerClient()
+	if err != nil {
+		return ""
+	}
+	stdout, _, exitCode, err := provider.Execute(ctx, project.SandboxID, "cat /tmp/wemob-sync-revision", TmpRoot, 5000)
+	if err != nil || exitCode != 0 {
+		return ""
+	}
+	return strings.TrimSpace(stdout)
 }
 
 func (m *Manager) previewLogs(ctx context.Context, project *models.AppProject, runtime PreviewRuntime, target string, lines int) (string, error) {
@@ -463,9 +481,6 @@ func (m *Manager) SyncDeltas(ctx context.Context, project *models.AppProject, de
 	plan := BuildRuntimePlan(project)
 	runtime := BuildPreviewRuntime(project)
 	restartPreview := previewRestartRequired(deltas) && m.hasPreviewSupervisor(ctx, project)
-	if needsVitePreviewProxy(plan) {
-		deltas = append(deltas, FileDelta{Path: vitePreviewConfigPath, Content: vitePreviewConfig})
-	}
 	if restartPreview {
 		deltas = append(deltas, FileDelta{Path: "tmp/wemob-preview.sh", Content: BuildPreviewSupervisorScript(runtime)})
 	}

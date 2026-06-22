@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,6 +24,7 @@ func (c *Controller) EnsurePreview(ctx context.Context, project *models.AppProje
 	}
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
+	addSandboxSyncRevision(files)
 	status, err := c.SandboxManager.EnsurePreview(ctx, project, files, envVars)
 	if err != nil {
 		return nil, err
@@ -36,7 +39,15 @@ func (c *Controller) PreviewStatus(ctx context.Context, project *models.AppProje
 	if c.SandboxManager == nil {
 		return nil, fmt.Errorf("sandbox manager is not configured")
 	}
-	return c.SandboxManager.PreviewStatus(ctx, project)
+	status, err := c.SandboxManager.PreviewStatus(ctx, project)
+	if status != nil {
+		if files, sourceErr := c.sandboxSourceFiles(project); sourceErr == nil {
+			addSandboxEnvFiles(project, files, c.CollectAllEnvVars(project))
+			status.SourceRevision = sandboxSourceRevision(files)
+			status.SyncStale = status.SourceRevision != "" && status.SourceRevision != status.SandboxRevision
+		}
+	}
+	return status, err
 }
 
 func (c *Controller) RestartPreview(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {
@@ -49,6 +60,7 @@ func (c *Controller) RestartPreview(ctx context.Context, project *models.AppProj
 	}
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
+	addSandboxSyncRevision(files)
 	status, err := c.SandboxManager.RestartPreview(ctx, project, files, envVars)
 	if err != nil {
 		return nil, err
@@ -90,6 +102,7 @@ func (c *Controller) startSandboxWithFiles(ctx context.Context, project *models.
 	}
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
+	addSandboxSyncRevision(files)
 	status, err := c.SandboxManager.Start(ctx, project, files, envVars)
 	if err != nil {
 		return nil, err
@@ -105,6 +118,9 @@ func (c *Controller) SyncSandbox(ctx context.Context, project *models.AppProject
 		return fmt.Errorf("sandbox manager is not configured")
 	}
 	c.refreshSandboxID(ctx, project)
+	if project == nil || project.SandboxID == "" {
+		return nil
+	}
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
 		return err
@@ -120,10 +136,16 @@ func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppPr
 		return nil
 	}
 	c.refreshSandboxID(ctx, project)
+	if project == nil || project.SandboxID == "" {
+		return nil
+	}
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
 		return err
 	}
+	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
+	sourceRevision := sandboxSourceRevision(files)
 	deltas := make([]sandbox.FileDelta, 0, len(paths))
 	for _, p := range normalizeSandboxChangedPaths(project, paths) {
 		if content, ok := files[p]; ok {
@@ -135,8 +157,39 @@ func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppPr
 	if len(deltas) == 0 {
 		return nil
 	}
-	envVars := c.CollectAllEnvVars(project)
+	deltas = append(deltas, sandbox.FileDelta{Path: sandbox.SyncRevisionPath, Content: sourceRevision})
 	return c.SandboxManager.SyncDeltas(ctx, project, deltas, envVars)
+}
+
+func (c *Controller) SyncSandboxDeltas(ctx context.Context, project *models.AppProject, deltas []sandbox.FileDelta) error {
+	if c.SandboxManager == nil {
+		return fmt.Errorf("sandbox manager is not configured")
+	}
+	if len(deltas) == 0 {
+		return nil
+	}
+	c.refreshSandboxID(ctx, project)
+	files, err := c.sandboxSourceFiles(project)
+	if err != nil {
+		return err
+	}
+	envVars := c.CollectAllEnvVars(project)
+	addSandboxEnvFiles(project, files, envVars)
+	sourceRevision := sandboxSourceRevision(files)
+	normalized := make([]sandbox.FileDelta, 0, len(deltas)+1)
+	for _, delta := range deltas {
+		paths := normalizeSandboxChangedPaths(project, []string{delta.Path})
+		if len(paths) == 0 {
+			continue
+		}
+		delta.Path = paths[0]
+		normalized = append(normalized, delta)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	normalized = append(normalized, sandbox.FileDelta{Path: sandbox.SyncRevisionPath, Content: sourceRevision})
+	return c.SandboxManager.SyncDeltas(ctx, project, normalized, envVars)
 }
 
 func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.AppProject, files map[string]string) error {
@@ -145,6 +198,7 @@ func (c *Controller) syncSandboxWithFiles(ctx context.Context, project *models.A
 	}
 	envVars := c.CollectAllEnvVars(project)
 	addSandboxEnvFiles(project, files, envVars)
+	addSandboxSyncRevision(files)
 	return c.SandboxManager.Sync(ctx, project, files, envVars)
 }
 
@@ -219,6 +273,35 @@ func addSandboxEnvFiles(project *models.AppProject, files map[string]string, env
 	for _, path := range sandboxEnvFilePaths(project) {
 		files[path] = dotEnv
 	}
+}
+
+func addSandboxSyncRevision(files map[string]string) {
+	if files == nil {
+		return
+	}
+	files[sandbox.SyncRevisionPath] = sandboxSourceRevision(files)
+}
+
+func sandboxSourceRevision(files map[string]string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		if p == sandbox.SyncRevisionPath {
+			continue
+		}
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	h := sha256.New()
+	for _, p := range paths {
+		h.Write([]byte(p))
+		h.Write([]byte{0})
+		h.Write([]byte(files[p]))
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func sandboxEnvFilePaths(project *models.AppProject) []string {

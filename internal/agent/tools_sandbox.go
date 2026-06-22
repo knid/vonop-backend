@@ -148,17 +148,38 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 }
 
 func syncChangedFilesBeforeSandboxExec(ctx context.Context, rc *RunContext) string {
-	if rc == nil || rc.Deps == nil || rc.Deps.SyncSandboxFiles == nil || rc.Project == nil || rc.BuildState == nil {
+	if rc == nil || rc.Deps == nil || rc.Project == nil || rc.BuildState == nil {
 		return ""
 	}
 	paths := rc.BuildState.ChangedPaths()
 	if len(paths) == 0 {
 		return ""
 	}
+	if rc.Deps.SyncSandboxDeltas != nil && rc.FileMap != nil {
+		if err := rc.Deps.SyncSandboxDeltas(ctx, rc.Project, sandboxDeltasFromFileMap(rc.FileMap, paths)); err != nil {
+			return fmt.Sprintf("sandbox sync failed before exec: %v. Do not change source or package scripts to work around this; retry preview sync/restart first.", err)
+		}
+		return ""
+	}
+	if rc.Deps.SyncSandboxFiles == nil {
+		return ""
+	}
 	if err := rc.Deps.SyncSandboxFiles(ctx, rc.Project, paths); err != nil {
 		return fmt.Sprintf("sandbox sync failed before exec: %v. Do not change source or package scripts to work around this; retry preview sync/restart first.", err)
 	}
 	return ""
+}
+
+func sandboxDeltasFromFileMap(fileMap *SafeFileMap, paths []string) []sandboxService.FileDelta {
+	deltas := make([]sandboxService.FileDelta, 0, len(paths))
+	for _, p := range paths {
+		if content, ok := fileMap.Get(p); ok {
+			deltas = append(deltas, sandboxService.FileDelta{Path: p, Content: content})
+			continue
+		}
+		deltas = append(deltas, sandboxService.FileDelta{Path: p, Delete: true})
+	}
+	return deltas
 }
 
 func sandboxToolNames() []string {

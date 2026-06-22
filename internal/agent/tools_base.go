@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 	"github.com/knid/wemob/internal/utils"
 )
 
@@ -395,6 +396,12 @@ func (DeleteFileTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 	if rc.BuildState != nil {
 		rc.BuildState.RecordFileDelete(path)
 	}
+	if msg := persistWorktreeSnapshot(ctx, rc); msg != "" {
+		return msg, true, nil
+	}
+	if msg := syncSandboxFileDeltas(ctx, rc, []sandboxService.FileDelta{{Path: path, Delete: true}}); msg != "" {
+		return msg, true, nil
+	}
 	rc.Emitter.Emit(EventFileDeleted, FileDeletedEvent{RunID: rc.RunID, Path: path})
 	return fmt.Sprintf("deleted %s", path), false, nil
 }
@@ -475,6 +482,10 @@ func commitFileWrite(rc *RunContext, plan fileWritePlan) string {
 			Message:    fmt.Sprintf("%s %s (%d/%d)", plan.Operation, plan.Path, plan.BatchIndex, plan.BatchTotal),
 		})
 	}
+	return fmt.Sprintf("%sd %s (%d bytes)", plan.Operation, plan.Path, len(plan.Content))
+}
+
+func emitFileWritten(rc *RunContext, plan fileWritePlan) {
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:      rc.RunID,
 		Path:       plan.Path,
@@ -485,15 +496,42 @@ func commitFileWrite(rc *RunContext, plan fileWritePlan) string {
 		BatchIndex: plan.BatchIndex,
 		BatchTotal: plan.BatchTotal,
 	})
-	return fmt.Sprintf("%sd %s (%d bytes)", plan.Operation, plan.Path, len(plan.Content))
 }
 
-func writeFileContent(rc *RunContext, rawPath, content string, overwrite bool, reason, batchID string, batchIndex, batchTotal int) (string, bool, error) {
+func writeFileContent(ctx context.Context, rc *RunContext, rawPath, content string, overwrite bool, reason, batchID string, batchIndex, batchTotal int) (string, bool, error) {
 	plan, msg := planFileWrite(rc, rawPath, content, overwrite, reason, batchID, batchIndex, batchTotal)
 	if msg != "" {
 		return msg, true, nil
 	}
-	return commitFileWrite(rc, *plan), false, nil
+	out := commitFileWrite(rc, *plan)
+	if msg := persistWorktreeSnapshot(ctx, rc); msg != "" {
+		return msg, true, nil
+	}
+	if msg := syncSandboxFileDeltas(ctx, rc, []sandboxService.FileDelta{{Path: plan.Path, Content: plan.Content}}); msg != "" {
+		return msg, true, nil
+	}
+	emitFileWritten(rc, *plan)
+	return out, false, nil
+}
+
+func persistWorktreeSnapshot(ctx context.Context, rc *RunContext) string {
+	if rc == nil || rc.Deps == nil || rc.Deps.PersistWorktreeFiles == nil || rc.Project == nil || rc.FileMap == nil {
+		return ""
+	}
+	if err := rc.Deps.PersistWorktreeFiles(ctx, rc.Project, rc.FileMap.Snapshot()); err != nil {
+		return fmt.Sprintf("persist worktree files failed: %v", err)
+	}
+	return ""
+}
+
+func syncSandboxFileDeltas(ctx context.Context, rc *RunContext, deltas []sandboxService.FileDelta) string {
+	if rc == nil || rc.Deps == nil || rc.Deps.SyncSandboxDeltas == nil || rc.Project == nil || len(deltas) == 0 {
+		return ""
+	}
+	if err := rc.Deps.SyncSandboxDeltas(ctx, rc.Project, deltas); err != nil {
+		return fmt.Sprintf("sandbox sync failed: %v", err)
+	}
+	return ""
 }
 
 // ---------- write_files ----------
@@ -589,6 +627,19 @@ func (WriteFilesTool) Execute(ctx context.Context, rc *RunContext, input json.Ra
 		}
 		lines = append(lines, commitFileWrite(rc, plan))
 	}
+	if msg := persistWorktreeSnapshot(ctx, rc); msg != "" {
+		return msg, true, nil
+	}
+	deltas := make([]sandboxService.FileDelta, 0, len(plans))
+	for _, plan := range plans {
+		deltas = append(deltas, sandboxService.FileDelta{Path: plan.Path, Content: plan.Content})
+	}
+	if msg := syncSandboxFileDeltas(ctx, rc, deltas); msg != "" {
+		return msg, true, nil
+	}
+	for _, plan := range plans {
+		emitFileWritten(rc, plan)
+	}
 	summary := fmt.Sprintf("wrote %d %s: created %d, updated %d", len(plans), pluralize("file", len(plans)), created, updated)
 	if len(lines) == 0 {
 		return summary, false, nil
@@ -656,7 +707,7 @@ func (CreateDesignTool) Execute(ctx context.Context, rc *RunContext, input json.
 		return fmt.Sprintf("invalid input: %v", err), true, nil
 	}
 	content := renderDesignBrief(args.Register, args.DesignDirection, args.ColorSystem, args.Typography, args.Layout, args.Components, args.Imagery, args.Accessibility, args.ForbiddenPatterns)
-	return writeFileContent(rc, designFilePath, content, args.Overwrite, args.Reason, "", 0, 0)
+	return writeFileContent(ctx, rc, designFilePath, content, args.Overwrite, args.Reason, "", 0, 0)
 }
 
 func renderDesignBrief(register, direction, colors, typography, layout, components, imagery, accessibility, forbidden string) string {
@@ -753,6 +804,12 @@ func (EditFileTool) Execute(ctx context.Context, rc *RunContext, input json.RawM
 	rc.MarkFileRead(path, newContent)
 	if rc.BuildState != nil {
 		rc.BuildState.RecordFileWrite(path, "update")
+	}
+	if msg := persistWorktreeSnapshot(ctx, rc); msg != "" {
+		return structuredEditError(path, "persist_failed", msg, "read_file_range", ""), true, nil
+	}
+	if msg := syncSandboxFileDeltas(ctx, rc, []sandboxService.FileDelta{{Path: path, Content: newContent}}); msg != "" {
+		return structuredEditError(path, "sandbox_sync_failed", msg, "read_file_range", ""), true, nil
 	}
 	rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 		RunID:     rc.RunID,
@@ -1213,6 +1270,18 @@ func (MultiEditTool) Execute(ctx context.Context, rc *RunContext, input json.Raw
 		if rc.BuildState != nil {
 			rc.BuildState.RecordFileWrite(p.path, "update")
 		}
+	}
+	if msg := persistWorktreeSnapshot(ctx, rc); msg != "" {
+		return structuredEditError("", "persist_failed", msg, "read_file_range", ""), true, nil
+	}
+	deltas := make([]sandboxService.FileDelta, 0, len(prepared))
+	for _, p := range prepared {
+		deltas = append(deltas, sandboxService.FileDelta{Path: p.path, Content: p.nextContent})
+	}
+	if msg := syncSandboxFileDeltas(ctx, rc, deltas); msg != "" {
+		return structuredEditError("", "sandbox_sync_failed", msg, "read_file_range", ""), true, nil
+	}
+	for _, p := range prepared {
 		rc.Emitter.Emit(EventFileWritten, FileWrittenEvent{
 			RunID:     rc.RunID,
 			Path:      p.path,

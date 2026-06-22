@@ -187,13 +187,13 @@ func TestWriteFilesTool_EmitsBatchMetadata(t *testing.T) {
 	if len(emitter.events) != 4 {
 		t.Fatalf("expected 2 tool_progress and 2 file_written events, got %d", len(emitter.events))
 	}
-	if emitter.events[0].Type != EventToolProgress || emitter.events[1].Type != EventFileWritten ||
-		emitter.events[2].Type != EventToolProgress || emitter.events[3].Type != EventFileWritten {
+	if emitter.events[0].Type != EventToolProgress || emitter.events[1].Type != EventToolProgress ||
+		emitter.events[2].Type != EventFileWritten || emitter.events[3].Type != EventFileWritten {
 		t.Fatalf("unexpected event order: %#v", emitter.events)
 	}
 	firstProgress := emitter.events[0].Data.(ToolProgressEvent)
-	secondProgress := emitter.events[2].Data.(ToolProgressEvent)
-	first := emitter.events[1].Data.(FileWrittenEvent)
+	secondProgress := emitter.events[1].Data.(ToolProgressEvent)
+	first := emitter.events[2].Data.(FileWrittenEvent)
 	second := emitter.events[3].Data.(FileWrittenEvent)
 	if first.BatchID == "" || first.BatchID != second.BatchID {
 		t.Fatalf("expected shared batch id, got %q and %q", first.BatchID, second.BatchID)
