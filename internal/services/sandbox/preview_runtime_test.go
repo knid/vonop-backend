@@ -91,6 +91,33 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 	if !strings.HasPrefix(runtime.Processes[1].Command, "export EXPO_GO_MODE=1 && export NODE_OPTIONS=") {
 		t.Fatalf("expo command should export env before starting, got %q", runtime.Processes[1].Command)
 	}
+	for _, process := range runtime.Processes {
+		if strings.Contains(process.Command, "--host 0.0.0.0") {
+			t.Fatalf("expo command uses invalid host mode: %q", process.Command)
+		}
+	}
+}
+
+func TestPreviewSupervisorScriptWaitsForMainProcess(t *testing.T) {
+	project := previewRuntimeProject()
+	project.ProjectType = models.ProjectTypeMobileAppNative
+
+	script := BuildPreviewSupervisorScript(BuildPreviewRuntime(project))
+
+	for _, want := range []string{
+		"main_pid=\"\"",
+		"pid=$!",
+		"main_pid=\"$pid\"",
+		"wait \"$main_pid\"",
+		"main preview process web was not started",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("supervisor script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "wait -n\nexit_code=$?") {
+		t.Fatalf("supervisor script should not unconditionally wait for the first child to exit:\n%s", script)
+	}
 }
 
 func TestPreviewSupervisorScriptContainsSingleSessionProcessControl(t *testing.T) {
@@ -114,6 +141,7 @@ func TestPreviewSupervisorScriptContainsSingleSessionProcessControl(t *testing.T
 		"trap cleanup EXIT",
 		"/workspace/.wemob/logs/web.log",
 		"http://127.0.0.1:3000",
+		"wait \"$main_pid\"",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q:\n%s", want, script)
