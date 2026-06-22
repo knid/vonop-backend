@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
@@ -85,6 +86,22 @@ func TestSkillAllowedToolsGuardrailOptIn(t *testing.T) {
 	}
 	if got := SkillAllowedToolsGuardrail(rc, "write_file", json.RawMessage(`{}`)); got.Allowed {
 		t.Fatal("write_file should be blocked by skill tool allowlist")
+	}
+}
+
+func TestPackageScriptGuardrailBlocksRemovingTypecheckFromBuildScript(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+
+	got := PackageScriptToolGuardrail(rc, "edit_file", json.RawMessage(`{
+		"path": "frontend/package.json",
+		"old_string": "\"build\": \"tsc --noEmit && vite build\"",
+		"new_string": "\"build\": \"vite build\""
+	}`))
+	if got.Allowed {
+		t.Fatal("expected package script guardrail to block removing typecheck from build script")
+	}
+	if !strings.Contains(got.Message, "sandbox") || !strings.Contains(got.Message, "package.json scripts") {
+		t.Fatalf("expected sandbox/package guidance, got: %s", got.Message)
 	}
 }
 

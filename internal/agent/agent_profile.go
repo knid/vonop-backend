@@ -49,7 +49,7 @@ var webBuilderProfile = &AgentProfile{
 	DefaultSkillIDs:  []string{"nextjs-app-router", "tailwind-v4", "web-builder-foundation"},
 	HandoffTargets:   []string{"debug-agent", "seo-agent", "store-data-agent", "release-agent"},
 	BuildRegistry:    buildWebBuilderRegistry,
-	ToolGuardrails:   []ToolGuardrail{ReadOnlyToolGuardrail, HumanApprovalToolGuardrail, SkillAllowedToolsGuardrail},
+	ToolGuardrails:   []ToolGuardrail{ReadOnlyToolGuardrail, HumanApprovalToolGuardrail, SkillAllowedToolsGuardrail, PackageScriptToolGuardrail},
 	ValidationPolicy: DefaultValidationPolicy,
 }
 
@@ -63,7 +63,7 @@ var mobileBuilderProfile = &AgentProfile{
 	DefaultSkillIDs:  []string{"expo-router", "mobile-builder-foundation", "nativewind-ui"},
 	HandoffTargets:   []string{"debug-agent", "release-agent"},
 	BuildRegistry:    buildMobileBuilderRegistry,
-	ToolGuardrails:   []ToolGuardrail{ReadOnlyToolGuardrail, HumanApprovalToolGuardrail, SkillAllowedToolsGuardrail},
+	ToolGuardrails:   []ToolGuardrail{ReadOnlyToolGuardrail, HumanApprovalToolGuardrail, SkillAllowedToolsGuardrail, PackageScriptToolGuardrail},
 	ValidationPolicy: DefaultValidationPolicy,
 }
 

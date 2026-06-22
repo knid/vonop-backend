@@ -504,7 +504,7 @@ type WriteFilesTool struct{}
 
 func (WriteFilesTool) Name() string { return "write_files" }
 func (WriteFilesTool) Description() string {
-	return "Create or fully overwrite one or more files in one call. Batch many small new files in one call. Do not write one file per round when several files are known. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for exact-string replacements, including multi-file batches."
+	return "Create or fully overwrite one or more files in one call. Batch many small new files in one call. Do not write one file per round when several files are known. For existing files, prefer multi_edit unless a full rewrite is intentional. For large JSX/TSX surfaces, create smaller component files first, then use multi_edit to wire imports. Existing files require overwrite=true and a reason. Do not use for existing files larger than 30KB; use multi_edit for exact-string replacements, including multi-file batches."
 }
 func (WriteFilesTool) Schema() map[string]any {
 	return map[string]any{

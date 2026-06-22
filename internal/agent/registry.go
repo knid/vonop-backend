@@ -86,6 +86,7 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 	if !ok {
 		return fmt.Sprintf("unknown tool: %s", name), true, nil
 	}
+	input = normalizeToolInput(name, input)
 	if decision := ApplyToolGuardrails(rc, name, input); !decision.Allowed {
 		msg := decision.Message
 		if msg == "" {
@@ -105,6 +106,37 @@ func (r *Registry) Execute(ctx context.Context, rc *RunContext, name string, inp
 		result = "<tool_output tool=\"" + name + "\">" + escapeUntrustedTag(result, "tool_output") + "</tool_output>"
 	}
 	return result, isErr, err
+}
+
+func normalizeToolInput(name string, input json.RawMessage) json.RawMessage {
+	if name != "write_files" && name != "multi_edit" {
+		return input
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(input, &obj); err != nil {
+		return input
+	}
+	rawFiles, ok := obj["files"].(string)
+	if !ok {
+		return input
+	}
+	rawFiles = strings.TrimSpace(rawFiles)
+	if rawFiles == "" {
+		return input
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(rawFiles), &decoded); err != nil {
+		return input
+	}
+	if _, ok := decoded.([]any); !ok {
+		return input
+	}
+	obj["files"] = decoded
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return input
+	}
+	return out
 }
 
 func validateToolInput(schema map[string]any, input json.RawMessage) string {

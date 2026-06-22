@@ -74,6 +74,23 @@ func TestRegistryExecuteRejectsInvalidInputBeforeToolExecution(t *testing.T) {
 	}
 }
 
+func TestRegistryExecuteNormalizesWriteFilesJSONEncodedFilesArray(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register(WriteFilesTool{})
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+
+	out, isError, err := registry.Execute(context.Background(), rc, "write_files", json.RawMessage(`{"files":"[{\"path\":\"frontend/src/App.tsx\",\"content\":\"export default function App() { return null }\"}]"}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected JSON-encoded files array to be normalized, got: %s", out)
+	}
+	if got, ok := rc.FileMap.Get("frontend/src/App.tsx"); !ok || !strings.Contains(got, "function App") {
+		t.Fatalf("expected file write through normalized input, exists=%v content=%q", ok, got)
+	}
+}
+
 func TestBuildRegistryFor_ExposesSandboxTools(t *testing.T) {
 	registry := BuildRegistryFor(&models.AppProject{ProjectType: models.ProjectTypeApp}, &RunDependencies{}, "")
 

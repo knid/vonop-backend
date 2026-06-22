@@ -649,6 +649,7 @@ func Run(
 
 	toolSchemas := registryToUtilsTools(registry)
 	liveToolCfg := liveToolWindowConfigForRun(isFirstGen, historyCfg, deps.RemoteConfig)
+	suppressWriteFiles := false
 
 	workflow := NewAgentRunWorkflow(nil)
 	loopResult, llmErr := workflow.ExecuteAgentLoop(ctx, AgentLoopInput{
@@ -676,6 +677,24 @@ func Run(
 			},
 			TrimArgs: func(toolName, args string) string {
 				return trimToolArgsForLLM(toolName, args, trimToolArgChars)
+			},
+			FilterTools: func(tools []utils.Tool) []utils.Tool {
+				if !suppressWriteFiles {
+					return tools
+				}
+				filtered := make([]utils.Tool, 0, len(tools))
+				for _, tool := range tools {
+					if tool.Function.Name == "write_files" {
+						continue
+					}
+					filtered = append(filtered, tool)
+				}
+				return filtered
+			},
+			OnToolResult: func(toolName, result string, isError bool) {
+				if toolName == "write_files" && isError && strings.Contains(result, `field "files" must be an array`) {
+					suppressWriteFiles = true
+				}
 			},
 			SummarizeTool: func(toolName, args, result string, isError bool) (string, string) {
 				part := models.ChatMessagePart{

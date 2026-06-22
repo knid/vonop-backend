@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -87,6 +88,46 @@ func TestSandboxExecToolExecutesFiniteCommandWithCwdAlias(t *testing.T) {
 	}
 	if got.Action != "exec" || got.Command != "npm run build" || got.Cwd != "/workspace/project/frontend" || got.TimeoutMs != 60000 {
 		t.Fatalf("request = %#v", got)
+	}
+}
+
+func TestSandboxExecToolSyncsGitBackedChangesBeforeExec(t *testing.T) {
+	var syncPaths []string
+	var execCalled bool
+	deps := &RunDependencies{
+		SyncSandboxFiles: func(ctx context.Context, project *models.AppProject, paths []string) error {
+			syncPaths = append([]string(nil), paths...)
+			return nil
+		},
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			execCalled = true
+			return map[string]any{"stdout": "ok", "exit_code": 0}, nil
+		},
+	}
+	state := NewBuildState("build app", false)
+	state.RecordFileWrite("frontend/src/components/Hero.tsx", "create")
+	rc := &RunContext{
+		Project: &models.AppProject{
+			ProjectType:     models.ProjectTypeApp,
+			FrontendRuntime: models.FrontendRuntimeViteReact,
+		},
+		User:       &models.User{},
+		Deps:       deps,
+		BuildState: state,
+	}
+
+	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"npm run build","cwd":"frontend"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("Execute returned isErr=true: %s", result)
+	}
+	if !execCalled {
+		t.Fatal("expected sandbox exec after sync")
+	}
+	if !slices.Contains(syncPaths, "frontend/src/components/Hero.tsx") {
+		t.Fatalf("expected changed path to sync before exec, got %#v", syncPaths)
 	}
 }
 

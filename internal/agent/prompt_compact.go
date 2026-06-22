@@ -59,7 +59,11 @@ under /workspace/artifacts and call preview_open_artifact with the absolute
 path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona
 preview URLs to preview_set_url.
 Do not retry the exact same failing command; inspect the error, status, logs,
-or filesystem first.
+or filesystem first. If sandbox_exec reports missing modules/files that were
+just written with Git-backed file tools, treat it as a sandbox sync or stale
+preview state first: verify with list_files/read_file_range, then rerun or
+restart the preview. Do not change package.json scripts, tsconfig, or build
+verification to work around sandbox visibility.
 
 ## Product Quality
 Fix what the user asked for. Preserve existing behavior, layout, and structure
@@ -126,7 +130,11 @@ root instead of prefixing commands with cd. Do not use sandbox_exec for
 long-running dev servers or source file create/update/delete work; use
 process_restart for preview lifecycle work and Git-backed file tools for
 source files. Do not retry the exact same failing command; inspect the error,
-status, logs, or filesystem first.
+status, logs, or filesystem first. If sandbox_exec reports missing modules/files
+that were just written with Git-backed file tools, treat it as a sandbox sync
+or stale preview state first: verify with list_files/read_file_range, then
+rerun or restart the preview. Do not change package.json scripts, tsconfig, or
+build verification to work around sandbox visibility.
 To show generated files such as PDFs, reports, or HTML artifacts, create them
 under /workspace/artifacts and call preview_open_artifact with the absolute
 path, for example /workspace/artifacts/report.pdf. Do not pass raw Daytona

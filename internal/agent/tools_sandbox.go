@@ -134,6 +134,9 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 	if msg != "" {
 		return msg, true, nil
 	}
+	if msg := syncChangedFilesBeforeSandboxExec(ctx, rc); msg != "" {
+		return msg, true, nil
+	}
 	out, isErr, err := sandboxControl(ctx, rc, SandboxControlRequest{
 		Action:    "exec",
 		Command:   command,
@@ -142,6 +145,20 @@ func (t SandboxExecTool) Execute(ctx context.Context, rc *RunContext, input json
 	})
 	out = truncateSandboxExecOutput(out)
 	return renderSandboxResult(out), isErr, err
+}
+
+func syncChangedFilesBeforeSandboxExec(ctx context.Context, rc *RunContext) string {
+	if rc == nil || rc.Deps == nil || rc.Deps.SyncSandboxFiles == nil || rc.Project == nil || rc.BuildState == nil {
+		return ""
+	}
+	paths := rc.BuildState.ChangedPaths()
+	if len(paths) == 0 {
+		return ""
+	}
+	if err := rc.Deps.SyncSandboxFiles(ctx, rc.Project, paths); err != nil {
+		return fmt.Sprintf("sandbox sync failed before exec: %v. Do not change source or package scripts to work around this; retry preview sync/restart first.", err)
+	}
+	return ""
 }
 
 func sandboxToolNames() []string {
