@@ -144,6 +144,17 @@ func TestEnsureAgentSandboxStartsAndAttachesMissingSandbox(t *testing.T) {
 	}
 }
 
+func TestAgentPreviewShouldEnsureWhenPreviewIsSyncStale(t *testing.T) {
+	status := &sandbox.PreviewStatus{
+		State:     sandbox.PreviewReady,
+		SyncStale: true,
+	}
+
+	if !agentPreviewShouldEnsure(status) {
+		t.Fatal("expected stale ready preview to be ensured")
+	}
+}
+
 func containsAll(s string, wants []string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {

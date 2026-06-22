@@ -54,6 +54,9 @@ func agentPreviewShouldEnsure(status *sandbox.PreviewStatus) bool {
 	if status == nil {
 		return true
 	}
+	if status.SyncStale {
+		return true
+	}
 	switch status.State {
 	case sandbox.PreviewMissing, sandbox.PreviewStopped, sandbox.PreviewError:
 		return true
