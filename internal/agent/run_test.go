@@ -79,6 +79,47 @@ func TestLangfusePromptNameUsesAgentProfile(t *testing.T) {
 	assert.Equal(t, observability.PromptAgentBase, langfusePromptName(&AgentProfile{ID: "custom"}))
 }
 
+func TestImageInputsForModelStripsImagesForNonVisionModel(t *testing.T) {
+	images := []string{"https://assets.example/logo.png"}
+
+	got := imageInputsForModel(&utils.LLMProvider{Name: "openrouter"}, "stepfun/step-3.5-flash", images)
+
+	assert.Empty(t, got)
+}
+
+func TestImageInputsForModelStripsImagesForGLMTextOnlyModel(t *testing.T) {
+	images := []string{"https://assets.example/logo.png"}
+
+	got := imageInputsForModel(&utils.LLMProvider{Name: "openrouter"}, "z-ai/glm-5.2", images)
+
+	assert.Empty(t, got)
+}
+
+func TestImageInputsForModelKeepsImagesForKimiOpenRouterModel(t *testing.T) {
+	images := []string{"https://assets.example/logo.png"}
+
+	got := imageInputsForModel(&utils.LLMProvider{Name: "openrouter"}, "moonshotai/kimi-k2.7-code", images)
+
+	assert.Equal(t, images, got)
+}
+
+func TestImageInputsForModelKeepsImagesForNativeMoonshotModel(t *testing.T) {
+	images := []string{"https://assets.example/logo.png"}
+
+	got := imageInputsForModel(&utils.LLMProvider{Name: "moonshot"}, "kimi-k2.6", images)
+
+	assert.Equal(t, images, got)
+}
+
+func TestImageInputsForModelKeepsImagesForVisionModel(t *testing.T) {
+	images := []string{"https://assets.example/logo.png"}
+
+	got := imageInputsForModel(&utils.LLMProvider{Name: "openrouter"}, "openai/gpt-5.4-nano", images)
+
+	assert.Equal(t, images, got)
+	assert.NotSame(t, &images[0], &got[0])
+}
+
 func TestRunExecutionHasRunID(t *testing.T) {
 	runID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	exec := &RunExecution{RunID: runID}

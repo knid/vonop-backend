@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -321,8 +322,8 @@ func Run(
 	// compact source of truth even when older tool messages are trimmed.
 	coreUserContent := expandedMessage
 	userTurn := utils.Message{Role: "user", Content: coreUserContent}
-	if len(currentImageURLs) > 0 {
-		userTurn.Images = currentImageURLs
+	if imageInputs := imageInputsForModel(provider, model, currentImageURLs); len(imageInputs) > 0 {
+		userTurn.Images = imageInputs
 	}
 	llmMessages = append(llmMessages, userTurn)
 
@@ -915,6 +916,26 @@ func normaliseImages(images []string) []map[string]string {
 		out = append(out, map[string]string{"url": img})
 	}
 	return out
+}
+
+func imageInputsForModel(provider *utils.LLMProvider, model string, images []string) []string {
+	if len(images) == 0 || !modelSupportsImageInput(provider, model) {
+		return nil
+	}
+	out := make([]string, len(images))
+	copy(out, images)
+	return out
+}
+
+func modelSupportsImageInput(provider *utils.LLMProvider, model string) bool {
+	info := constants.GatewayChatModelByID(model)
+	if info != nil {
+		return slices.Contains(info.Capabilities, "vision")
+	}
+	if provider != nil && provider.IsAnthropic() {
+		return true
+	}
+	return false
 }
 
 func finaliseSuccess(
