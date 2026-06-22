@@ -133,7 +133,7 @@ func (v *HttpViews) previewProjectForRef(ref string) (*models.AppProject, error)
 
 func setPreviewProxyHeaders(req *http.Request, targetHost string) {
 	req.Host = targetHost
-	req.Header.Set("X-Forwarded-Host", targetHost)
+	req.Header.Del("X-Forwarded-Host")
 	req.Header.Del("X-Forwarded-Proto")
 	req.Header.Set(daytonaSkipPreviewWarningHeader, daytonaSkipPreviewWarningEnabled)
 }
