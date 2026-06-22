@@ -95,6 +95,9 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 		t.Fatalf("expo go process should be optional in web preview supervisor")
 	}
 	for _, process := range runtime.Processes {
+		if strings.Contains(process.Command, "CI=1") {
+			t.Fatalf("expo preview command should allow Metro reloads, got %q", process.Command)
+		}
 		if strings.Contains(process.Command, "--host 0.0.0.0") {
 			t.Fatalf("expo command uses invalid host mode: %q", process.Command)
 		}

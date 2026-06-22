@@ -81,14 +81,18 @@ func TestSetPreviewProxyHeadersSkipsDaytonaWarning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
+	req.Header.Set("X-Forwarded-Proto", "https")
 
-	setPreviewProxyHeaders(req, "sandbox.example.test", "todo.preview.wemob.app")
+	setPreviewProxyHeaders(req, "sandbox.example.test")
 
 	if req.Host != "sandbox.example.test" {
 		t.Fatalf("request host = %q", req.Host)
 	}
-	if got := req.Header.Get("X-Forwarded-Host"); got != "todo.preview.wemob.app" {
+	if got := req.Header.Get("X-Forwarded-Host"); got != "sandbox.example.test" {
 		t.Fatalf("X-Forwarded-Host = %q", got)
+	}
+	if got := req.Header.Get("X-Forwarded-Proto"); got != "" {
+		t.Fatalf("X-Forwarded-Proto = %q, want empty", got)
 	}
 	if got := req.Header.Get(daytonaSkipPreviewWarningHeader); got != daytonaSkipPreviewWarningEnabled {
 		t.Fatalf("%s = %q", daytonaSkipPreviewWarningHeader, got)

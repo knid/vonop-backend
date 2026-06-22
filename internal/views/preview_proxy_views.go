@@ -115,7 +115,7 @@ func (v *HttpViews) HandlePreviewProxy(w http.ResponseWriter, r *http.Request) {
 	baseDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		baseDirector(req)
-		setPreviewProxyHeaders(req, target.Host, host)
+		setPreviewProxyHeaders(req, target.Host)
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Warn("preview proxy upstream failed", "error", proxyErr, "slug", slug, "kind", kind)
@@ -131,9 +131,10 @@ func (v *HttpViews) previewProjectForRef(ref string) (*models.AppProject, error)
 	return v.Controller.DB.GetAppProjectBySlug(ref)
 }
 
-func setPreviewProxyHeaders(req *http.Request, targetHost, previewHost string) {
+func setPreviewProxyHeaders(req *http.Request, targetHost string) {
 	req.Host = targetHost
-	req.Header.Set("X-Forwarded-Host", previewHost)
+	req.Header.Set("X-Forwarded-Host", targetHost)
+	req.Header.Del("X-Forwarded-Proto")
 	req.Header.Set(daytonaSkipPreviewWarningHeader, daytonaSkipPreviewWarningEnabled)
 }
 
