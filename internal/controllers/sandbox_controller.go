@@ -148,11 +148,15 @@ func (c *Controller) SyncSandbox(ctx context.Context, project *models.AppProject
 		return fmt.Errorf("sandbox manager is not configured")
 	}
 	c.refreshSandboxID(ctx, project)
-	if project == nil || project.SandboxID == "" {
+	if project == nil {
 		return nil
 	}
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
+		return err
+	}
+	if project.SandboxID == "" {
+		_, err := c.EnsurePreview(ctx, project)
 		return err
 	}
 	return c.syncSandboxWithFiles(ctx, project, files)
@@ -166,11 +170,15 @@ func (c *Controller) SyncSandboxPaths(ctx context.Context, project *models.AppPr
 		return nil
 	}
 	c.refreshSandboxID(ctx, project)
-	if project == nil || project.SandboxID == "" {
+	if project == nil {
 		return nil
 	}
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
+		return err
+	}
+	if project.SandboxID == "" {
+		_, err := c.EnsurePreview(ctx, project)
 		return err
 	}
 	envVars := c.CollectAllEnvVars(project)
@@ -199,8 +207,15 @@ func (c *Controller) SyncSandboxDeltas(ctx context.Context, project *models.AppP
 		return nil
 	}
 	c.refreshSandboxID(ctx, project)
+	if project == nil {
+		return nil
+	}
 	files, err := c.sandboxSourceFiles(project)
 	if err != nil {
+		return err
+	}
+	if project.SandboxID == "" {
+		_, err := c.EnsurePreview(ctx, project)
 		return err
 	}
 	envVars := c.CollectAllEnvVars(project)

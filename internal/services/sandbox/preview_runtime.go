@@ -62,14 +62,22 @@ func BuildPreviewRuntime(project *models.AppProject) PreviewRuntime {
 			},
 		}
 	case project.UsesSplitWebRuntime():
-		return PreviewRuntime{
-			Root:        ProjectRoot,
-			InstallDirs: []string{BackendRoot, ProjectRoot + "/frontend"},
-			Main:        "web",
-			Processes: []PreviewProcess{
+		processes := []PreviewProcess{
+			{Name: "web", Cwd: ProjectRoot + "/frontend", Port: 3000, Command: nodeHeapFlag + "npm run dev -- --host 0.0.0.0 --port 3000"},
+		}
+		installDirs := []string{ProjectRoot + "/frontend"}
+		if project.BackendEnabled && project.BackendRuntime == models.BackendRuntimeNextJSAPI {
+			installDirs = append([]string{BackendRoot}, installDirs...)
+			processes = []PreviewProcess{
 				{Name: "backend", Cwd: BackendRoot, Port: 3001, Command: nodeHeapFlag + "npm run dev -- -p 3001"},
 				{Name: "web", Cwd: ProjectRoot + "/frontend", Port: 3000, Command: nodeHeapFlag + "npm run dev -- --config vite.config.preview.ts --host 0.0.0.0 --port 3000"},
-			},
+			}
+		}
+		return PreviewRuntime{
+			Root:        ProjectRoot,
+			InstallDirs: installDirs,
+			Main:        "web",
+			Processes:   processes,
 		}
 	default:
 		return PreviewRuntime{
