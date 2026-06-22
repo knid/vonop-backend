@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	sdkerrors "github.com/daytonaio/daytona/libs/sdk-go/pkg/errors"
 	sdkoptions "github.com/daytonaio/daytona/libs/sdk-go/pkg/options"
 	sdktypes "github.com/daytonaio/daytona/libs/sdk-go/pkg/types"
 	"github.com/knid/wemob/internal/services/sandbox"
@@ -15,6 +16,7 @@ type fakeClient struct {
 	sb               *fakeSandbox
 	lastCreateParams any
 	createErr        error
+	getErr           error
 	getIDOrName      string
 }
 
@@ -31,6 +33,9 @@ func (c *fakeClient) Create(_ context.Context, params any, _ ...func(*sdkoptions
 
 func (c *fakeClient) Get(_ context.Context, idOrName string) (sandboxHandle, error) {
 	c.getIDOrName = idOrName
+	if c.getErr != nil {
+		return nil, c.getErr
+	}
 	if c.sb != nil {
 		return c.sb, nil
 	}
@@ -252,6 +257,17 @@ func TestStartTreatsStateChangeConflictAsAlreadyStarting(t *testing.T) {
 	}
 	if !sb.started {
 		t.Fatal("expected Start to be called")
+	}
+}
+
+func TestGetStatusMapsDaytonaNotFoundToSandboxMissing(t *testing.T) {
+	provider := NewWithClient(&fakeClient{
+		getErr: sdkerrors.NewDaytonaNotFoundError("sandbox not found", nil),
+	}, "")
+
+	_, err := provider.GetStatus(context.Background(), "sandbox-missing", sandbox.RuntimePlan{})
+	if !errors.Is(err, sandbox.ErrSandboxMissing) {
+		t.Fatalf("err = %v, want ErrSandboxMissing", err)
 	}
 }
 
