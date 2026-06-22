@@ -1,12 +1,16 @@
 package controllers
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
+	"github.com/knid/wemob/internal/services/gitrepo"
+	"github.com/knid/wemob/internal/services/sandbox"
 )
 
 func TestAddSandboxEnvFilesWritesBackendEnvForSplitWeb(t *testing.T) {
@@ -99,6 +103,47 @@ func TestAdoptLatestSandboxIDDoesNotOverwriteExistingID(t *testing.T) {
 	}
 }
 
+func TestEnsureAgentSandboxStartsAndAttachesMissingSandbox(t *testing.T) {
+	ctx := context.Background()
+	project := &models.AppProject{
+		ID:              uuid.New(),
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeViteReact,
+		Slug:            "todo",
+	}
+	repos := gitrepo.NewService(t.TempDir())
+	repo, err := repos.Init(project.ID.String())
+	if err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if err := repo.WriteFile("frontend/package.json", []byte(`{"scripts":{"dev":"vite"}}`)); err != nil {
+		t.Fatalf("write repo file: %v", err)
+	}
+
+	provider := newControllerFakeSandboxProvider()
+	c := &Controller{
+		GitRepoService: repos,
+		SandboxManager: sandbox.NewManager(provider),
+	}
+
+	status, err := c.EnsureAgentSandbox(ctx, project)
+	if err != nil {
+		t.Fatalf("EnsureAgentSandbox: %v", err)
+	}
+	if project.SandboxID != "daytona-test" {
+		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	}
+	if provider.startCalls != 1 {
+		t.Fatalf("start calls = %d", provider.startCalls)
+	}
+	if len(provider.files) == 0 {
+		t.Fatal("expected source files to be synced")
+	}
+	if status == nil || status.SandboxID != "daytona-test" {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
 func containsAll(s string, wants []string) bool {
 	for _, want := range wants {
 		if !strings.Contains(s, want) {
@@ -106,4 +151,101 @@ func containsAll(s string, wants []string) bool {
 		}
 	}
 	return true
+}
+
+type controllerFakeSandboxProvider struct {
+	sandboxID  string
+	files      []sandbox.FileDelta
+	startCalls int
+}
+
+func newControllerFakeSandboxProvider() *controllerFakeSandboxProvider {
+	return &controllerFakeSandboxProvider{sandboxID: "daytona-test"}
+}
+
+func (f *controllerFakeSandboxProvider) Create(ctx context.Context, plan sandbox.RuntimePlan) (string, error) {
+	return f.sandboxID, nil
+}
+
+func (f *controllerFakeSandboxProvider) GetStatus(ctx context.Context, sandboxID string, plan sandbox.RuntimePlan) (*sandbox.Status, error) {
+	return &sandbox.Status{
+		Provider:    sandbox.ProviderDaytona,
+		SandboxID:   sandboxID,
+		State:       sandbox.StateReady,
+		PreviewURLs: map[sandbox.PreviewKind]string{},
+	}, nil
+}
+
+func (f *controllerFakeSandboxProvider) Start(ctx context.Context, sandboxID string) error {
+	f.startCalls++
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) Stop(ctx context.Context, sandboxID string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) Archive(ctx context.Context, sandboxID string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) Delete(ctx context.Context, sandboxID string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) WriteFiles(ctx context.Context, sandboxID string, files []sandbox.FileDelta, plan sandbox.RuntimePlan) error {
+	f.files = append(f.files, files...)
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) Execute(ctx context.Context, sandboxID, command, cwd string, timeoutMs int) (string, string, int, error) {
+	return "", "", 0, nil
+}
+
+func (f *controllerFakeSandboxProvider) StartProcess(ctx context.Context, sandboxID string, spec sandbox.ProcessSpec) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) StopProcess(ctx context.Context, sandboxID string, name sandbox.ProcessName) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) ProcessLogs(ctx context.Context, sandboxID string, spec sandbox.ProcessSpec, lines int) (*sandbox.LogsResult, error) {
+	return &sandbox.LogsResult{Process: spec.Name, Content: "ok"}, nil
+}
+
+func (f *controllerFakeSandboxProvider) ProcessStates(ctx context.Context, sandboxID string, plan sandbox.RuntimePlan) (map[sandbox.ProcessName]sandbox.ProcessState, error) {
+	out := map[sandbox.ProcessName]sandbox.ProcessState{}
+	for _, spec := range plan.Processes {
+		out[spec.Name] = sandbox.ProcessState{Name: spec.Name, Status: sandbox.ProcessReady, Port: spec.Port}
+	}
+	return out, nil
+}
+
+func (f *controllerFakeSandboxProvider) PreviewURL(ctx context.Context, sandboxID string, port int) (string, error) {
+	return fmt.Sprintf("https://provider-%d.example.test", port), nil
+}
+
+func (f *controllerFakeSandboxProvider) CreateTerminal(ctx context.Context, sandboxID string, cols, rows int) (*sandbox.Terminal, error) {
+	return &sandbox.Terminal{ID: "term-1"}, nil
+}
+
+func (f *controllerFakeSandboxProvider) SendTerminalInput(ctx context.Context, sandboxID, terminalID, input string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) CloseTerminal(ctx context.Context, sandboxID, terminalID string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) CreateSnapshot(ctx context.Context, sandboxID string) (*sandbox.Snapshot, error) {
+	return &sandbox.Snapshot{ID: "snapshot-1"}, nil
+}
+
+func (f *controllerFakeSandboxProvider) RestoreSnapshot(ctx context.Context, sandboxID, snapshotID string) error {
+	return nil
+}
+
+func (f *controllerFakeSandboxProvider) RunDiagnostics(ctx context.Context, sandboxID string, plan sandbox.RuntimePlan) (*sandbox.DiagnosticsResult, error) {
+	return &sandbox.DiagnosticsResult{Summary: "ok"}, nil
 }
