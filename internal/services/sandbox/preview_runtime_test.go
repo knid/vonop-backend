@@ -54,6 +54,34 @@ func TestBuildPreviewRuntimeSplitWeb(t *testing.T) {
 	}
 }
 
+func TestBuildPreviewRuntimeSplitWebWithoutBackendRunsOnlyWeb(t *testing.T) {
+	project := previewRuntimeProject()
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = false
+	project.BackendRuntime = models.BackendRuntimeNone
+
+	runtime := BuildPreviewRuntime(project)
+
+	if runtime.Main != "web" {
+		t.Fatalf("main = %q, want web", runtime.Main)
+	}
+	if got := strings.Join(runtime.InstallDirs, ","); got != ProjectRoot+"/frontend" {
+		t.Fatalf("install dirs = %q", got)
+	}
+	if got := runtime.Port("backend"); got != 0 {
+		t.Fatalf("backend port = %d, want 0", got)
+	}
+	if got := runtime.Port("web"); got != 3000 {
+		t.Fatalf("web port = %d, want 3000", got)
+	}
+	if len(runtime.Processes) != 1 || runtime.Processes[0].Name != "web" {
+		t.Fatalf("processes = %#v, want only web", runtime.Processes)
+	}
+	if strings.Contains(runtime.Processes[0].Command, "vite.config.preview.ts") {
+		t.Fatalf("web command should not use backend proxy config: %q", runtime.Processes[0].Command)
+	}
+}
+
 func TestPreviewSupervisorScriptWritesManagedVitePreviewConfig(t *testing.T) {
 	project := previewRuntimeProject()
 	project.FrontendRuntime = models.FrontendRuntimeViteReact

@@ -144,6 +144,49 @@ func TestEnsureAgentSandboxStartsAndAttachesMissingSandbox(t *testing.T) {
 	}
 }
 
+func TestSyncSandboxDeltasStartsMissingSandboxBeforeSync(t *testing.T) {
+	ctx := context.Background()
+	project := &models.AppProject{
+		ID:              uuid.New(),
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeViteReact,
+		Slug:            "todo",
+	}
+	repos := gitrepo.NewService(t.TempDir())
+	repo, err := repos.Init(project.ID.String())
+	if err != nil {
+		t.Fatalf("init repo: %v", err)
+	}
+	if err := repo.WriteFile("frontend/package.json", []byte(`{"scripts":{"dev":"vite"}}`)); err != nil {
+		t.Fatalf("write package: %v", err)
+	}
+	if err := repo.WriteFile("frontend/src/App.tsx", []byte(`export default function App() { return null }`)); err != nil {
+		t.Fatalf("write app: %v", err)
+	}
+
+	provider := newControllerFakeSandboxProvider()
+	c := &Controller{
+		GitRepoService: repos,
+		SandboxManager: sandbox.NewManager(provider),
+	}
+
+	err = c.SyncSandboxDeltas(ctx, project, []sandbox.FileDelta{
+		{Path: "frontend/src/App.tsx", Content: `export default function App() { return null }`},
+	})
+	if err != nil {
+		t.Fatalf("SyncSandboxDeltas: %v", err)
+	}
+	if project.SandboxID != "daytona-test" {
+		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	}
+	if provider.startCalls == 0 {
+		t.Fatal("expected missing sandbox to be started")
+	}
+	if len(provider.files) == 0 {
+		t.Fatal("expected files to be synced")
+	}
+}
+
 func TestAgentPreviewShouldEnsureWhenPreviewIsSyncStale(t *testing.T) {
 	status := &sandbox.PreviewStatus{
 		State:     sandbox.PreviewReady,
