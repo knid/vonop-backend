@@ -34,7 +34,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		plan.Processes = append(plan.Processes,
 			ProcessSpec{
 				Name:        ProcessExpoWeb,
-				Command:     nodeHeapFlag + "CI=1 npx expo start --web --clear --port 8081",
+				Command:     nodeHeapFlag + "npx expo start --web --clear --port 8081",
 				Cwd:         ProjectRoot,
 				Port:        8081,
 				Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:8081"},
@@ -43,7 +43,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 			},
 			ProcessSpec{
 				Name:        ProcessExpoGo,
-				Command:     "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "CI=1 npx expo start --clear --port 19000",
+				Command:     "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "npx expo start --clear --port 19000",
 				Cwd:         ProjectRoot,
 				Port:        19000,
 				Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:19000"},

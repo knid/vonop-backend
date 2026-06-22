@@ -113,6 +113,14 @@ func TestRuntimePlanMobileNative(t *testing.T) {
 	if plan.Previews[PreviewApp] != 8081 || plan.Previews[PreviewExpo] != 19000 {
 		t.Fatalf("mobile preview ports = %#v", plan.Previews)
 	}
+	for _, process := range plan.Processes {
+		if process.Name != ProcessExpoWeb && process.Name != ProcessExpoGo {
+			continue
+		}
+		if strings.Contains(process.Command, "CI=1") {
+			t.Fatalf("expo preview command should allow Metro reloads, got %q", process.Command)
+		}
+	}
 }
 
 func TestRuntimePlanBackendOnly(t *testing.T) {
