@@ -86,6 +86,9 @@ func (c *Controller) DeleteAppEnvVar(id string, project *models.AppProject) erro
 // into a single map for deployment/preview.
 func (c *Controller) CollectAllEnvVars(project *models.AppProject) map[string]string {
 	envVars := make(map[string]string)
+	if c == nil || c.DB == nil || project == nil {
+		return envVars
+	}
 
 	// Determine public prefix based on project type
 	publicPrefix := "NEXT_PUBLIC_"

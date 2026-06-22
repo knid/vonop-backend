@@ -29,10 +29,37 @@ func (c *Controller) EnsurePreview(ctx context.Context, project *models.AppProje
 	if err != nil {
 		return nil, err
 	}
-	if project.SandboxID != "" {
+	if c.DB != nil && project.SandboxID != "" {
 		_ = c.DB.UpdateAppProjectSandboxID(project.ID.String(), project.SandboxID)
 	}
 	return status, nil
+}
+
+func (c *Controller) EnsureAgentSandbox(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {
+	if c.SandboxManager == nil {
+		return nil, fmt.Errorf("sandbox manager is not configured")
+	}
+	c.refreshSandboxID(ctx, project)
+	status, err := c.PreviewStatus(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if !agentPreviewShouldEnsure(status) {
+		return status, nil
+	}
+	return c.EnsurePreview(ctx, project)
+}
+
+func agentPreviewShouldEnsure(status *sandbox.PreviewStatus) bool {
+	if status == nil {
+		return true
+	}
+	switch status.State {
+	case sandbox.PreviewMissing, sandbox.PreviewStopped, sandbox.PreviewError:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Controller) PreviewStatus(ctx context.Context, project *models.AppProject) (*sandbox.PreviewStatus, error) {

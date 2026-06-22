@@ -211,6 +211,7 @@ func (c *Controller) sandboxControlForAgent(ctx context.Context, project *models
 		}
 		return map[string]any{"ok": err == nil, "sandbox_id": project.SandboxID}, err
 	case "exec":
+		c.refreshSandboxID(ctx, project)
 		stdout, stderr, exitCode, err := c.SandboxManager.Execute(ctx, project, req.Command, req.Cwd, req.TimeoutMs)
 		return sandboxExecOutput(stdout, stderr, exitCode, project.SandboxID, err), err
 	case "logs", "process_logs":

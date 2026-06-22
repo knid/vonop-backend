@@ -153,6 +153,12 @@ func (c *Controller) HandleAgentRunTask(ctx context.Context, t *asynq.Task) erro
 	emitter := newRedisEventEmitter(runCtx, c.RedisPubSub, p.JobID, onEvent)
 
 	// --- Run the agent ---
+	if c.SandboxManager != nil {
+		if _, err := c.EnsureAgentSandbox(runCtx, project); err != nil {
+			slog.Warn("agent_run: sandbox preflight failed; continuing without ensured sandbox",
+				"job_id", p.JobID, "project_id", project.ID, "error", err)
+		}
+	}
 	deps := c.AgentDeps(user, p.JobID)
 	runErr := agent.Run(runCtx, deps, project, user, p.Message, turnAttachments, emitter)
 	if runErr != nil {
