@@ -3,10 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/knid/wemob/internal/models"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 )
 
 func TestReadFilesTool_ReturnsContentsForAllPaths(t *testing.T) {
@@ -55,6 +57,108 @@ func TestWriteFilesToolDescriptionEncouragesBatching(t *testing.T) {
 		if !strings.Contains(desc, required) {
 			t.Fatalf("write_files description missing %q: %s", required, desc)
 		}
+	}
+}
+
+func TestWriteFilesToolPersistsCurrentFileMapToWorktree(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	var persisted map[string]string
+	rc.Deps = &RunDependencies{
+		PersistWorktreeFiles: func(ctx context.Context, project *models.AppProject, files map[string]string) error {
+			persisted = files
+			return nil
+		},
+	}
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"frontend/src/App.tsx","content":"export default function App() { return null }"}]}`))
+	if err != nil {
+		t.Fatalf("write execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected write_files success, got: %s", out)
+	}
+	if persisted["frontend/src/App.tsx"] != "export default function App() { return null }" {
+		t.Fatalf("persisted snapshot = %#v", persisted)
+	}
+}
+
+func TestWriteFilesToolSyncsCurrentContentToSandbox(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	var gotDeltas []sandboxService.FileDelta
+	rc.Deps = &RunDependencies{
+		PersistWorktreeFiles: func(ctx context.Context, project *models.AppProject, files map[string]string) error {
+			return nil
+		},
+		SyncSandboxDeltas: func(ctx context.Context, project *models.AppProject, deltas []sandboxService.FileDelta) error {
+			gotDeltas = append([]sandboxService.FileDelta(nil), deltas...)
+			return nil
+		},
+	}
+
+	out, isError, err := WriteFilesTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"files":[{"path":"frontend/src/App.tsx","content":"fresh"}]}`))
+	if err != nil {
+		t.Fatalf("write execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected write_files success, got: %s", out)
+	}
+	if len(gotDeltas) != 1 || gotDeltas[0].Path != "frontend/src/App.tsx" || gotDeltas[0].Content != "fresh" {
+		t.Fatalf("deltas = %#v, want fresh content delta", gotDeltas)
+	}
+}
+
+func TestEditFileToolPersistsCurrentFileMapToWorktree(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/App.tsx", "old")
+	rc.MarkFileRead("frontend/src/App.tsx", "old")
+	var persisted map[string]string
+	rc.Deps = &RunDependencies{
+		PersistWorktreeFiles: func(ctx context.Context, project *models.AppProject, files map[string]string) error {
+			persisted = files
+			return nil
+		},
+	}
+
+	out, isError, err := EditFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"frontend/src/App.tsx","old_string":"old","new_string":"new"}`))
+	if err != nil {
+		t.Fatalf("edit execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected edit_file success, got: %s", out)
+	}
+	if !reflect.DeepEqual(persisted, map[string]string{"frontend/src/App.tsx": "new"}) {
+		t.Fatalf("persisted snapshot = %#v", persisted)
+	}
+}
+
+func TestDeleteFileToolPersistsCurrentFileMapToWorktree(t *testing.T) {
+	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc.FileMap.Set("frontend/src/App.tsx", "app")
+	rc.FileMap.Set("frontend/src/Old.tsx", "old")
+	var persisted map[string]string
+	rc.Deps = &RunDependencies{
+		PersistWorktreeFiles: func(ctx context.Context, project *models.AppProject, files map[string]string) error {
+			persisted = files
+			return nil
+		},
+	}
+
+	out, isError, err := DeleteFileTool{}.Execute(context.Background(), rc,
+		json.RawMessage(`{"path":"frontend/src/Old.tsx"}`))
+	if err != nil {
+		t.Fatalf("delete execute: %v", err)
+	}
+	if isError {
+		t.Fatalf("expected delete_file success, got: %s", out)
+	}
+	if _, ok := persisted["frontend/src/Old.tsx"]; ok {
+		t.Fatalf("deleted file still persisted: %#v", persisted)
+	}
+	if persisted["frontend/src/App.tsx"] != "app" {
+		t.Fatalf("remaining file missing from persisted snapshot: %#v", persisted)
 	}
 }
 

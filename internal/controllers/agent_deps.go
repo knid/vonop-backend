@@ -129,6 +129,19 @@ func (c *Controller) AgentDeps(user *models.User, jobID string) *agent.RunDepend
 		SyncSandboxFiles: func(ctx context.Context, project *models.AppProject, paths []string) error {
 			return c.SyncSandboxPaths(ctx, project, paths)
 		},
+		SyncSandboxDeltas: func(ctx context.Context, project *models.AppProject, deltas []sandboxService.FileDelta) error {
+			return c.SyncSandboxDeltas(ctx, project, deltas)
+		},
+		PersistWorktreeFiles: func(ctx context.Context, project *models.AppProject, files map[string]string) error {
+			if project == nil {
+				return fmt.Errorf("project is required")
+			}
+			repo, err := c.GitRepoService.Open(project.ID.String())
+			if err != nil {
+				return err
+			}
+			return repo.WriteFileMap(files)
+		},
 		RecordLLMUsage: func(tracker *utils.TokenTracker, action, model, provider, reference, appType string) {
 			c.RecordTokenUsage(user, action, model, provider, reference, appType, tracker)
 		},

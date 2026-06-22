@@ -11,6 +11,7 @@ import (
 	"github.com/knid/wemob/internal/services/gitrepo"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
+	"github.com/knid/wemob/internal/services/sandbox"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
@@ -132,6 +133,8 @@ type SandboxControlRequest struct {
 type SandboxControlFn func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error)
 type PreviewURLSetter func(ctx context.Context, project *models.AppProject, url, label, kind string) error
 type SandboxFileSyncer func(ctx context.Context, project *models.AppProject, paths []string) error
+type SandboxDeltaSyncer func(ctx context.Context, project *models.AppProject, deltas []sandbox.FileDelta) error
+type WorktreeFileMapPersister func(ctx context.Context, project *models.AppProject, files map[string]string) error
 
 // GatewayAllowedModelsFn returns the model IDs (chat + image, OpenRouter /
 // fal format) the current user's subscription tier can reach through the
@@ -275,6 +278,8 @@ type RunDependencies struct {
 	SandboxControl        SandboxControlFn
 	SetPreviewURL         PreviewURLSetter
 	SyncSandboxFiles      SandboxFileSyncer
+	SyncSandboxDeltas     SandboxDeltaSyncer
+	PersistWorktreeFiles  WorktreeFileMapPersister
 	RecordLLMUsage        LLMUsageRecorder
 	RecordLLMError        LLMErrorRecorder
 	RecordLangfuseScore   LangfuseScoreRecorder

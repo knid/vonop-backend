@@ -192,8 +192,8 @@ func TestManagerSyncDeltasSyncsSourceWithoutRestartingPreview(t *testing.T) {
 	if !sawDelete {
 		t.Fatalf("deleted file delta was not synced: %#v", fp.files)
 	}
-	if !sawPreviewConfig {
-		t.Fatalf("managed Vite preview config was not synced: %#v", fp.files)
+	if sawPreviewConfig {
+		t.Fatalf("managed Vite preview config should not be re-synced for source-only deltas: %#v", fp.files)
 	}
 	if sawSupervisorScript {
 		t.Fatalf("preview supervisor script should not be synced for source-only changes: %#v", fp.files)

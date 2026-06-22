@@ -9,6 +9,7 @@ import (
 
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
+	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 )
 
 func TestSandboxToolNamesIncludePreviewAndExecTools(t *testing.T) {
@@ -128,6 +129,86 @@ func TestSandboxExecToolSyncsGitBackedChangesBeforeExec(t *testing.T) {
 	}
 	if !slices.Contains(syncPaths, "frontend/src/components/Hero.tsx") {
 		t.Fatalf("expected changed path to sync before exec, got %#v", syncPaths)
+	}
+}
+
+func TestSandboxExecToolSyncsCurrentFileMapDeltasBeforeExec(t *testing.T) {
+	var gotDeltas []sandboxService.FileDelta
+	var legacyPathSyncCalled bool
+	deps := &RunDependencies{
+		SyncSandboxFiles: func(ctx context.Context, project *models.AppProject, paths []string) error {
+			legacyPathSyncCalled = true
+			return nil
+		},
+		SyncSandboxDeltas: func(ctx context.Context, project *models.AppProject, deltas []sandboxService.FileDelta) error {
+			gotDeltas = append([]sandboxService.FileDelta(nil), deltas...)
+			return nil
+		},
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			return map[string]any{"stdout": "ok", "exit_code": 0}, nil
+		},
+	}
+	state := NewBuildState("build app", false)
+	state.RecordFileWrite("frontend/src/pages/AdminPage.tsx", "update")
+	rc := &RunContext{
+		Project: &models.AppProject{
+			ProjectType:     models.ProjectTypeApp,
+			FrontendRuntime: models.FrontendRuntimeViteReact,
+		},
+		User:       &models.User{},
+		Deps:       deps,
+		BuildState: state,
+		FileMap:    NewSafeFileMap(map[string]string{"frontend/src/pages/AdminPage.tsx": "fresh import"}),
+	}
+
+	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"npm run build","cwd":"frontend"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("expected success, got: %s", result)
+	}
+	if legacyPathSyncCalled {
+		t.Fatal("expected exact delta sync, not stale path-based repo sync")
+	}
+	if len(gotDeltas) != 1 {
+		t.Fatalf("deltas = %#v, want one delta", gotDeltas)
+	}
+	if gotDeltas[0].Path != "frontend/src/pages/AdminPage.tsx" || gotDeltas[0].Content != "fresh import" || gotDeltas[0].Delete {
+		t.Fatalf("delta = %#v, want fresh content delta", gotDeltas[0])
+	}
+}
+
+func TestSandboxExecToolSyncsDeletedFilesAsDeleteDeltasBeforeExec(t *testing.T) {
+	var gotDeltas []sandboxService.FileDelta
+	deps := &RunDependencies{
+		SyncSandboxDeltas: func(ctx context.Context, project *models.AppProject, deltas []sandboxService.FileDelta) error {
+			gotDeltas = append([]sandboxService.FileDelta(nil), deltas...)
+			return nil
+		},
+		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
+			return map[string]any{"stdout": "ok", "exit_code": 0}, nil
+		},
+	}
+	state := NewBuildState("build app", false)
+	state.RecordFileDelete("frontend/src/Old.tsx")
+	rc := &RunContext{
+		Project:    &models.AppProject{ProjectType: models.ProjectTypeApp, FrontendRuntime: models.FrontendRuntimeViteReact},
+		User:       &models.User{},
+		Deps:       deps,
+		BuildState: state,
+		FileMap:    NewSafeFileMap(map[string]string{}),
+	}
+
+	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"npm run build","cwd":"frontend"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if isErr {
+		t.Fatalf("expected success, got: %s", result)
+	}
+	if len(gotDeltas) != 1 || gotDeltas[0].Path != "frontend/src/Old.tsx" || !gotDeltas[0].Delete {
+		t.Fatalf("deltas = %#v, want delete delta", gotDeltas)
 	}
 }
 
