@@ -12,10 +12,11 @@ import (
 const previewStatePath = "/workspace/.wemob/status.json"
 
 type PreviewProcess struct {
-	Name    string
-	Cwd     string
-	Port    int
-	Command string
+	Name     string
+	Cwd      string
+	Port     int
+	Command  string
+	Optional bool
 }
 
 type PreviewRuntime struct {
@@ -45,8 +46,8 @@ func BuildPreviewRuntime(project *models.AppProject) PreviewRuntime {
 			InstallDirs: []string{ProjectRoot},
 			Main:        "web",
 			Processes: []PreviewProcess{
-				{Name: "web", Cwd: ProjectRoot, Port: 8081, Command: nodeHeapFlag + "CI=1 npx expo start --web --clear --port 8081 --host 0.0.0.0"},
-				{Name: "expo", Cwd: ProjectRoot, Port: 19000, Command: "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "CI=1 npx expo start --clear --port 19000 --host 0.0.0.0"},
+				{Name: "web", Cwd: ProjectRoot, Port: 8081, Command: nodeHeapFlag + "CI=1 npx expo start --web --clear --port 8081"},
+				{Name: "expo", Cwd: ProjectRoot, Port: 19000, Command: "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "CI=1 npx expo start --clear --port 19000", Optional: true},
 			},
 		}
 	case project.FrontendRuntime == models.FrontendRuntimeNone &&
@@ -111,6 +112,9 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 	}
 	b.WriteString("write_state starting\n")
 	b.WriteString("started_processes=0\n")
+	b.WriteString("main_pid=\"\"\n")
+	b.WriteString("required_pids=()\n")
+	b.WriteString("missing_required=\"\"\n")
 	for _, process := range runtime.Processes {
 		cwd := process.Cwd
 		if cwd == "" {
@@ -120,17 +124,35 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 		packagePath := strings.TrimRight(cwd, "/") + "/package.json"
 		b.WriteString(fmt.Sprintf("if test -f %s; then\n", shellQuotePath(packagePath)))
 		b.WriteString(fmt.Sprintf("  (cd %s && %s) > %s 2>&1 &\n", shellQuotePath(cwd), process.Command, shellQuotePath(logPath)))
+		b.WriteString("  pid=$!\n")
 		b.WriteString("  started_processes=$((started_processes + 1))\n")
+		if process.Name == runtime.Main {
+			b.WriteString("  main_pid=\"$pid\"\n")
+		}
+		if !process.Optional {
+			b.WriteString("  required_pids+=(\"$pid\")\n")
+		}
 		b.WriteString("else\n")
 		b.WriteString(fmt.Sprintf("  printf 'skipped: %s not found\\n' > %s\n", packagePath, shellQuotePath(logPath)))
+		if !process.Optional {
+			b.WriteString(fmt.Sprintf("  missing_required=%s\n", shellQuotePath(process.Name)))
+		}
 		b.WriteString("fi\n")
 	}
+	b.WriteString("if test -n \"$missing_required\"; then\n")
+	b.WriteString("  write_error \"required preview process ${missing_required} was not started\"\n")
+	b.WriteString("  exit 0\n")
+	b.WriteString("fi\n")
 	b.WriteString("if test \"$started_processes\" -eq 0; then\n")
 	b.WriteString("  write_error \"no preview processes started\"\n")
 	b.WriteString("  exit 0\n")
 	b.WriteString("fi\n")
 	mainPort := runtime.Port(runtime.Main)
 	if mainPort > 0 {
+		b.WriteString("if test -z \"$main_pid\"; then\n")
+		b.WriteString(fmt.Sprintf("  write_error \"main preview process %s was not started\"\n", runtime.Main))
+		b.WriteString("  exit 0\n")
+		b.WriteString("fi\n")
 		b.WriteString("ready=0\n")
 		b.WriteString("for i in $(seq 1 90); do\n")
 		b.WriteString(fmt.Sprintf("  if curl -fsS http://127.0.0.1:%d >/dev/null; then\n", mainPort))
@@ -146,7 +168,11 @@ func BuildPreviewSupervisorScript(runtime PreviewRuntime) string {
 		b.WriteString("fi\n")
 	}
 	b.WriteString("set +e\n")
-	b.WriteString("wait -n\n")
+	b.WriteString("if test \"${#required_pids[@]}\" -gt 0; then\n")
+	b.WriteString("  wait -n \"${required_pids[@]}\"\n")
+	b.WriteString("else\n")
+	b.WriteString("  wait -n\n")
+	b.WriteString("fi\n")
 	b.WriteString("exit_code=$?\n")
 	b.WriteString("set -e\n")
 	b.WriteString("write_error \"preview process exited with code ${exit_code}\"\n")
