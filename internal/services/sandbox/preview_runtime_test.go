@@ -91,6 +91,9 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 	if !strings.HasPrefix(runtime.Processes[1].Command, "export EXPO_GO_MODE=1 && export NODE_OPTIONS=") {
 		t.Fatalf("expo command should export env before starting, got %q", runtime.Processes[1].Command)
 	}
+	if !runtime.Processes[1].Optional {
+		t.Fatalf("expo go process should be optional in web preview supervisor")
+	}
 	for _, process := range runtime.Processes {
 		if strings.Contains(process.Command, "--host 0.0.0.0") {
 			t.Fatalf("expo command uses invalid host mode: %q", process.Command)
@@ -98,7 +101,7 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 	}
 }
 
-func TestPreviewSupervisorScriptWaitsForMainProcess(t *testing.T) {
+func TestPreviewSupervisorScriptIgnoresOnlyOptionalProcesses(t *testing.T) {
 	project := previewRuntimeProject()
 	project.ProjectType = models.ProjectTypeMobileAppNative
 
@@ -106,17 +109,42 @@ func TestPreviewSupervisorScriptWaitsForMainProcess(t *testing.T) {
 
 	for _, want := range []string{
 		"main_pid=\"\"",
+		"required_pids=()",
 		"pid=$!",
 		"main_pid=\"$pid\"",
-		"wait \"$main_pid\"",
+		"required_pids+=(\"$pid\")",
+		"wait -n \"${required_pids[@]}\"",
 		"main preview process web was not started",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("supervisor script missing %q:\n%s", want, script)
 		}
 	}
-	if strings.Contains(script, "wait -n\nexit_code=$?") {
-		t.Fatalf("supervisor script should not unconditionally wait for the first child to exit:\n%s", script)
+	if strings.Count(script, "required_pids+=(\"$pid\")") != 1 {
+		t.Fatalf("mobile supervisor should track only the required web process:\n%s", script)
+	}
+}
+
+func TestPreviewSupervisorScriptKeepsSplitWebBackendFailureVisible(t *testing.T) {
+	project := previewRuntimeProject()
+	project.FrontendRuntime = models.FrontendRuntimeViteReact
+	project.BackendEnabled = true
+	project.BackendRuntime = models.BackendRuntimeNextJSAPI
+
+	script := BuildPreviewSupervisorScript(BuildPreviewRuntime(project))
+
+	for _, want := range []string{
+		"required_pids=()",
+		"missing_required=\"\"",
+		"required preview process ${missing_required} was not started",
+		"wait -n \"${required_pids[@]}\"",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("supervisor script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Count(script, "required_pids+=(\"$pid\")") != 2 {
+		t.Fatalf("split web supervisor should track both backend and web as required:\n%s", script)
 	}
 }
 
@@ -141,7 +169,7 @@ func TestPreviewSupervisorScriptContainsSingleSessionProcessControl(t *testing.T
 		"trap cleanup EXIT",
 		"/workspace/.wemob/logs/web.log",
 		"http://127.0.0.1:3000",
-		"wait \"$main_pid\"",
+		"wait -n \"${required_pids[@]}\"",
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("script missing %q:\n%s", want, script)
@@ -166,6 +194,8 @@ func TestPreviewSupervisorScriptSkipsProcessesWithoutPackageJSON(t *testing.T) {
 		"if test -f '/workspace/backend/package.json'; then",
 		"started_processes=$((started_processes + 1))",
 		"skipped: /workspace/backend/package.json not found",
+		"missing_required='backend'",
+		"required preview process ${missing_required} was not started",
 		"if test \"$started_processes\" -eq 0; then",
 	} {
 		if !strings.Contains(script, want) {
