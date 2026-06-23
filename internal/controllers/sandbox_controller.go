@@ -47,7 +47,21 @@ func (c *Controller) EnsureAgentSandbox(ctx context.Context, project *models.App
 	if !agentPreviewShouldEnsure(status) {
 		return status, nil
 	}
+	if _, err := c.sandboxSourceFiles(project); err != nil {
+		if isMissingSandboxSourceError(err) {
+			return status, nil
+		}
+		return nil, err
+	}
 	return c.EnsurePreview(ctx, project)
+}
+
+func isMissingSandboxSourceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return msg == "no generated files found" || msg == "no mobile files found"
 }
 
 func agentPreviewShouldEnsure(status *sandbox.PreviewStatus) bool {

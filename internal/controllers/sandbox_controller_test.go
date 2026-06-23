@@ -144,6 +144,39 @@ func TestEnsureAgentSandboxStartsAndAttachesMissingSandbox(t *testing.T) {
 	}
 }
 
+func TestEnsureAgentSandboxSkipsFreshProjectWithoutGeneratedFiles(t *testing.T) {
+	ctx := context.Background()
+	project := &models.AppProject{
+		ID:              uuid.New(),
+		ProjectType:     models.ProjectTypeApp,
+		FrontendRuntime: models.FrontendRuntimeViteReact,
+		Slug:            "fresh",
+	}
+
+	provider := newControllerFakeSandboxProvider()
+	c := &Controller{
+		GitRepoService: gitrepo.NewService(t.TempDir()),
+		SandboxManager: sandbox.NewManager(provider),
+	}
+
+	status, err := c.EnsureAgentSandbox(ctx, project)
+	if err != nil {
+		t.Fatalf("EnsureAgentSandbox: %v", err)
+	}
+	if project.SandboxID != "" {
+		t.Fatalf("project sandbox id = %q", project.SandboxID)
+	}
+	if provider.startCalls != 0 {
+		t.Fatalf("start calls = %d, want 0", provider.startCalls)
+	}
+	if len(provider.files) != 0 {
+		t.Fatalf("synced files = %d, want 0", len(provider.files))
+	}
+	if status == nil || status.State != sandbox.PreviewMissing {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
 func TestSyncSandboxDeltasStartsMissingSandboxBeforeSync(t *testing.T) {
 	ctx := context.Background()
 	project := &models.AppProject{
