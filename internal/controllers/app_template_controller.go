@@ -77,7 +77,6 @@ func (c *Controller) CreateAppTemplate(user *models.User, req requests.CreateApp
 		Tags:         tags,
 		TemplateType: req.TemplateType,
 		ProjectType:  req.ProjectType,
-		Prompt:       req.Prompt,
 		Theme:        themeJSON,
 		DataModels:   dataModelsJSON,
 		Settings:     settings,
@@ -143,9 +142,6 @@ func (c *Controller) UpdateAppTemplate(id string, user *models.User, req request
 	}
 	if req.ProjectType != "" {
 		template.ProjectType = req.ProjectType
-	}
-	if req.Prompt != "" {
-		template.Prompt = req.Prompt
 	}
 	if req.PreviewImageKey != "" {
 		template.PreviewImageKey = req.PreviewImageKey
@@ -234,6 +230,10 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	if err != nil || !template.Published {
 		return nil, fmt.Errorf("template not found")
 	}
+	if template.SourceRepoID == "" || c.GitRepoService == nil {
+		slog.Error("Published template is not code-backed", "template_id", template.ID, "source_repo_id", template.SourceRepoID)
+		return nil, fmt.Errorf("failed to copy template files")
+	}
 
 	// Resolve the org early so the quota count below is org-scoped (matches
 	// CreateAppProject after the Plan A org-billing migration). Counting by
@@ -282,7 +282,7 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 		OrganizationID:  orgID,
 		Name:            template.Name,
 		Slug:            projectSlug,
-		Prompt:          template.Prompt,
+		Prompt:          "",
 		ProjectType:     template.ProjectType,
 		FrontendRuntime: frontendRuntime,
 		FrontendHosting: frontendHosting,
@@ -302,26 +302,19 @@ func (c *Controller) CopyTemplate(ctx context.Context, user *models.User, slug s
 	}
 
 	// Clone template git repo into new project
-	if template.SourceRepoID != "" {
-		repo, cloneErr := c.GitRepoService.Clone(template.SourceRepoID, project.ID.String())
-		if cloneErr != nil {
-			slog.Error("Failed to clone template git repo", "error", cloneErr,
-				"template_id", template.ID, "project_id", project.ID)
-			return nil, fmt.Errorf("failed to copy template files")
-		}
-		if shouldPreserveLegacyCopiedTemplate(project, repo) {
-			project.FrontendRuntime = models.FrontendRuntimeNextJSLegacy
-			project.FrontendHosting = models.FrontendHostingFly
-			project.BackendEnabled = false
-			project.BackendRuntime = models.BackendRuntimeNone
-			if _, updateErr := c.DB.UpdateAppProject(project); updateErr != nil {
-				slog.Warn("CopyTemplate: failed to persist inferred legacy runtime", "error", updateErr, "project_id", project.ID)
-			}
-		}
-	} else {
-		// Initialize empty repo if template has no source
-		if _, initErr := c.GitRepoService.Init(project.ID.String()); initErr != nil {
-			slog.Error("Failed to init git repo for template copy", "error", initErr, "project_id", project.ID)
+	repo, cloneErr := c.GitRepoService.Clone(template.SourceRepoID, project.ID.String())
+	if cloneErr != nil {
+		slog.Error("Failed to clone template git repo", "error", cloneErr,
+			"template_id", template.ID, "project_id", project.ID)
+		return nil, fmt.Errorf("failed to copy template files")
+	}
+	if shouldPreserveLegacyCopiedTemplate(project, repo) {
+		project.FrontendRuntime = models.FrontendRuntimeNextJSLegacy
+		project.FrontendHosting = models.FrontendHostingFly
+		project.BackendEnabled = false
+		project.BackendRuntime = models.BackendRuntimeNone
+		if _, updateErr := c.DB.UpdateAppProject(project); updateErr != nil {
+			slog.Warn("CopyTemplate: failed to persist inferred legacy runtime", "error", updateErr, "project_id", project.ID)
 		}
 	}
 
@@ -383,7 +376,6 @@ func (c *Controller) CreateTemplateFromApp(user *models.User, appID string, req 
 		Tags:         tags,
 		TemplateType: templateType,
 		ProjectType:  project.ProjectType,
-		Prompt:       project.Prompt,
 		Theme:        project.Theme,
 		DataModels:   project.DataModels,
 		Settings:     project.Settings,
@@ -468,7 +460,6 @@ func ToTemplateDetailResponse(t *models.AppTemplate) responses.AppTemplateDetail
 		DataModels:      dataModels,
 		Settings:        settings,
 		ProjectType:     t.ProjectType,
-		Prompt:          t.Prompt,
 		Published:       t.Published,
 		SortOrder:       t.SortOrder,
 		SourceRepoID:    t.SourceRepoID,
