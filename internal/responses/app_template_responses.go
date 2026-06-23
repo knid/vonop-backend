@@ -34,7 +34,6 @@ type AppTemplateDetailResponse struct {
 	DataModels      []any          `json:"data_models"`
 	Settings        map[string]any `json:"settings"`
 	ProjectType     string         `json:"project_type"`
-	Prompt          string         `json:"prompt"`
 	Published       bool           `json:"published,omitempty"`
 	SortOrder       int            `json:"sort_order,omitempty"`
 	SourceRepoID    string         `json:"source_repo_id,omitempty"`

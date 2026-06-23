@@ -12,7 +12,6 @@ type CreateAppTemplateRequest struct {
 	Tags         []string       `json:"tags"`
 	TemplateType string         `json:"template_type" validate:"required,oneof=web mobile both" errormgs:"must be 'web', 'mobile', or 'both'"`
 	ProjectType  string         `json:"project_type" validate:"required,oneof=app ecommerce" errormgs:"must be 'app' or 'ecommerce'"`
-	Prompt       string         `json:"prompt"`
 	Theme        map[string]any `json:"theme"`
 	DataModels   []any          `json:"data_models"`
 	Settings     map[string]any `json:"settings"`
@@ -29,7 +28,6 @@ type UpdateAppTemplateRequest struct {
 	Tags            []string       `json:"tags"`
 	TemplateType    string         `json:"template_type" validate:"omitempty,oneof=web mobile both" errormgs:"must be 'web', 'mobile', or 'both'"`
 	ProjectType     string         `json:"project_type" validate:"omitempty,oneof=app ecommerce" errormgs:"must be 'app' or 'ecommerce'"`
-	Prompt          string         `json:"prompt"`
 	PreviewImageKey string         `json:"preview_image_key"`
 	PreviewURL      string         `json:"preview_url"`
 	Theme           map[string]any `json:"theme"`

@@ -19,7 +19,6 @@ type AppTemplate struct {
 	DataModels      []byte         `bun:",type:jsonb,default:'[]'"`
 	Settings        map[string]any `bun:",type:jsonb,default:'{}'"`
 	ProjectType     string         `bun:",notnull,default:'app'"` // "app", "ecommerce"
-	Prompt          string         `bun:",type:text,default:''"`
 	SourceRepoID    string         `bun:",default:''"`
 	Published       bool           `bun:",notnull,default:false"`
 	CreatedByID     uuid.UUID      `bun:",notnull,type:uuid"`
