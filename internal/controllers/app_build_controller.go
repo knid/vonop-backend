@@ -124,22 +124,23 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 	//  1. No default connection → user hasn't linked their ASC API key.
 	//  2. Connection exists but ASC mint fails (revoked key, expired, ASC
 	//     downtime) → cert+profile can't be ensured.
+	var iosPreflightErr error
 	if wantIOS {
 		if project.DefaultAppleConnectionID == nil {
-			return nil, nil, &AppleSigningPreconditionError{
+			iosPreflightErr = &AppleSigningPreconditionError{
 				Message: "iOS builds require an Apple connection on this app — add an App Store Connect API key in Credentials and set it as the default for this app",
 			}
-		}
-		conn, err := c.DB.GetAppleConnectionById(project.DefaultAppleConnectionID.String())
-		if err != nil || conn == nil {
-			return nil, nil, &AppleSigningPreconditionError{
+		} else if conn, err := c.DB.GetAppleConnectionById(project.DefaultAppleConnectionID.String()); err != nil || conn == nil {
+			iosPreflightErr = &AppleSigningPreconditionError{
 				Message: fmt.Sprintf("iOS builds: Apple connection lookup failed — verify the linked App Store Connect key still exists: %v", err),
 			}
-		}
-		if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
-			return nil, nil, &AppleSigningPreconditionError{
+		} else if _, err := c.EnsureAppleSigningAssets(ctx, project, conn); err != nil {
+			iosPreflightErr = &AppleSigningPreconditionError{
 				Message: fmt.Sprintf("iOS builds: could not mint signing cert + profile via Apple — verify your ASC API key is still valid: %v", err),
 			}
+		}
+		if iosPreflightErr != nil && !wantAndroid {
+			return nil, nil, iosPreflightErr
 		}
 	}
 	bundleID := bundleIDForProject(project, opts.BundleIDOverride)
@@ -319,7 +320,9 @@ func (c *Controller) BuildExpoMobile(ctx context.Context, project *models.AppPro
 			if mobileCfg != nil {
 				iosPermissions = renderPermissionUsageStrings(build.Title, "", mobileCfg.Permissions)
 			}
-			if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindIOS, build.ID.String()); chargeErr != nil {
+			if iosPreflightErr != nil {
+				triggerErr = iosPreflightErr
+			} else if chargeErr := c.ChargeBuildCredits(user, project.OrganizationID, constants.BuildCreditKindIOS, build.ID.String()); chargeErr != nil {
 				slog.Warn("failed to charge ios build credits", "error", chargeErr, "build_id", build.ID, "org_id", project.OrganizationID)
 				triggerErr = fmt.Errorf("insufficient credits to trigger iOS build: %w", chargeErr)
 			} else {

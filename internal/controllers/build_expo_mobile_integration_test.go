@@ -449,19 +449,19 @@ func TestBuildExpoMobile_HappyPath_AndroidOnly(t *testing.T) {
 		t.Errorf("workflowID = %q, want %q", call.WorkflowID, codemagic.WorkflowExpoAndroidBuild)
 	}
 	wantEnv := map[string]string{
-		"CM_PROJECT_ID":          f.project.ID.String(),
-		"CM_BUILD_ID":            build.ID.String(),
-		"CM_TASK_ID":             tasks[0].ID.String(),
-		"CM_APP_TITLE":           "My Test App",
-		"CM_APP_SLUG":            f.project.Slug,
-		"CM_BUNDLE_ID":           bundleIDForProject(f.project, ""),
-		"CM_PACKAGE_NAME":        bundleIDForProject(f.project, ""),
-		"CM_BUILD_NUMBER":        "1",
-		"CM_MARKETING_VERSION":   "1.0.0",
-		"CM_SPLASH_COLOR":        "#112233",
-		"CM_FIRST_BUILD":         "true",
-		"CM_ICON_KEY":            "icons/test.png",
-		"CM_EAS_PROJECT_UUID":    f.project.ID.String(),
+		"CM_PROJECT_ID":             f.project.ID.String(),
+		"CM_BUILD_ID":               build.ID.String(),
+		"CM_TASK_ID":                tasks[0].ID.String(),
+		"CM_APP_TITLE":              "My Test App",
+		"CM_APP_SLUG":               f.project.Slug,
+		"CM_BUNDLE_ID":              bundleIDForProject(f.project, ""),
+		"CM_PACKAGE_NAME":           bundleIDForProject(f.project, ""),
+		"CM_BUILD_NUMBER":           "1",
+		"CM_MARKETING_VERSION":      "1.0.0",
+		"CM_SPLASH_COLOR":           "#112233",
+		"CM_FIRST_BUILD":            "true",
+		"CM_ICON_KEY":               "icons/test.png",
+		"CM_EAS_PROJECT_UUID":       f.project.ID.String(),
 		"EXPO_PUBLIC_API_URL":       "https://" + f.project.Slug + ".wemob.app",
 		"EXPO_PUBLIC_PROJECT_ID":    f.project.ID.String(),
 		"EXPO_PUBLIC_WEMOB_API_URL": "https://api.wemob.io",
@@ -538,6 +538,62 @@ func TestBuildExpoMobile_HappyPath_BothPlatforms(t *testing.T) {
 			t.Errorf("CM_PROJECT_ID mismatch on %s: got %q want %q",
 				c.WorkflowID, c.Variables["CM_PROJECT_ID"], f.project.ID.String())
 		}
+	}
+}
+
+func TestBuildExpoMobile_BothPlatformsMissingAppleSigningStillQueuesAndroid(t *testing.T) {
+	f := setupExpoBuildTest(t)
+	ctx := context.Background()
+
+	build, tasks, err := f.c.BuildExpoMobile(ctx, f.project, f.user, ExpoBuildOptions{
+		Platforms:   []string{"android", "ios"},
+		AppName:     "Partial App",
+		SplashColor: "#abcdef",
+	})
+	if err != nil {
+		t.Fatalf("BuildExpoMobile should not abort android when ios signing is missing: %v", err)
+	}
+	if build == nil {
+		t.Fatal("expected build, got nil")
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	var androidTask, iosTask *models.AppBuildTask
+	for _, task := range tasks {
+		switch task.Platform {
+		case "Android":
+			androidTask = task
+		case "IOS":
+			iosTask = task
+		}
+	}
+	if androidTask == nil {
+		t.Fatal("expected android task")
+	}
+	if iosTask == nil {
+		t.Fatal("expected ios task")
+	}
+	if androidTask.Finished {
+		t.Fatalf("android task should be queued, got finished status=%q err=%q", androidTask.StatusText, androidTask.ErrorMessage)
+	}
+	if androidTask.StatusText != "Queued" {
+		t.Fatalf("android status = %q, want Queued", androidTask.StatusText)
+	}
+	if !iosTask.Finished || iosTask.StatusText != "Failed" {
+		t.Fatalf("ios task should be failed, got finished=%v status=%q", iosTask.Finished, iosTask.StatusText)
+	}
+	if iosTask.ErrorMessage == "" {
+		t.Fatal("ios failed task should include an error message")
+	}
+
+	calls := f.cmRec.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected only android codemagic call, got %d", len(calls))
+	}
+	if calls[0].WorkflowID != codemagic.WorkflowExpoAndroidBuild {
+		t.Fatalf("workflow = %q, want %q", calls[0].WorkflowID, codemagic.WorkflowExpoAndroidBuild)
 	}
 }
 
@@ -629,13 +685,13 @@ func TestBuildExpoMobile_RejectsConcurrentBuild(t *testing.T) {
 
 	// Pre-insert a Build + non-Finished AppBuildTask scoped by AppProject.
 	pendingBuild, err := f.db.CreateProjectBuild(&models.Build{
-		AppProjectID:  f.project.ID,
-		BuildNumber:   1,
-		VersionString: "0.0.1",
-		Title:         "prior",
-		Icon:          "",
+		AppProjectID:      f.project.ID,
+		BuildNumber:       1,
+		VersionString:     "0.0.1",
+		Title:             "prior",
+		Icon:              "",
 		SplashScreenColor: "#fff",
-		NavBarStyle:   "default",
+		NavBarStyle:       "default",
 	})
 	if err != nil {
 		t.Fatalf("create prior build: %v", err)
