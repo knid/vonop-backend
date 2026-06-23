@@ -61,6 +61,31 @@ func setupMobileBootstrapTest(t *testing.T) (*Controller, *database.Database, *m
 	return c, db, user, org
 }
 
+func TestCreateDraftAppProjectPersistsDraftStatus(t *testing.T) {
+	c, db, user, org := setupMobileBootstrapTest(t)
+	ctx := context.Background()
+
+	project, err := c.CreateDraftAppProject(ctx, user, requests.GenerateAppRequest{
+		Prompt:         "tiny bakery landing page",
+		ProjectType:    models.ProjectTypeApp,
+		OrganizationID: &org.ID,
+	})
+	if err != nil {
+		t.Fatalf("CreateDraftAppProject: %v", err)
+	}
+	if project.Status != "draft" {
+		t.Fatalf("returned status = %q, want draft", project.Status)
+	}
+
+	reloaded, err := db.GetAppProjectByID(project.ID.String())
+	if err != nil {
+		t.Fatalf("reload project: %v", err)
+	}
+	if reloaded.Status != "draft" {
+		t.Fatalf("persisted status = %q, want draft", reloaded.Status)
+	}
+}
+
 // TestCreateAppProject_MobileAppNative_SeedsMobileAppConfig verifies that a
 // mobile_app_native project gets an eager MobileAppConfig row with the
 // expected boolean defaults populated (PushEnabled, BridgeEnabled, etc.).
