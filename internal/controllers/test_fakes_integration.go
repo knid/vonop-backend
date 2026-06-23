@@ -7,6 +7,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/secret"
@@ -38,7 +39,7 @@ var _ secret.SecretManager = (*fakeSecretManager)(nil)
 // fakeEventCall records a single SendEvent invocation.
 type fakeEventCall struct {
 	User       *models.User
-	Event      string
+	Event      constants.EventName
 	Attributes map[string]any
 }
 
@@ -54,7 +55,7 @@ func newFakeEventService() *fakeEventService {
 	return &fakeEventService{}
 }
 
-func (f *fakeEventService) SendEvent(user *models.User, event string, attributes map[string]any) error {
+func (f *fakeEventService) SendEvent(user *models.User, event constants.EventName, attributes map[string]any) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Calls = append(f.Calls, fakeEventCall{User: user, Event: event, Attributes: attributes})
