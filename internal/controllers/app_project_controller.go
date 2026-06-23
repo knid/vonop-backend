@@ -49,10 +49,10 @@ func (c *Controller) CreateDraftAppProject(ctx context.Context, user *models.Use
 	if err != nil {
 		return nil, err
 	}
-	project.Status = "draft"
-	if _, err := c.DB.UpdateAppProject(project); err != nil {
+	if err := c.DB.UpdateAppProjectStatus(project.ID.String(), "draft"); err != nil {
 		return nil, fmt.Errorf("failed to set draft status: %w", err)
 	}
+	project.Status = "draft"
 	return project, nil
 }
 
