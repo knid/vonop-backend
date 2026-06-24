@@ -101,6 +101,31 @@ func TestWebFirstGenPromptEmphasizesBatchedUiScaffold(t *testing.T) {
 	}
 }
 
+func TestMobileFirstGenPromptDefaultsToSmallUiScaffold(t *testing.T) {
+	for _, required := range []string{
+		"Default phase is UI scaffold only",
+		"create DESIGN.md",
+		"one coherent primary mobile screen",
+		"Do not add backend APIs",
+		"Stop after one focused verification pass",
+	} {
+		if !strings.Contains(BasePromptMobileNativeFirstGen, required) {
+			t.Fatalf("BasePromptMobileNativeFirstGen missing lean scaffold guidance %q", required)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"home screen first",
+		"finish the entire visible UI surface",
+		"Every other screen + component with stubs",
+		"Images Last",
+	} {
+		if strings.Contains(BasePromptMobileNativeFirstGen, forbidden) {
+			t.Fatalf("BasePromptMobileNativeFirstGen still carries over-broad first-gen guidance %q", forbidden)
+		}
+	}
+}
+
 func TestWebBuilderFoundationBatchesSmallFiles(t *testing.T) {
 	if strings.Count(webBuilderFoundationSkillForTests(), "NEVER write files larger than ~15KB") != 0 {
 		t.Fatal("web-builder foundation must not repeat the old single-file-biased 15KB warning")

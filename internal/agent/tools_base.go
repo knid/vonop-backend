@@ -156,6 +156,9 @@ func enforceProjectPathScope(rc *RunContext, path string) string {
 	if rc.Project.ProjectType != models.ProjectTypeMobileAppNative {
 		return ""
 	}
+	if path == designFilePath {
+		return ""
+	}
 	if strings.HasPrefix(path, mobileNativePathPrefixMobile) ||
 		strings.HasPrefix(path, mobileNativePathPrefixBackend) {
 		return ""

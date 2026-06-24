@@ -139,7 +139,7 @@ func TestWriteFilesTool_RejectsMalformedDesignBrief(t *testing.T) {
 
 func TestCreateDesignTool_WritesValidDesignBrief(t *testing.T) {
 	tool := CreateDesignTool{}
-	rc := newPathScopeTestRC(models.ProjectTypeApp)
+	rc := newPathScopeTestRC(models.ProjectTypeMobileAppNative)
 
 	out, isError, err := tool.Execute(context.Background(), rc, json.RawMessage(`{
 		"register":"brand",

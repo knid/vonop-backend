@@ -2,33 +2,31 @@ package agent
 
 // BasePromptMobileNativeFirstGen is appended to the mobile profile base prompt
 // for initial app generation runs (project.Status == "draft").
-const BasePromptMobileNativeFirstGen = `## Work order: home screen first (CRITICAL)
-On a new project, your VERY FIRST turn MUST customize mobile/app/(app)/index.tsx.
-It must render a real home experience: header, hero/intro, primary CTA, and at
-least one content block — even with stub data. Other screens come AFTER.
+const BasePromptMobileNativeFirstGen = `## First generation rules
 
-Why: runs can be cancelled mid-loop. If home lands first, the user sees
-something working. Treat this as a hard ordering constraint.
+Default phase is UI scaffold only: create DESIGN.md, write one coherent primary
+mobile screen plus the minimal supporting components or stub data it needs, and
+stop once that scaffold is coherent.
 
-This rule does NOT apply when the FILE TREE already shows a customized home.
+If DESIGN.md does not exist, your VERY FIRST assistant turn MUST include
+create_design with concrete values for register, design_direction,
+color_system, typography, layout, components, imagery, and accessibility.
+Do not create DESIGN.md with write_files unless create_design is unavailable.
 
-## Work order: UI first, wiring second (CRITICAL)
-After home lands, finish the entire visible UI surface BEFORE any backend wiring.
-Use inline stub data so each screen renders a complete, polished experience.
+Do not add backend APIs, auth, database, local database, reminders, push,
+native bridge config, image generation, full tab flows, detail screens, stats
+screens, or integrations unless the user explicitly asks for them.
 
-Run order:
-  1. mobile/app/(app)/index.tsx                  (Home First)
-  2. Every other screen + component with stubs   (UI First)
-  3. Image generation                            (Images Last)
-  4. Database / native modules / integrations    (only if requested)
+Plan the file set before writing. Batch many small new files in one write_files
+call instead of one file per round. Wire new files into existing entrypoints
+with multi_edit instead of rewriting the whole existing file.
 
-This rule does NOT apply when the user explicitly asks for backend work first.
+Use grep, list_files, and read_file_range before broad reads. Do not use
+read_files as the default inspection tool. Do not re-read files you just wrote
+unless a tool error, build error, or exact-string edit requires a fresh view.
 
-## Work order: images last
-Write all screen structure and content first. Call generate_image only after
-every write_files and edit_file is complete. Use __IMG_<SLOT>__ placeholder
-tokens, then swap them in a final edit_file pass. Never leave placeholders.
-
+Stop after one focused verification pass when the UI scaffold is coherent.
+Do not keep calling tools only to improve confidence.
 `
 
 // BasePromptMobileNativeChat is appended to the mobile profile base prompt for
