@@ -212,28 +212,37 @@ func TestSandboxExecToolSyncsDeletedFilesAsDeleteDeltasBeforeExec(t *testing.T) 
 	}
 }
 
-func TestSandboxExecToolRejectsSourceMutationCommands(t *testing.T) {
-	called := false
+func TestSandboxExecToolAllowsSandboxLocalShellAndFileOperations(t *testing.T) {
+	var commands []string
 	deps := &RunDependencies{
 		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
-			called = true
-			return nil, nil
+			commands = append(commands, req.Command)
+			return map[string]any{"stdout": "ok", "exit_code": 0}, nil
 		},
 	}
 	rc := &RunContext{Project: &models.AppProject{ProjectType: models.ProjectTypeApp}, User: &models.User{}, Deps: deps}
 
-	result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, json.RawMessage(`{"command":"echo hacked > frontend/src/App.tsx","cwd":"project"}`))
-	if err != nil {
-		t.Fatalf("Execute returned error: %v", err)
+	for _, command := range []string{
+		`echo hacked > frontend/src/App.tsx`,
+		`npm test && touch src/x`,
+		`npm test; rm -rf src/tmp`,
+		`cat package.json | jq '.scripts'`,
+		`CI=1 sh -c 'mkdir -p /tmp/out && cp package.json /tmp/out/package.json'`,
+		`perl -pi -e 's/foo/bar/g' /tmp/out.txt`,
+	} {
+		t.Run(command, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]string{"command": command, "cwd": "project"})
+			result, isErr, err := (SandboxExecTool{Deps: deps}).Execute(context.Background(), rc, input)
+			if err != nil {
+				t.Fatalf("Execute returned error: %v", err)
+			}
+			if isErr {
+				t.Fatalf("expected sandbox command to be forwarded, got error: %s", result)
+			}
+		})
 	}
-	if !isErr {
-		t.Fatalf("expected tool error, got success: %s", result)
-	}
-	if called {
-		t.Fatal("sandbox control should not be called for rejected mutation commands")
-	}
-	if !strings.Contains(result, "file tools") {
-		t.Fatalf("expected file tool guidance, got: %s", result)
+	if len(commands) != 6 {
+		t.Fatalf("forwarded commands = %#v, want 6 commands", commands)
 	}
 }
 
@@ -266,31 +275,23 @@ func TestSandboxExecToolIgnoresLegacyKillSwitch(t *testing.T) {
 	}
 }
 
-func TestSandboxExecToolRejectsChainedAndShellWrappedMutations(t *testing.T) {
+func TestSandboxExecToolStillRejectsEmptyCommand(t *testing.T) {
 	rc := &RunContext{Project: &models.AppProject{ProjectType: models.ProjectTypeApp}, User: &models.User{}, Deps: &RunDependencies{
 		SandboxControl: func(ctx context.Context, project *models.AppProject, user *models.User, req SandboxControlRequest) (map[string]any, error) {
-			t.Fatalf("sandbox control should not be called for %q", req.Command)
+			t.Fatal("sandbox control should not be called for an empty command")
 			return nil, nil
 		},
 	}}
 
-	for _, input := range []string{
-		`{"command":"npm test; rm -rf src","cwd":"project"}`,
-		`{"command":"npm test && touch src/x","cwd":"project"}`,
-		`{"command":"CI=1 sh -c 'touch src/x'","cwd":"project"}`,
-	} {
-		t.Run(input, func(t *testing.T) {
-			result, isErr, err := (SandboxExecTool{}).Execute(context.Background(), rc, json.RawMessage(input))
-			if err != nil {
-				t.Fatalf("Execute returned error: %v", err)
-			}
-			if !isErr {
-				t.Fatalf("expected tool error, got success: %s", result)
-			}
-			if !strings.Contains(result, "Git-backed file tools") {
-				t.Fatalf("expected file tool guidance, got: %s", result)
-			}
-		})
+	result, isErr, err := (SandboxExecTool{}).Execute(context.Background(), rc, json.RawMessage(`{"command":"   ","cwd":"project"}`))
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !isErr {
+		t.Fatalf("expected tool error, got success: %s", result)
+	}
+	if !strings.Contains(result, "command is required") {
+		t.Fatalf("expected required-command guidance, got: %s", result)
 	}
 }
 

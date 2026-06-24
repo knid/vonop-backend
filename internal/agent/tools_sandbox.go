@@ -96,14 +96,14 @@ type SandboxExecTool struct{ Deps *RunDependencies }
 
 func (SandboxExecTool) Name() string { return "sandbox_exec" }
 func (SandboxExecTool) Description() string {
-	return "Run one finite command inside the Daytona preview sandbox for builds, tests, diagnostics, curl, pandoc, or artifact work. Do not use this to create, update, or delete app source files; use the Git-backed file tools for source changes."
+	return "Run one finite command inside the isolated Daytona preview sandbox for builds, tests, installs, diagnostics, curl, pandoc, artifact work, temporary files, and sandbox-local shell operations. Persistent app source changes must still be made with Git-backed file tools."
 }
 func (SandboxExecTool) Schema() map[string]any {
 	return map[string]any{
 		"type":     "object",
 		"required": []any{"command"},
 		"properties": map[string]any{
-			"command": map[string]any{"type": "string", "description": "One finite command, for example npm run build, npx tsc --noEmit, curl -I http://localhost:3000, or pandoc input.md -o /workspace/artifacts/out.pdf."},
+			"command": map[string]any{"type": "string", "description": "One finite shell command, for example npm run build, npx tsc --noEmit, npm install, mkdir -p /tmp/out && cp package.json /tmp/out, curl -I http://localhost:3000, or pandoc input.md -o /workspace/artifacts/out.pdf. Sandbox-local filesystem changes are allowed, but persistent source changes must use Git-backed file tools."},
 			"cwd": map[string]any{
 				"type":        "string",
 				"description": "Working directory alias or absolute workspace path. Use frontend, backend, project, artifacts, or an absolute path under /workspace/project, /workspace/backend, /workspace/artifacts, or /tmp.",
@@ -195,84 +195,10 @@ const (
 )
 
 func validateSandboxExecCommand(command string) string {
-	lower := strings.ToLower(strings.TrimSpace(command))
 	if strings.ContainsAny(command, "\r\n") {
 		return "sandbox_exec accepts one finite command per call; do not pass multi-line shell scripts"
 	}
-	if containsShellControl(lower) {
-		return "sandbox_exec must not use shell chaining, pipes, command substitution, or background operators; use one finite command and Git-backed file tools for source changes"
-	}
-	if strings.Contains(command, ">") || strings.Contains(command, "<") {
-		return "sandbox_exec must not use shell redirection to create or change files; use Git-backed file tools for source files and write artifacts under /workspace/artifacts with command flags such as -o"
-	}
-	fields := strings.Fields(lower)
-	if len(fields) == 0 {
-		return "command is required"
-	}
-	firstCommand := firstNonEnvAssignmentField(fields)
-	if firstCommand == "" {
-		return "command is required"
-	}
-	blockedFirstWords := map[string]string{
-		"rm":       "delete files",
-		"mv":       "move or rename files",
-		"cp":       "copy files",
-		"touch":    "create files",
-		"mkdir":    "create directories",
-		"rmdir":    "delete directories",
-		"tee":      "write files",
-		"truncate": "modify files",
-		"bash":     "wrap commands in a shell",
-		"sh":       "wrap commands in a shell",
-		"zsh":      "wrap commands in a shell",
-	}
-	if reason, ok := blockedFirstWords[firstCommand]; ok {
-		return fmt.Sprintf("sandbox_exec must not %s; use the Git-backed file tools for source changes and call finite commands directly", reason)
-	}
-	if strings.Contains(lower, " sed -i") || strings.HasPrefix(lower, "sed -i") ||
-		strings.Contains(lower, " perl -pi") || strings.HasPrefix(lower, "perl -pi") {
-		return "sandbox_exec must not mutate files in place; use the Git-backed file tools for source changes"
-	}
 	return ""
-}
-
-func containsShellControl(command string) bool {
-	for _, token := range []string{";", "&&", "||", "|", "`", "$("} {
-		if strings.Contains(command, token) {
-			return true
-		}
-	}
-	return false
-}
-
-func firstNonEnvAssignmentField(fields []string) string {
-	for _, field := range fields {
-		if isShellEnvAssignment(field) {
-			continue
-		}
-		return field
-	}
-	return ""
-}
-
-func isShellEnvAssignment(field string) bool {
-	idx := strings.IndexByte(field, '=')
-	if idx <= 0 {
-		return false
-	}
-	key := field[:idx]
-	for i, r := range key {
-		if i == 0 {
-			if r != '_' && (r < 'a' || r > 'z') {
-				return false
-			}
-			continue
-		}
-		if r != '_' && (r < 'a' || r > 'z') && (r < '0' || r > '9') {
-			return false
-		}
-	}
-	return true
 }
 
 func normalizeSandboxExecCwd(project *models.AppProject, cwd string) (string, string) {
