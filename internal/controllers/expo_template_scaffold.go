@@ -17,12 +17,8 @@ import (
 // FS into the project's git repo under mobile/<path>, substituting the
 // __FOO__ placeholders the template carries with real per-project values.
 //
-// The template was originally written with placeholders that Codemagic
-// substituted via `sed` at build time. That left raw `__BUNDLE_ID__` etc.
-// visible in the studio editor, broke `expo prebuild` whenever it ran
-// outside Codemagic (e.g. our OTA-publish worker), and surprised users.
-// Now we substitute project-stable values at scaffold time so the on-disk
-// `app.json` is always a valid Expo config that any tool can consume.
+// Values are substituted at scaffold time so the on-disk app.json is always
+// a valid Expo config that the preview sandbox and user export can consume.
 //
 // Existing files in mobile/ are NOT overwritten — this is a one-shot
 // scaffold meant to run on a fresh project.
@@ -73,16 +69,9 @@ func scaffoldExpoTemplate(c *Controller, repo *gitrepo.Repo, project *models.App
 }
 
 // expoTemplateSubstitutions returns the placeholder→value map used at
-// scaffold time. Project-stable values are derived from the project; the
-// per-binary-build values (marketing version / build number / splash
-// color) get sensible defaults so app.json is a valid Expo config out of
-// the gate. The Codemagic build pipeline can still override per-build
-// values at build time using its existing CM_* env vars (it would need to
-// switch from sed-replacing placeholders to a JSON-aware update — outside
-// the scope of this change).
+// scaffold time. Project-stable values are derived from the project.
 func expoTemplateSubstitutions(c *Controller, project *models.AppProject, authEnabled bool) map[string]string {
 	bundleID := bundleIDForProject(project, "")
-	otaURL := c.BackendDeployURL(project) + "/v2/apps/" + project.ID.String() + "/ota"
 	return map[string]string{
 		"__APP_TITLE__":         project.Name,
 		"__APP_SLUG__":          project.Slug,
@@ -91,10 +80,7 @@ func expoTemplateSubstitutions(c *Controller, project *models.AppProject, authEn
 		"__MARKETING_VERSION__": "1.0.0",
 		"__BUILD_NUMBER__":      "1",
 		"__SPLASH_COLOR__":      "#FFFFFF",
-		"__OTA_URL__":           otaURL,
-		"__OTA_KEY_ID__":        "",
 		"__APP_SCHEME__":        strings.ToLower(strings.TrimSpace(project.Slug)),
-		"__EAS_PROJECT_ID_NOT_USED_BUT_REQUIRED_FOR_RUNTIME__": project.ID.String(),
 	}
 }
 

@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Verify the embedded Expo template under
 # internal/agent/templates/expo_native/ is in sync with the standalone
-# wemob-expo-template repo (the scaffold Codemagic clones at build time).
+# wemob-expo-template repo.
 #
-# These two trees can drift silently because the agent reads the embedded
-# copy while builds run against the standalone repo — see P0 #3 of the
-# 2026-05-02 mobile pipeline audit. This script does a `diff -rq` and
-# exits non-zero if any file differs (excluding intentional non-ports
-# like codemagic.yaml, README.md, embed.go, etc.).
+# These two trees can drift silently. This script does a `diff -rq` and exits
+# non-zero if any file differs, excluding intentional non-ports like README.md
+# and embed.go.
 #
 # Usage:
 #   scripts/check-template-sync.sh                # uses ../wemob-expo-template
@@ -44,7 +42,6 @@ DIFF=$(diff -rq \
   --exclude=.worktrees \
   --exclude=dist \
   --exclude=package-lock.json \
-  --exclude=codemagic.yaml \
   --exclude=.gitignore \
   --exclude=README.md \
   --exclude=expo-env.d.ts \

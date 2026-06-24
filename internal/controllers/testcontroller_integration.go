@@ -36,14 +36,14 @@ type TestFakes struct {
 // tests don't have to provide every positional dependency.
 //
 // KNOWN nil fields (intentional — set explicitly in tests that need them):
-//   - UserApiKeysStorage, AssetsStorage, AndroidKeysStorage (legacy *S3Storage)
+//   - UserApiKeysStorage, AssetsStorage (legacy *S3Storage)
 //   - SlackService, TaskService, AsynqInspector
 //   - FlyService, GiteaService, NeonService, GitRepoService
-//   - CodemagicService, RemoteConfig, SandboxManager, PostHog, CaddyAdmin, EdgeIPs
+//   - RemoteConfig, SandboxManager, PostHog, CaddyAdmin, EdgeIPs
 //
-// Tests that touch S3 directly (presigned URL generation, RedeemKeystoreDownload's
-// S3 read, the encryptAndStoreCredential staging-bucket read used by Create/Update
-// connection flows) will nil-deref on the storage fields. Inject a real or fake
+// Tests that touch S3 directly (presigned URL generation or the
+// encryptAndStoreCredential staging-bucket read used by Create/Update connection
+// flows) will nil-deref on the storage fields. Inject a real or fake
 // *storage.S3Storage on the returned Controller in those tests.
 func NewTestController(t *testing.T, db *database.Database, opts TestControllerOptions) (*Controller, *TestFakes) {
 	t.Helper()

@@ -61,7 +61,7 @@ var mobileBuilderProfile = &AgentProfile{
 	FirstGenPrompt:   BasePromptMobileNativeFirstGen,
 	ChatPrompt:       BasePromptMobileNativeChat,
 	DefaultSkillIDs:  []string{"expo-router", "mobile-builder-foundation", "nativewind-ui"},
-	HandoffTargets:   []string{"debug-agent", "release-agent"},
+	HandoffTargets:   []string{"debug-agent"},
 	BuildRegistry:    buildMobileBuilderRegistry,
 	ToolGuardrails:   []ToolGuardrail{ReadOnlyToolGuardrail, HumanApprovalToolGuardrail, SkillAllowedToolsGuardrail, PackageScriptToolGuardrail},
 	ValidationPolicy: DefaultValidationPolicy,

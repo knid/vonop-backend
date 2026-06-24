@@ -16,13 +16,7 @@ import (
 func TestEmbedIncludesTemplateBootFiles(t *testing.T) {
 	required := []string{
 		"app.json",
-		// app.config.js patches the resolved Expo config based on
-		// EXPO_GO_MODE — strips EAS / fingerprint when the Expo Go-targeted
-		// Metro starts. Drop it and the Expo Go preview hits a non-
-		// interactive auth wall on manifest fetch.
-		"app.config.js",
 		"babel.config.js",
-		"eas.json",
 		"global.css",
 		"metro.config.js",
 		"nativewind-env.d.ts",
@@ -35,11 +29,6 @@ func TestEmbedIncludesTemplateBootFiles(t *testing.T) {
 		"store/index.ts",
 		"app/_layout.tsx",
 		"lib/api.ts",
-		// push.ts and iap.ts carry the Expo Go runtime guards. Dropping
-		// them would let the agent's generated code crash at module-eval
-		// time the moment a project is opened in Expo Go.
-		"lib/push.ts",
-		"lib/iap.ts",
 		// nativewind-setup registers cssInterop for Animated.* components.
 		// Without it, every <Animated.View className="..."> in user code
 		// silently drops styles, breaking screen padding everywhere.

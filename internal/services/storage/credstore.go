@@ -46,12 +46,11 @@ func NewCredStore(s3 credStoreS3, kms credStoreKMS) *CredStore {
 	return &CredStore{s3: s3, kms: kms}
 }
 
-// CredRef is the persistent handle to a stored credential. Persist this in
-// the AppleConnection / GooglePlayConnection / etc. row; pass it back to
-// Get when reading. Holds no plaintext.
+// CredRef is the persistent handle to a stored secret. Persist this in the
+// owning model row and pass it back to Get when reading. Holds no plaintext.
 type CredRef struct {
 	OrgID        uuid.UUID
-	Kind         string // "apple-p8" | "apple-apns" | "google-sa" | "android-keystore" | etc.
+	Kind         string
 	BlobS3Key    string
 	DEKBlobS3Key string
 }

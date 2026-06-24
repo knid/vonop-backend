@@ -32,14 +32,12 @@ func (c *Controller) AdminListProjects(params requests.AdminListParams) (*respon
 		if p.User != nil {
 			userEmail = p.User.Email
 		}
-		buildCount, _ := c.DB.AdminGetProjectBuildCount(p.ID.String())
 		items[i] = responses.AdminProjectResponse{
 			ID:          p.ID,
 			UserID:      p.UserID,
 			UserEmail:   userEmail,
 			URL:         p.URL,
 			PackageName: p.PackageName,
-			BuildCount:  buildCount,
 			CreatedAt:   p.CreatedAt,
 		}
 	}
@@ -70,15 +68,12 @@ func (c *Controller) AdminGetProject(projectID string) (*responses.AdminProjectR
 		userEmail = project.User.Email
 	}
 
-	buildCount, _ := c.DB.AdminGetProjectBuildCount(project.ID.String())
-
 	return &responses.AdminProjectResponse{
 		ID:          project.ID,
 		UserID:      project.UserID,
 		UserEmail:   userEmail,
 		URL:         project.URL,
 		PackageName: project.PackageName,
-		BuildCount:  buildCount,
 		CreatedAt:   project.CreatedAt,
 	}, nil
 }

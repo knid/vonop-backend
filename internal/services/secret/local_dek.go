@@ -19,8 +19,8 @@ import (
 //   - Real AES-256-GCM encryption is still in place — only the KMS round-trip
 //     is skipped
 //
-// Use only for dev/staging when you want CredStore + the keystore endpoints
-// to function without an AWS KMS dependency. Production should use KMSManager.
+// Use only for dev/staging when you want CredStore to function without an AWS
+// KMS dependency. Production should use KMSManager.
 //
 // **One-way:** rows encrypted under LocalDEKManager are unreadable by
 // KMSManager (the persisted "DEK blob" is meaningless to KMS.Decrypt).

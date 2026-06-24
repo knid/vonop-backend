@@ -33,7 +33,7 @@ func TestDefaultProjectCapabilities(t *testing.T) {
 			name:            "mobile stays expo",
 			projectType:     models.ProjectTypeMobileAppNative,
 			frontendRuntime: models.FrontendRuntimeExpoNative,
-			frontendHosting: models.FrontendHostingCodemagic,
+			frontendHosting: models.FrontendHostingNone,
 			backendRuntime:  models.BackendRuntimeNone,
 		},
 	}

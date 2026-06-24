@@ -39,7 +39,6 @@ rsync -a \
   --exclude='.expo' \
   --exclude='dist' \
   --exclude='package-lock.json' \
-  --exclude='codemagic.yaml' \
   --exclude='README.md' \
   "$SOURCE/" "$DEST/"
 

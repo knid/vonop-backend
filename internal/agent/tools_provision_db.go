@@ -126,10 +126,25 @@ type ProvisionDatabaseTool struct {
 	Deps *RunDependencies
 }
 
+func camelCaseSnake(s string) string {
+	parts := strings.Split(s, "_")
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	out := parts[0]
+	for _, p := range parts[1:] {
+		if p == "" {
+			continue
+		}
+		out += strings.ToUpper(p[:1]) + p[1:]
+	}
+	return out
+}
+
 func (ProvisionDatabaseTool) Name() string { return "provision_database" }
 
 func (ProvisionDatabaseTool) Description() string {
-	return "Create the project's wemob database. Call this exactly once when the user asks for a database without naming a specific provider. Provide a `tables` array (each table needs a name and a columns array); the tool creates the database, runs CREATE TABLE for each table, seeds it with realistic demo data (including AI-generated images for image columns), writes the database client (`lib/db.ts` for web projects, `backend/lib/db.ts` for native mobile projects — the latter scaffolds a minimal Next.js backend if `backend/` doesn't exist yet), and unlocks the execute_sql tool. Do NOT call this if the user explicitly named a third-party provider (Supabase, Firebase, etc.) — use those integrations directly instead. Do NOT call this on ecommerce projects — their canonical schema is seeded automatically at project creation time. For on-device SQLite (offline-first apps with no backend), use `provision_local_database` instead — that tool is only available on native mobile projects."
+	return "Create the project's wemob database. Call this exactly once when the user asks for a database without naming a specific provider. Provide a `tables` array (each table needs a name and a columns array); the tool creates the database, runs CREATE TABLE for each table, seeds it with realistic demo data (including AI-generated images for image columns), writes the database client for web projects, and unlocks the execute_sql tool. Do NOT call this if the user explicitly named a third-party provider (Supabase, Firebase, etc.) — use those integrations directly instead. Do NOT call this on ecommerce projects — their canonical schema is seeded automatically at project creation time."
 }
 
 func (ProvisionDatabaseTool) Schema() map[string]any {

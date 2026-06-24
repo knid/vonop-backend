@@ -18,7 +18,6 @@ const (
 	EVENT_PASSWORD_RESET               EventName = "password_reset"
 	EVENT_PASSWORD_RESET_REQUESTED     EventName = "password_reset_requested"
 	EVENT_EMAIL_VERIFICATION_REQUESTED EventName = "email_verification_requested"
-	EVENT_KEYSTORE_DOWNLOAD_OTP        EventName = "keystore_download_otp"
 
 	// Support
 	EVENT_NEW_TICKET EventName = "support_ticket_created"
@@ -57,19 +56,9 @@ const (
 	EVENT_WEB_DEPLOYMENT_FAILED    EventName = "app_deploy_failed"
 	EVENT_WEB_UNDEPLOYED           EventName = "app_undeployed_web"
 
-	// Mobile deployment / OTA / release
-	EVENT_MOBILE_UNDEPLOYED     EventName = "app_undeployed_mobile"
-	EVENT_APP_DEPLOYED_EXPO_OTA EventName = "app_deployed_expo_ota"
-	EVENT_OTA_PROMOTED          EventName = "app_ota_promoted"
-	EVENT_OTA_ROLLED_BACK       EventName = "app_ota_rolled_back"
-	EVENT_RELEASE_LIFECYCLE     EventName = "release_lifecycle"
-	EVENT_RELEASE_CREATE_FAILED EventName = "release_create_failed"
-
 	// Dynamic-suffix prefixes — call site appends the platform (e.g. "ios").
 	// These are constants so the prefix lives in one place; the assembled
 	// event name is still passed through TrackUserEvent / SendEvent typed.
-	EVENT_PREFIX_APP_BUILT_EXPO EventName = "app_built_expo_"
-	EVENT_PREFIX_APP_SUBMITTED  EventName = "app_submitted_"
 
 	// Domain
 	EVENT_DOMAIN_ADDED    EventName = "domain_added"

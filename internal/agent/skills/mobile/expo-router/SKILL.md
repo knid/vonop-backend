@@ -24,8 +24,7 @@ Use this skill on every mobile-builder turn.
 
 - Use Expo Router file conventions under the mobile app tree: route groups, `_layout.tsx`, screen files, and typed navigation patterns already present in the template.
 - Build native React Native screens, not DOM or web-only components. Do not use `window`, `document`, HTML tags, CSS media queries, or Next.js APIs.
-- Use mobile template helpers for API calls, auth, haptics, push, location, camera, contacts, calendar, local notifications, biometrics, review prompts, sharing, network state, and IAP.
-- Check or configure mobile bridge capabilities before using native features that require permissions or native setup.
+- Use Expo Router route conventions and the preview-safe helpers already present in the template.
+- Do not add production native services, bridge configuration, app-store build flows, backend/auth infrastructure, push, IAP, or permission-gated native features.
 - Use `FlatList` or `SectionList` for long lists instead of mapping large arrays inside `ScrollView`.
-- Keep route changes small during edits. Preserve existing navigation groups and auth boundaries unless the user asks to change them.
-- For build failures, read logs before editing and prefer the smallest targeted fix.
+- Keep route changes small during edits.

@@ -12,20 +12,19 @@ type AdminStats struct {
 	PaidUsers        int `json:"paid_users"`
 	InactiveUsers    int `json:"inactive_users"`
 	TotalProjects    int `json:"total_projects"`
-	TotalBuilds      int `json:"total_builds"`
 	NewUsersToday    int `json:"new_users_today"`
 	NewUsersThisWeek int `json:"new_users_this_week"`
 }
 
 type RevenueStats struct {
-	TotalSubscriptions int `json:"total_subscriptions"`
+	TotalSubscriptions  int `json:"total_subscriptions"`
 	ActiveSubscriptions int `json:"active_subscriptions"`
 }
 
 type AIUsageStats struct {
-	TotalCreditsUsed   int `json:"total_credits_used"`
-	TotalTransactions  int `json:"total_transactions"`
-	AvgCreditsPerUser  int `json:"avg_credits_per_user"`
+	TotalCreditsUsed  int `json:"total_credits_used"`
+	TotalTransactions int `json:"total_transactions"`
+	AvgCreditsPerUser int `json:"avg_credits_per_user"`
 }
 
 func (db *Database) GetAdminStats() (*AdminStats, error) {
@@ -59,12 +58,6 @@ func (db *Database) GetAdminStats() (*AdminStats, error) {
 		return nil, err
 	}
 	stats.TotalProjects = projects
-
-	builds, err := db.DB.NewSelect().TableExpr("builds").Where("deleted_at IS NULL").Count(ctx)
-	if err != nil {
-		return nil, err
-	}
-	stats.TotalBuilds = builds
 
 	today := time.Now().Truncate(24 * time.Hour)
 	newToday, err := db.DB.NewSelect().TableExpr("users").Where("deleted_at IS NULL").Where("created_at >= ?", today).Count(ctx)

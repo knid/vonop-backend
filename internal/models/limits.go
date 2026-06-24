@@ -10,9 +10,6 @@ type StandardUserLimits struct {
 	ID                      uuid.UUID `bun:",pk,type:uuid,default:uuid_generate_v4()"`
 	MaximumCredentialCount  int       `bun:",notnull"`
 	MontlyNotificationCount int       `bun:",notnull"`
-	MontlyBuildCount        int       `bun:",notnull"`
-	CanBuildToAndroid       bool      `bun:",notnull"`
-	CanBuildToIOS           bool      `bun:",notnull"`
 	CanUseAnalytics         bool      `bun:",notnull"`
 	CanRemoveBrandLogo      bool      `bun:",notnull"`
 	// AI limits
@@ -51,8 +48,6 @@ type StandardUserLimits struct {
 	// Fly egress quota per billing period. Metered daily via Fly GraphQL.
 	// 0 = unlimited (avoid; pre-A1 default).
 	MonthlyBandwidthGB int `bun:"monthly_bandwidth_gb,notnull,default:0"`
-	// Self-hosted Expo OTA publish quota per billing period. 0 = unlimited.
-	MonthlyOTAPublishCount int `bun:"monthly_ota_publish_count,notnull,default:0"`
 	// Per-app Fly region selection (Pro+ feature). When false, every app
 	// pins to FLY_PRIMARY_REGION.
 	CanChooseRegion      bool `bun:"can_choose_region,notnull,default:false"`
@@ -61,7 +56,6 @@ type StandardUserLimits struct {
 	CanBuyDomain         bool `bun:",notnull,default:false"`
 	CanExportToGitHub    bool `bun:"can_export_to_github,notnull,default:false"`
 	CanUseEmailService   bool `bun:",notnull,default:false"`
-	CanBuildMobile       bool `bun:",notnull,default:false"`
 	// Deprecated: removed from product surface in commit ab7c5f0 ("Remove
 	// CanSeeActiveUsers from usage"). The DB column still exists with NOT
 	// NULL and *no* DB-level default (it predates Bun's auto-default era).
@@ -75,8 +69,8 @@ type StandardUserLimits struct {
 	//
 	// A separate cleanup spec can DROP COLUMN once we're sure no admin
 	// tooling reads it.
-	CanSeeActiveUsers bool `bun:",notnull"`
+	CanSeeActiveUsers bool      `bun:",notnull"`
 	CreatedAt         time.Time `bun:"created_at,nullzero,notnull,default:current_timestamp"`
-	UpdatedAt            time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
-	DeletedAt            time.Time `bun:",soft_delete,nullzero"`
+	UpdatedAt         time.Time `bun:"updated_at,nullzero,notnull,default:current_timestamp"`
+	DeletedAt         time.Time `bun:",soft_delete,nullzero"`
 }

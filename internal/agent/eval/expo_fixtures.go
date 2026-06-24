@@ -78,8 +78,8 @@ var ExpoFixtures = []Fixture{
 	},
 	{
 		Name:   "ecommerce_mobile",
-		Prompt: "Mobile shop app for handmade jewelry with in-app purchase upgrades.",
-		MustContain:    []string{`from "expo-router"`, `className=`, `react-native-purchases`},
+		Prompt: "Mobile shop app for handmade jewelry with a polished product browsing flow.",
+		MustContain:    []string{`from "expo-router"`, `className=`},
 		MustNotContain: []string{`from "next/`, `Stripe.checkout`},
 	},
 }

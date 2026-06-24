@@ -9,7 +9,7 @@
 // every mobile_app_native project's git repo gets an opinionated Expo
 // SDK 54 + Expo Router + NativeWind v4 + Tailwind v3 baseline under
 // mobile/ so the AI agent can read existing files (lib/api.ts,
-// lib/auth.ts, components/ui/*) and the preview sandbox can run
+// components/ui/*) and the preview sandbox can run
 // `npx expo start --web` with no extra setup.
 package expo_native
 
@@ -26,8 +26,8 @@ import "embed"
 // startup with "Cannot find module './tailwind.config'". When refreshing
 // the template, sync this list with `ls` of the template root.
 //
-//go:embed all:app all:assets all:components all:lib all:plugins all:store
-//go:embed app.config.js app.json babel.config.js components.json eas.json global.css
+//go:embed all:app all:assets all:components all:lib all:store
+//go:embed app.json babel.config.js components.json global.css
 //go:embed metro.config.js nativewind-env.d.ts package.json postcss.config.mjs
 //go:embed tailwind.config.js tsconfig.json .npmrc .gitignore
 var FS embed.FS

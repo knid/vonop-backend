@@ -304,20 +304,6 @@ func buildMobileBuilderRegistry(project *models.AppProject, deps *RunDependencie
 	r := NewRegistry()
 	registerBaseBuilderTools(r, deps)
 	registerSandboxTools(r, deps, project)
-	registerServerTools(r, deps, model)
-	registerDataAndAITools(r, deps)
-
-	r.Register(&ReadMobileConfigTool{})
-	r.Register(ProvisionLocalDatabaseTool{Deps: deps})
-	if project == nil || project.Status != "draft" {
-		r.Register(&ReadBuildLogsTool{Deps: deps})
-		r.Register(&TriggerBuildAfterFixTool{Deps: deps})
-	}
-
-	if project == nil || project.Status != "draft" {
-		r.Register(&ReadDeployLogsTool{Deps: deps})
-		r.Register(&TriggerWebDeployTool{Deps: deps})
-	}
 	registerMCPTools(r, project, deps)
 	return r
 }
@@ -395,19 +381,6 @@ func projectHasDatabase(project *models.AppProject) bool {
 		return false
 	}
 	if v, ok := project.Settings["has_database"].(bool); ok {
-		return v
-	}
-	return false
-}
-
-// projectHasLocalDatabase returns true if the project has an on-device
-// SQLite database wired (signaled by Settings["has_local_database"]).
-// Used by context.go to gate LocalDatabaseAddendum.
-func projectHasLocalDatabase(project *models.AppProject) bool {
-	if project == nil || project.Settings == nil {
-		return false
-	}
-	if v, ok := project.Settings["has_local_database"].(bool); ok {
 		return v
 	}
 	return false

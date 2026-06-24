@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/responses"
 	"github.com/knid/wemob/internal/services/remoteconfig"
@@ -94,9 +93,7 @@ func (c *Controller) applyPlanRemoteConfigOverrides(limits *models.StandardUserL
 	limits.CreditRolloverMonths = rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global)
 	limits.MaxWebApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-web-apps", limits.MaxWebApps), remoteconfig.Global)
 	limits.MaxMobileApps = rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global)
-	limits.MontlyBuildCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-build-count", limits.MontlyBuildCount), remoteconfig.Global)
 	limits.MontlyNotificationCount = rc.GetInt(remoteconfig.PlanInt(pn, "montly-notification-count", limits.MontlyNotificationCount), remoteconfig.Global)
-	limits.CanBuildMobile = rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global)
 	limits.CanUseAnalytics = rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global)
 	limits.CanAccessCode = rc.GetBool(remoteconfig.PlanBool(pn, "can-access-code", limits.CanAccessCode), remoteconfig.Global)
 	limits.CanBuyDomain = rc.GetBool(remoteconfig.PlanBool(pn, "can-buy-domain", limits.CanBuyDomain), remoteconfig.Global)
@@ -125,39 +122,34 @@ func (c *Controller) GetSubscription(user *models.User) (*responses.UserSubscrip
 	}
 
 	limitsResponse := responses.LimitsResponse{
-		ID:                      limits.ID,
-		MaximumAccessIdCount:    limits.MaximumCredentialCount,
-		MontlyBuildCount:        limits.MontlyBuildCount,
-		MontlyNotificationCount: limits.MontlyNotificationCount,
-		CanBuildToAndroid:       limits.CanBuildToAndroid,
-		CanBuildToIOS:           limits.CanBuildToIOS,
-		CanUseAnalytics:         limits.CanUseAnalytics,
-		CanRemoveBrandLogo:      limits.CanRemoveBrandLogo,
-		MaxDeployedWebApps:      limits.MaxDeployedWebApps,
-		MaxDeployedMobileApps:   limits.MaxDeployedMobileApps,
-		CanDeployMobile:         limits.CanDeployMobile,
-		CreditRolloverMonths:    limits.CreditRolloverMonths,
-		CanAccessCode:           limits.CanAccessCode,
-		CanBuyDomain:            limits.CanBuyDomain,
-		CanUseEmailService:      limits.CanUseEmailService,
-		CanBuildMobile:          limits.CanBuildMobile,
-		MonthlyAICredits:        limits.MonthlyAICredits,
-		MaxWebApps:              limits.MaxWebApps,
-		MaxMobileApps:           limits.MaxMobileApps,
-		CanUseEcommerce:         limits.CanUseEcommerce,
-		CanDeployWeb:            limits.CanDeployWeb,
-		CanExportToGitHub:       limits.CanExportToGitHub,
-		DeployMemoryMB:          limits.DeployMemoryMB,
-		DeployCPUs:              limits.DeployCPUs,
-		DeployDBMaxCU:           limits.DeployDBMaxCU,
-		DeployDBStorageMB:       limits.DeployDBStorageMB,
+		ID:                        limits.ID,
+		MaximumAccessIdCount:      limits.MaximumCredentialCount,
+		MontlyNotificationCount:   limits.MontlyNotificationCount,
+		CanUseAnalytics:           limits.CanUseAnalytics,
+		CanRemoveBrandLogo:        limits.CanRemoveBrandLogo,
+		MaxDeployedWebApps:        limits.MaxDeployedWebApps,
+		MaxDeployedMobileApps:     limits.MaxDeployedMobileApps,
+		CanDeployMobile:           limits.CanDeployMobile,
+		CreditRolloverMonths:      limits.CreditRolloverMonths,
+		CanAccessCode:             limits.CanAccessCode,
+		CanBuyDomain:              limits.CanBuyDomain,
+		CanUseEmailService:        limits.CanUseEmailService,
+		MonthlyAICredits:          limits.MonthlyAICredits,
+		MaxWebApps:                limits.MaxWebApps,
+		MaxMobileApps:             limits.MaxMobileApps,
+		CanUseEcommerce:           limits.CanUseEcommerce,
+		CanDeployWeb:              limits.CanDeployWeb,
+		CanExportToGitHub:         limits.CanExportToGitHub,
+		DeployMemoryMB:            limits.DeployMemoryMB,
+		DeployCPUs:                limits.DeployCPUs,
+		DeployDBMaxCU:             limits.DeployDBMaxCU,
+		DeployDBStorageMB:         limits.DeployDBStorageMB,
 		DeployDBActiveTimeSec:     limits.DeployDBActiveTimeSec,
 		DeployDBDataTransferBytes: limits.DeployDBDataTransferBytes,
 		DeployDBComputeTimeSec:    limits.DeployDBComputeTimeSec,
 		DeployDBSuspendTimeoutSec: limits.DeployDBSuspendTimeoutSec,
 		DeployDBOrgTier:           limits.DeployDBOrgTier,
 		MaxSeats:                  limits.MaxSeats,
-		BuildCreditCosts:          buildCreditCostsForResponse(),
 	}
 
 	return &responses.UserSubscriptionInformationResponse{
@@ -191,16 +183,6 @@ func (c *Controller) UpdateSubscription(user *models.User, orgID *uuid.UUID, sub
 	}
 
 	return nil
-}
-
-// buildCreditCostsForResponse converts the typed BuildCreditCosts map to a
-// JSON-friendly string-keyed shape for the billing API response.
-func buildCreditCostsForResponse() map[string]int {
-	out := make(map[string]int, len(constants.BuildCreditCosts))
-	for k, v := range constants.BuildCreditCosts {
-		out[string(k)] = v
-	}
-	return out
 }
 
 func (c *Controller) CancelSubscription(user *models.User, orgID *uuid.UUID) error {

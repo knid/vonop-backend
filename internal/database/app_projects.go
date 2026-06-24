@@ -125,10 +125,9 @@ func (db *Database) UpdateAppProjectPreviewTarget(projectID string, target map[s
 }
 
 // SetAppProjectV1ProjectID persists the legacy v1 Project ID into
-// app_projects.settings via jsonb_set so the dashboard's Native Builds tab
-// can resolve this mobile app to its Codemagic build pipeline entry.
-// Uses jsonb_set to avoid wiping other setting keys, and avoids a full
-// UpdateAppProject call that would require a hydrated struct.
+// app_projects.settings via jsonb_set for rows that still need the old
+// shadow-project pointer. Uses jsonb_set to avoid wiping other setting keys,
+// and avoids a full UpdateAppProject call that would require a hydrated struct.
 func (db *Database) SetAppProjectV1ProjectID(projectID string, v1ProjectID string) error {
 	_, err := db.DB.NewUpdate().Model((*models.AppProject)(nil)).
 		Set(`settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{v1_project_id}', ?::jsonb, true)`, `"`+v1ProjectID+`"`).

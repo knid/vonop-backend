@@ -11,13 +11,8 @@ import (
 )
 
 // ReadDeployLogsTool exposes the latest failed web deployment's status,
-// error message, and structured error details (including the flyctl build
-// log when available) to the chat agent so it can diagnose Fly deploy
-// failures from inside the conversation.
-//
-// The tool is auth-scoped to the project owner: it queries AppDeployments
-// for the current project, so a forged deployment_id cannot leak another
-// user's logs.
+// error message, and structured error details to the chat agent so it can
+// diagnose Fly deploy failures from inside the conversation.
 type ReadDeployLogsTool struct {
 	Deps *RunDependencies
 }
@@ -27,7 +22,7 @@ var _ ToolExecutor = (*ReadDeployLogsTool)(nil)
 func (t *ReadDeployLogsTool) Name() string { return "read_deploy_logs" }
 
 func (t *ReadDeployLogsTool) Description() string {
-	return "Read context for the most recent FAILED web deployment of this project (Fly deploy report): the deployment status, stage where it failed, error message, and the full build log when available. Pass the optional deployment_id to target a specific deployment. Use this BEFORE proposing a code fix in response to a 'web deployment failed' chat message — the build log usually contains the exact Next.js compilation error."
+	return "Read context for the most recent FAILED web deployment of this project: deployment status, failure stage, error message, and build log when available. Use this before proposing a code fix for a failed web deployment."
 }
 
 func (t *ReadDeployLogsTool) Schema() map[string]any {
@@ -86,7 +81,6 @@ func (t *ReadDeployLogsTool) Execute(ctx context.Context, rc *RunContext, input 
 		_ = json.Unmarshal(input, &args)
 	}
 
-	// Pull all web deployments for this project, newest first.
 	deployments, err := rc.Deps.DB.GetAppDeploymentsByProjectID(rc.Project.ID.String())
 	if err != nil {
 		return fmt.Sprintf("read_deploy_logs: failed to load deployments: %v", err), true, nil
@@ -129,7 +123,6 @@ func (t *ReadDeployLogsTool) Execute(ctx context.Context, rc *RunContext, input 
 		UpdatedAt:    picked.UpdatedAt.UTC().Format(time.RFC3339),
 	}
 
-	// Extract stage and build_log from provider_data when available.
 	if picked.ProviderData != nil {
 		if errDetail, ok := picked.ProviderData["error"].(map[string]any); ok {
 			if stage, ok := errDetail["stage"].(string); ok {
@@ -141,25 +134,21 @@ func (t *ReadDeployLogsTool) Execute(ctx context.Context, rc *RunContext, input 
 		}
 	}
 
-	// If the error message encodes "stage: detail", split it.
 	if info.Stage == "" && info.ErrorMessage != "" {
 		if idx := indexOfFirstColon(info.ErrorMessage); idx > 0 {
 			info.Stage = info.ErrorMessage[:idx]
 		}
 	}
 
-	// Truncate build log to a sane size — full logs can be 100KB+.
 	const maxLogChars = 4000
 	if len(info.BuildLog) > maxLogChars {
-		info.BuildLog = "…(truncated)…\n" + info.BuildLog[len(info.BuildLog)-maxLogChars:]
+		info.BuildLog = "...(truncated)...\n" + info.BuildLog[len(info.BuildLog)-maxLogChars:]
 	}
-	// Truncate error message too.
 	const maxErrChars = 2000
 	if len(info.ErrorMessage) > maxErrChars {
-		info.ErrorMessage = info.ErrorMessage[:maxErrChars] + "\n…(truncated)"
+		info.ErrorMessage = info.ErrorMessage[:maxErrChars] + "\n...(truncated)"
 	}
 
-	// Pull deployment event timeline. Best-effort.
 	events, eerr := database.ListDeploymentEvents(ctx, rc.Deps.DB.DB, picked.ID)
 	infos := make([]deployEventInfo, 0, len(events))
 	if eerr == nil {

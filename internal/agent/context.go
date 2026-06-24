@@ -53,20 +53,13 @@ Treat these as mismatches:
   cart, checkout, orders, inventory, shipping, or selling products/services:
   they need an ecommerce project.
 - project_type=app or ecommerce, but the user asks for a native iOS/Android,
-  React Native, Expo, App Store, Play Store, push-notification, biometric,
-  deep-link, offline-native, or in-app-purchase app: they need a
+  React Native, Expo, device-native screen, or installable mobile app: they need a
   mobile_app_native project.
 - project_type=mobile_app_native, but the user asks for a web-only marketing
   site, web dashboard, portfolio, or ecommerce storefront without native
   mobile requirements: they need an app or ecommerce project.
 
 If the request fits this project type, continue normally.`
-
-// mobileConfigGetter abstracts GetMobileAppConfig so context.go can be tested
-// without a real *database.Database. *database.Database satisfies this interface.
-type mobileConfigGetter interface {
-	GetMobileAppConfig(projectID string) (*models.MobileAppConfig, error)
-}
 
 // BuildSystemMessages returns the cached system messages for a run:
 //
@@ -271,9 +264,9 @@ func BuildDesignBriefUserPrefix(fileMap *SafeFileMap) string {
 // user asked for a DB; layering it on top of EcommerceAddendum contradicted
 // the canonical ecommerce schema paths and doubled the token count.
 //
-// mobile_app_native projects receive a MobileAppConfig addendum listing the
-// currently-enabled native features so the agent doesn't need to call
-// read_mobile_config every turn.
+// mobile_app_native projects intentionally receive no production native,
+// backend, database, bridge, build, or release addenda. Mobile builder mode is
+// preview/source oriented only.
 func buildAddendum(project *models.AppProject, deps *RunDependencies) string {
 	text, _ := buildAddendumWithLangfuse(contextWithoutLangfuse(), project, depsWithoutLangfuse(deps))
 	return text
@@ -284,39 +277,7 @@ func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, 
 		return "", nil
 	}
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		var parts []string
-		var links []observability.PromptLink
-		var fetcher mobileConfigGetter
-		if deps != nil {
-			if deps.mobileConfigFetcher != nil {
-				fetcher = deps.mobileConfigFetcher
-			} else if deps.DB != nil {
-				fetcher = deps.DB
-			}
-		}
-		if fetcher != nil {
-			cfg, err := fetcher.GetMobileAppConfig(project.ID.String())
-			if err == nil && cfg != nil {
-				if a, link := mobileNativeAddendumWithLangfuse(ctx, deps, cfg); a != "" {
-					parts = append(parts, a)
-					links = append(links, link)
-				}
-			}
-		}
-		if projectHasDatabase(project) {
-			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseNativeBackend, DatabaseAddendumNative, nil)
-			parts = append(parts, a)
-			links = append(links, link)
-		}
-		if projectHasLocalDatabase(project) {
-			a, link := resolveLangfusePrompt(ctx, deps, observability.PromptAgentDatabaseMobileLocal, LocalDatabaseAddendum, nil)
-			parts = append(parts, a)
-			links = append(links, link)
-		}
-		if len(parts) == 0 {
-			return "", nil
-		}
-		return strings.Join(parts, "\n\n"), links
+		return "", nil
 	}
 
 	var parts []string
@@ -360,50 +321,6 @@ func buildAddendumWithLangfuse(ctx context.Context, project *models.AppProject, 
 		return "", nil
 	}
 	return strings.Join(parts, "\n\n"), links
-}
-
-// mobileNativeAddendum formats the current MobileAppConfig as a system-message
-// addendum so the agent sees the project's enabled native features on every
-// turn without calling read_mobile_config first.
-func mobileNativeAddendum(cfg *models.MobileAppConfig) string {
-	text, _ := mobileNativeAddendumWithLangfuse(contextWithoutLangfuse(), nil, cfg)
-	return text
-}
-
-func mobileNativeAddendumWithLangfuse(ctx context.Context, deps *RunDependencies, cfg *models.MobileAppConfig) (string, observability.PromptLink) {
-	if cfg == nil {
-		return "", observability.PromptLink{}
-	}
-	methods := cfg.BridgeMethods
-	if methods == nil {
-		methods = []string{}
-	}
-	permissions := cfg.Permissions
-	if permissions == nil {
-		permissions = []string{}
-	}
-	var sb strings.Builder
-	sb.WriteString("## Current MobileAppConfig (read by the agent — call read_mobile_config to refetch)\n\n")
-	sb.WriteString(fmt.Sprintf("Enabled native features: [%s]\n", strings.Join(methods, ", ")))
-	sb.WriteString(fmt.Sprintf("URL scheme: %q\n", cfg.URLScheme))
-	sb.WriteString(fmt.Sprintf("Universal link domain: %q\n", cfg.UniversalLinkDomain))
-	sb.WriteString(fmt.Sprintf("Biometric enabled: %v\n", cfg.BiometricEnabled))
-	sb.WriteString(fmt.Sprintf("Push enabled: %v\n", cfg.PushEnabled))
-	sb.WriteString(fmt.Sprintf("Dark mode enabled: %v\n", cfg.DarkModeEnabled))
-	sb.WriteString(fmt.Sprintf("Offline enabled: %v\n", cfg.OfflineEnabled))
-	sb.WriteString(fmt.Sprintf("Permissions: [%s]\n", strings.Join(permissions, ", ")))
-	sb.WriteString("\nIf you need a feature not in the list, call configure_mobile_bridge first.")
-	fallback := sb.String()
-	return resolveLangfusePrompt(ctx, deps, observability.PromptAgentMobileConfigAddendum, fallback, map[string]string{
-		"bridge_methods":        strings.Join(methods, ", "),
-		"url_scheme":            cfg.URLScheme,
-		"universal_link_domain": cfg.UniversalLinkDomain,
-		"biometric_enabled":     fmt.Sprintf("%v", cfg.BiometricEnabled),
-		"push_enabled":          fmt.Sprintf("%v", cfg.PushEnabled),
-		"dark_mode_enabled":     fmt.Sprintf("%v", cfg.DarkModeEnabled),
-		"offline_enabled":       fmt.Sprintf("%v", cfg.OfflineEnabled),
-		"permissions":           strings.Join(permissions, ", "),
-	})
 }
 
 // projectHasAI returns true if the project has the Wemob AI Gateway wired up

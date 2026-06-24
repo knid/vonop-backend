@@ -96,7 +96,6 @@ type AdminProjectResponse struct {
 	UserEmail   string    `json:"user_email"`
 	URL         string    `json:"url"`
 	PackageName string    `json:"package_name"`
-	BuildCount  int       `json:"build_count"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

@@ -30,17 +30,6 @@ func (v *HttpViews) resolveCreditOrgID(r *http.Request, user *models.User) (uuid
 	return v.Controller.RequireOrgIDForUser(user, reqOrgID)
 }
 
-// buildCreditCostsMap converts the typed BuildCreditCosts table to a
-// JSON-friendly string-keyed shape. Same shape used by the per-user
-// /v1/users/subscription endpoint (controllers/subscriptions.go).
-func buildCreditCostsMap() map[string]int {
-	out := make(map[string]int, len(constants.BuildCreditCosts))
-	for k, v := range constants.BuildCreditCosts {
-		out[string(k)] = v
-	}
-	return out
-}
-
 func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 	// Best-effort: resolve the caller's personal org so we can compute
 	// per-org intro eligibility. Anonymous callers (no auth) get IntroEligible=false.
@@ -92,7 +81,6 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				// Credits
 				MonthlyAICredits:     rc.GetInt(remoteconfig.PlanInt(pn, "monthly-ai-credits", limits.MonthlyAICredits), remoteconfig.Global),
 				CreditRolloverMonths: rc.GetInt(remoteconfig.PlanInt(pn, "credit-rollover-months", limits.CreditRolloverMonths), remoteconfig.Global),
-				BuildCreditCosts:     buildCreditCostsMap(),
 				// Org / plan caps
 				MaxSeats:               limits.MaxSeats,
 				MaximumCredentialCount: limits.MaximumCredentialCount,
@@ -101,14 +89,9 @@ func (v *HttpViews) GetBillingPlans(w http.ResponseWriter, r *http.Request) {
 				MaxMobileApps:         rc.GetInt(remoteconfig.PlanInt(pn, "max-mobile-apps", limits.MaxMobileApps), remoteconfig.Global),
 				MaxDeployedWebApps:    rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-web-apps", limits.MaxDeployedWebApps), remoteconfig.Global),
 				MaxDeployedMobileApps: rc.GetInt(remoteconfig.PlanInt(pn, "max-deployed-mobile-apps", limits.MaxDeployedMobileApps), remoteconfig.Global),
-				// Build / notification quotas (legacy — credits gate now)
-				MontlyBuildCount:        limits.MontlyBuildCount,
+				// Notification quota is legacy; credits gate most modern usage.
 				MontlyNotificationCount: limits.MontlyNotificationCount,
-				MonthlyOTAPublishCount:  limits.MonthlyOTAPublishCount,
 				// Capability flags
-				CanBuildToAndroid:  limits.CanBuildToAndroid,
-				CanBuildToIOS:      limits.CanBuildToIOS,
-				CanBuildMobile:     rc.GetBool(remoteconfig.PlanBool(pn, "can-build-mobile", limits.CanBuildMobile), remoteconfig.Global),
 				CanDeployMobile:    rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-mobile", limits.CanDeployMobile), remoteconfig.Global),
 				CanDeployWeb:       rc.GetBool(remoteconfig.PlanBool(pn, "can-deploy-web", limits.CanDeployWeb), remoteconfig.Global),
 				CanUseAnalytics:    rc.GetBool(remoteconfig.PlanBool(pn, "can-use-analytics", limits.CanUseAnalytics), remoteconfig.Global),
