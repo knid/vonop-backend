@@ -1687,16 +1687,12 @@ func StreamWithTools(
 	var toolRoundHistory []toolRoundTrimState
 	continuationCount := 0
 	incompleteToolCallRetries := 0
-	var recoveryToolDenylist map[string]bool
 	var fullText strings.Builder // declared outside loop so ShouldContinue abort can return partial text
 	recoverIncompleteToolCall := func(round int, finishReason string, toolCallsMap map[int]*ToolCall) bool {
 		if len(toolCallsMap) == 0 || incompleteToolCallRetries >= incompleteToolCallRecoveryRetries {
 			return false
 		}
 		incompleteToolCallRetries++
-		if incompleteToolCallsInclude(toolCallsMap, "write_files") {
-			recoveryToolDenylist = map[string]bool{"write_files": true}
-		}
 		if text := strings.TrimSpace(fullText.String()); text != "" {
 			currentMessages = append(currentMessages, Message{
 				Role:    "assistant",
@@ -1779,9 +1775,6 @@ func StreamWithTools(
 		roundTools := tools
 		if len(opts) > 0 && opts[0].FilterTools != nil {
 			roundTools = opts[0].FilterTools(roundTools)
-		}
-		if len(recoveryToolDenylist) > 0 {
-			roundTools = filterToolsByDeniedNames(roundTools, recoveryToolDenylist)
 		}
 		if ctx.Err() != nil {
 			err := ctx.Err()
@@ -1996,7 +1989,6 @@ func StreamWithTools(
 		}
 		rateLimitRetries = 0 // reset after successful request
 		transientRetries = 0
-		recoveryToolDenylist = nil
 
 		fullText.Reset()
 		var fullReasoning strings.Builder // accumulate reasoning_content for cache continuity
