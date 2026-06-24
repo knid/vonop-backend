@@ -355,17 +355,3 @@ func incompleteToolCallsInclude(toolCallsMap map[int]*ToolCall, toolName string)
 	}
 	return false
 }
-
-func filterToolsByDeniedNames(tools []Tool, denied map[string]bool) []Tool {
-	if len(denied) == 0 {
-		return tools
-	}
-	filtered := make([]Tool, 0, len(tools))
-	for _, t := range tools {
-		if denied[t.Function.Name] {
-			continue
-		}
-		filtered = append(filtered, t)
-	}
-	return filtered
-}
