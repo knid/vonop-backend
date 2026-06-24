@@ -13,7 +13,7 @@ create_design with concrete values for register, design_direction,
 color_system, typography, layout, components, imagery, and accessibility.
 Do not create DESIGN.md with write_files unless create_design is unavailable.
 
-Do not add backend APIs, auth, database, local database, reminders, push,
+Do not add backend APIs, auth, persistence layers, reminders, device services,
 native bridge config, image generation, full tab flows, detail screens, stats
 screens, or integrations unless the user explicitly asks for them.
 

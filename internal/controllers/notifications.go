@@ -7,7 +7,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/requests"
 	"github.com/knid/wemob/internal/responses"
-	"github.com/knid/wemob/internal/utils/external"
 )
 
 func (c *Controller) GetNotifications(projectId string) ([]responses.NotificationInformationResponse, error) {
@@ -74,17 +73,12 @@ func (c *Controller) SendNotification(user *models.User, notificationCreateReq r
 		SendAfter:   notificationCreateReq.SendAfter,
 	}
 
-	createdNotification, err := c.DB.CreateNotification(&notification)
-	if err != nil {
+	if _, err := c.DB.CreateNotification(&notification); err != nil {
 		return nil, err
 	}
 
-	// utils.ConvertBase64ToImageSave(notificationCreateReq.Image, "images/"+createdNotification.ID.String())
-
-	err = external.SendOneSignalNotification(createdNotification, project)
-
 	return &responses.NotificationSendResponse{
 		SuccessResponse: responses.SuccessResponse{Success: true},
-	}, err
+	}, nil
 
 }

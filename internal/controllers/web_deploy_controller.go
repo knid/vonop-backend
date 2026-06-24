@@ -303,8 +303,7 @@ func (c *Controller) HandleWebDeployTask(ctx context.Context, t *asynq.Task) err
 	}
 
 	// 4. Collect env vars (DB read + lazy Better-Auth secret generation).
-	// Includes Better-Auth env vars when MobileAppConfig.AuthEnabled is true;
-	// CollectBetterAuthEnvVars also lazily generates + persists the per-customer
+	// CollectBetterAuthEnvVars lazily generates + persists the per-customer
 	// BETTER_AUTH_SECRET on first call (envelope-encrypted via CredStore).
 	envVars := c.CollectAllEnvVars(project)
 	authVars, err := c.CollectBetterAuthEnvVars(ctx, project)

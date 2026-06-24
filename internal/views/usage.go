@@ -16,12 +16,6 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	buildTasks, err := v.Controller.DB.GetAppBuildTasksByUser(user)
-	if err != nil {
-		utils.JSONInternalError(w, err)
-		return
-	}
-
 	projects, err := v.Controller.GetProjects(user)
 	if err != nil {
 		utils.JSONInternalError(w, err)
@@ -54,19 +48,11 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	appBuildTaskCount := 0
-	for _, appBuildTask := range buildTasks {
-		if appBuildTask.CreatedAt.After(renewStart) && appBuildTask.CreatedAt.Before(renewEnd) {
-			appBuildTaskCount++
-		}
-	}
-
 	// Fetch plan limits to include in response
-	var notificationLimit, buildLimit, webAppLimit, mobileAppLimit, aiCreditsLimit int
+	var notificationLimit, webAppLimit, mobileAppLimit, aiCreditsLimit int
 	limits, limitsErr := v.Controller.GetUserLimits(user)
 	if limitsErr == nil {
 		notificationLimit = limits.MontlyNotificationCount
-		buildLimit = limits.MontlyBuildCount
 		webAppLimit = limits.MaxWebApps
 		mobileAppLimit = limits.MaxMobileApps
 		aiCreditsLimit = limits.MonthlyAICredits
@@ -95,9 +81,7 @@ func (v *HttpViews) GetMontlyUsage(w http.ResponseWriter, r *http.Request) {
 	billing := v.Controller.GetUserBilling(user)
 	output := map[string]any{
 		"notifications_used":    notificationCount,
-		"app_builds_used":       appBuildTaskCount,
 		"notification_limit":    notificationLimit,
-		"app_builds_limit":      buildLimit,
 		"web_apps_used":         webAppsUsed,
 		"web_apps_limit":        webAppLimit,
 		"mobile_apps_used":      mobileAppsUsed,

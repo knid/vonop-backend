@@ -35,9 +35,7 @@ func main() {
 	}
 
 	// Concurrency caps total in-flight tasks across queues. 4 leaves
-	// headroom for parallel web/cron tasks (which are IO-bound). The
-	// historical in-process Expo OTA publisher has been removed — OTA
-	// publishes now run on Codemagic, not the worker.
+	// headroom for parallel web/cron tasks, which are IO-bound.
 	srv := asynq.NewServer(redisOpts, asynq.Config{
 		Concurrency: 6,
 		Queues: map[string]int{
@@ -117,12 +115,6 @@ func main() {
 	mux.HandleFunc(tasks.TypeReapStuckAgentRuns, func(ctx context.Context, _ *asynq.Task) error {
 		return controller.ReapStuckAgentRunsTask(ctx)
 	})
-	mux.HandleFunc(tasks.TypeReapStuckBuildTasks, func(ctx context.Context, _ *asynq.Task) error {
-		return controller.ReapStuckBuildTasksTask(ctx)
-	})
-	mux.HandleFunc(tasks.TypeRunCredentialHealthCheck, func(ctx context.Context, _ *asynq.Task) error {
-		return controller.RunCredentialHealthCheck(ctx)
-	})
 	// E3 Phase 7: daily Fly GraphQL pull → per-org egress tally for the
 	// MonthlyBandwidthGB deploy gate.
 	mux.HandleFunc(tasks.TypeFlyBandwidthSync, func(ctx context.Context, _ *asynq.Task) error {
@@ -142,14 +134,6 @@ func main() {
 	}
 	if _, err := scheduler.Register("@every 5m", asynq.NewTask(tasks.TypeReapStuckAgentRuns, nil), asynq.Queue("cron")); err != nil {
 		slog.Error("schedule reap-stuck-agent-runs", "err", err)
-		os.Exit(1)
-	}
-	if _, err := scheduler.Register("@every 5m", asynq.NewTask(tasks.TypeReapStuckBuildTasks, nil), asynq.Queue("cron")); err != nil {
-		slog.Error("schedule reap-stuck-build-tasks", "err", err)
-		os.Exit(1)
-	}
-	if _, err := scheduler.Register("@every 24h", asynq.NewTask(tasks.TypeRunCredentialHealthCheck, nil), asynq.Queue("cron")); err != nil {
-		slog.Error("schedule credential-health-daily", "err", err)
 		os.Exit(1)
 	}
 	// E3 Phase 7: daily Fly bandwidth sync. Once a day is plenty — quotas

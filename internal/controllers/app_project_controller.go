@@ -132,11 +132,8 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 	// second RequireOrgIDForUser call (and its DB roundtrip).
 	orgID := orgIDForCount
 
-	// Seed build_defaults for native mobile apps so the Ship page's
-	// "+ New build" button is enabled from app creation. Without this the
-	// launchpad gate (build_defaults.app_name must be set) blocks the user
-	// until the agent or a manual edit writes one — but the project
-	// already has a generated name we can mirror in.
+	// Seed display defaults for native mobile apps so generated projects have
+	// a stable app name before the agent writes richer metadata.
 	settings := map[string]any{}
 	applyDefaultAgentSettings(settings)
 	if projectType == models.ProjectTypeMobileAppNative {
@@ -189,49 +186,11 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 		}
 	}
 
-	// mobile_app_native projects get an eager MobileAppConfig row + a
-	// canonical mobile/ skeleton in the project repo so the agent has
-	// somewhere to write from turn 1 and read_mobile_config returns sensible
-	// defaults instead of "missing config". backend/ stays opt-in.
+	// mobile_app_native projects get a canonical mobile/ skeleton in the
+	// project repo so the agent has somewhere to write from turn 1. No mobile
+	// config, backend, build, push, IAP, or release infrastructure is
+	// provisioned in builder mode.
 	if project.ProjectType == models.ProjectTypeMobileAppNative {
-		// Pre-populate every field with the same defaults the DB column
-		// DEFAULT clauses use. Bun's INSERT emits explicit values for all
-		// non-pointer scalar fields (including bool zeros), which would
-		// override the column defaults if we left them unset.
-		cfg := &models.MobileAppConfig{
-			ProjectID:            project.ID,
-			PushEnabled:          true,
-			AnalyticsEnabled:     true,
-			PullToRefreshEnabled: true,
-			ExternalBrowserLinks: true,
-			BridgeEnabled:        true,
-			OfflineEnabled:       false,
-			CachingStrategy:      "network-first",
-			BiometricEnabled:     false,
-			DarkModeEnabled:      false,
-			RatingEnabled:        false,
-			RatingSessions:       5,
-			UpdateCheckEnabled:   false,
-			// IAP defaults OFF — most apps don't need payments. The agent flips
-			// this on (and triggers lazy RC provisioning at next build) only
-			// when the user asks for paywalls / subscriptions.
-			IAPEnabled: false,
-		}
-		if _, err := c.DB.UpsertMobileAppConfig(cfg); err != nil {
-			// Non-fatal: the agent can still call read_mobile_config and
-			// get a missing-config response. Log so we can investigate
-			// if this becomes a pattern.
-			slog.Warn("eager MobileAppConfig insert failed",
-				"error", err, "project_id", project.ID)
-		}
-
-		// RevenueCat + OneSignal provisioning is intentionally LAZY — only
-		// triggered from the build path (BuildExpoMobile) when the agent has
-		// flipped iap_enabled / push_enabled on. Eager goroutines were
-		// dropped because most projects (calculators, utilities, single-
-		// purpose tools) never need IAP or push, and provisioning created
-		// orphan RC projects + OneSignal apps for every signup.
-
 		// Scaffold the wemob-expo-template baseline into mobile/ so the AI
 		// agent has a complete Expo SDK 54 + Expo Router + NativeWind v4 +
 		// react-native-reusables source tree to read + edit, AND the preview
@@ -250,16 +209,16 @@ func (c *Controller) CreateAppProject(ctx context.Context, user *models.User, re
 
 The mobile app source lives in mobile/ — a complete Expo SDK 54 +
 NativeWind v4 + react-native-reusables baseline. The AI agent edits
-this directly; Codemagic builds it into a signed APK/IPA.
+this directly and the project can be exported as source.
 
-backend/ is OPTIONAL — created only when this app needs server-side
-functionality (persisted data, auth, payments, push, marketing landing).
+No backend, app-store build, push, IAP, or native release service is provisioned
+by the mobile builder.
 `
 				if err := repo.WriteFile("README.md", []byte(readme)); err != nil {
 					slog.Warn("mobile_app_native README write failed",
 						"error", err, "project_id", project.ID)
 				}
-				if err := scaffoldExpoTemplate(c, repo, project, cfg.AuthEnabled); err != nil {
+				if err := scaffoldExpoTemplate(c, repo, project, false); err != nil {
 					slog.Warn("mobile_app_native template scaffold failed",
 						"error", err, "project_id", project.ID)
 				}
@@ -280,7 +239,7 @@ functionality (persisted data, auth, payments, push, marketing landing).
 func defaultProjectCapabilities(projectType string) (frontendRuntime, frontendHosting string, backendEnabled bool, backendRuntime string) {
 	switch projectType {
 	case models.ProjectTypeMobileAppNative:
-		return models.FrontendRuntimeExpoNative, models.FrontendHostingCodemagic, false, models.BackendRuntimeNone
+		return models.FrontendRuntimeExpoNative, models.FrontendHostingNone, false, models.BackendRuntimeNone
 	case models.ProjectTypeEcommerce:
 		return models.FrontendRuntimeNextJSLegacy, models.FrontendHostingFly, false, models.BackendRuntimeNone
 	default:

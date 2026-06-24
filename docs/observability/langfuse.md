@@ -33,7 +33,6 @@ Environment variables override Infisical-backed `SecretManager` values. This app
 | `wemob-agent-auth-addendum` | `internal/agent/prompt_addenda.go` | Auth-enabled projects | Session/auth implementation constraints. |
 | `wemob-agent-database-nextjs` / `wemob-agent-database-split-web` / `wemob-agent-database-native-backend` / `wemob-agent-database-mobile-local` | `internal/agent/prompt_addenda.go` | Database-enabled projects | Concrete web, split-web/backend-only, native backend, and on-device database rules. |
 | `wemob-agent-ai-nextjs` / `wemob-agent-ai-split-web` | `internal/agent/prompt_addenda.go` | AI-enabled projects | Concrete AI rules; only model lists/default model are variable-driven. |
-| `wemob-agent-mobile-config-addendum` | `internal/agent/context.go` | Native mobile projects | Uses Langfuse variables for current mobile config. |
 | `wemob-agent-attachments-addendum` | `internal/agent/prompt_addenda.go` | Projects with uploaded assets | Uses a Langfuse variable for sanitized asset table rows. |
 | `wemob-project-classify` | `internal/controllers/project_classify.go` | Project creation classifier | Fast LLM system prompt that classifies the initial user prompt into `ecommerce`, `app`, or `mobile_app_native`. |
 | `wemob-project-name` | `internal/controllers/project_name.go` | Project naming flow | Fast LLM system prompt that derives a short English app name before slug generation. |

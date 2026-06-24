@@ -68,12 +68,3 @@ func (db *Database) AdminGetProjectByID(id string) (*models.Project, error) {
 		Scan(context.Background())
 	return &project, err
 }
-
-// AdminGetProjectBuildCount returns the number of builds for a given project.
-func (db *Database) AdminGetProjectBuildCount(projectID string) (int, error) {
-	count, err := db.DB.NewSelect().
-		Model((*models.Build)(nil)).
-		Where("project_id = ?", projectID).
-		Count(context.Background())
-	return count, err
-}

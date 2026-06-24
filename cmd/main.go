@@ -17,14 +17,12 @@ import (
 	"github.com/go-chi/cors"
 	"github.com/go-chi/httplog/v3"
 	"github.com/knid/wemob/internal/bootstrap"
-	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	appMiddleware "github.com/knid/wemob/internal/middleware"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/observability"
 	"github.com/knid/wemob/internal/services/mcpserver"
 	"github.com/knid/wemob/internal/services/secret"
-	"github.com/knid/wemob/internal/services/storage"
 	"github.com/knid/wemob/internal/utils"
 	"github.com/knid/wemob/internal/views"
 	"github.com/markbates/goth"
@@ -43,20 +41,13 @@ func createSchema(db *bun.DB) error {
 		(*models.StandardUserLimits)(nil),
 		(*models.StandardUserSubscription)(nil),
 		(*models.Project)(nil),
-		(*models.Build)(nil),
-		// <P1#16> releases (replace stub) — promoted to a full release model
-		// covering uploaded → in_review → approved → live → rejected lifecycle.
-		(*models.Release)(nil),
 		(*models.Device)(nil),
 		(*models.Notification)(nil),
 		(*models.Session)(nil),
 		(*models.AppUsageEvent)(nil),
-		(*models.AppBuildTask)(nil),
 		(*models.Ticket)(nil),
 		(*models.NavBarItems)(nil),
 		(*models.JSInjectData)(nil),
-		(*models.GooglePlayConnection)(nil),
-		(*models.AppleConnection)(nil),
 		(*models.DeploymentEvent)(nil),
 		(*models.AICreditsBalance)(nil),
 		(*models.AICreditTransaction)(nil),
@@ -98,10 +89,6 @@ func createSchema(db *bun.DB) error {
 		(*models.WebAnalyticsEvent)(nil),
 		// Notification tasks
 		(*models.AppNotificationTask)(nil),
-		// Mobile app config (feature flags, plugin toggles, bridge settings)
-		(*models.MobileAppConfig)(nil),
-		// Compose-push audit log (P2.2: dashboard-driven push notifications for mobile_app_native)
-		(*models.ComposePushHistory)(nil),
 		// Preview codes for Try With Wemob
 		(*models.PreviewCode)(nil),
 		// GitHub export tracking
@@ -114,29 +101,6 @@ func createSchema(db *bun.DB) error {
 		(*models.AppTemplate)(nil),
 		// AI gateway per-project keys
 		(*models.ProjectGatewayKey)(nil),
-		// Persistent store listing per AppProject (replaces per-wizard form state)
-		(*models.AppStoreListing)(nil),
-		// <P1#15> app_store_listing_localizations — per-locale title/desc/keywords/screenshots
-		(*models.AppStoreListingLocalization)(nil),
-		// Known build failure patterns for human-readable error surfacing
-		(*models.BuildAnnotation)(nil),
-		// Expo build event stream (append-only, idempotent by task+message_hash)
-		(*models.BuildEvent)(nil),
-		// Append-only validation outcome per Apple/Google Play connection
-		(*models.ConnectionValidation)(nil),
-		// Encrypted Android keystore + key.properties (replaces plaintext S3 path).
-		(*models.AndroidKeystore)(nil),
-		// Self-hosted expo-updates manifests for mobile_app_native projects (P2.1).
-		(*models.OTAUpdate)(nil),
-		// Per-project OTA manifest signing keys (P0 #8a — code-signed updates).
-		(*models.OTAUpdateSigningKey)(nil),
-		// <P1#14> apple_signing_assets — auto-generated iOS distribution
-		// cert + provisioning profile per project (P1 #14, mobile audit).
-		(*models.AppleSigningAssets)(nil),
-		// <P2#25> mobile_subscriptions — RC v2 webhook landing zone for
-		// native subscription state. Backend mirror of "active subscribers"
-		// for dashboard panels + paywall enforcement on backend resources.
-		(*models.MobileSubscription)(nil),
 		// E3 Phase 7 — per-org bandwidth tally, populated by the daily Fly
 		// GraphQL sync cron and read by the deploy gate.
 		(*models.AppBandwidthUsage)(nil),
@@ -183,7 +147,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			PriceID:      "free_plan",
 			Limits: models.StandardUserLimits{
 				MaximumCredentialCount:    2,
-				MontlyBuildCount:          0,
 				MontlyNotificationCount:   3,
 				MonthlyAICredits:          50,
 				MaxSeats:                  1,
@@ -203,12 +166,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBComputeTimeSec:    0,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        10,
-				MonthlyOTAPublishCount:    0,
 				CanChooseRegion:           false,
 				CreditRolloverMonths:      0,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            false,
 				CanUseAnalytics:           false,
 				CanAccessCode:             false,
 				CanBuyDomain:              false,
@@ -228,7 +187,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			AnnualPriceID: sm.GetSecret("STRIPE_HOBBY_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
 				MaximumCredentialCount:    2,
-				MontlyBuildCount:          0,
 				MontlyNotificationCount:   50,
 				MonthlyAICredits:          200,
 				MaxSeats:                  2,
@@ -248,12 +206,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBComputeTimeSec:    180000,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        100,
-				MonthlyOTAPublishCount:    0,
 				CanChooseRegion:           false,
 				CreditRolloverMonths:      1,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            true,
 				CanUseAnalytics:           true,
 				CanAccessCode:             true,
 				CanBuyDomain:              true,
@@ -273,7 +227,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			AnnualPriceID: sm.GetSecret("STRIPE_PRO_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
 				MaximumCredentialCount:    10,
-				MontlyBuildCount:          0,
 				MontlyNotificationCount:   200,
 				MonthlyAICredits:          500,
 				MaxSeats:                  5,
@@ -293,12 +246,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBComputeTimeSec:    360000,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        250,
-				MonthlyOTAPublishCount:    0,
 				CanChooseRegion:           true,
 				CreditRolloverMonths:      1,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            true,
 				CanUseAnalytics:           true,
 				CanAccessCode:             true,
 				CanBuyDomain:              true,
@@ -318,7 +267,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 			AnnualPriceID: sm.GetSecret("STRIPE_MAX_ANNUAL_PRICE_ID"),
 			Limits: models.StandardUserLimits{
 				MaximumCredentialCount:    25,
-				MontlyBuildCount:          0,
 				MontlyNotificationCount:   500,
 				MonthlyAICredits:          1000,
 				MaxSeats:                  10,
@@ -338,12 +286,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 				DeployDBComputeTimeSec:    360000,
 				MinMachinesRunning:        0,
 				MonthlyBandwidthGB:        500,
-				MonthlyOTAPublishCount:    0,
 				CanChooseRegion:           true,
 				CreditRolloverMonths:      2,
-				CanBuildToAndroid:         true,
-				CanBuildToIOS:             true,
-				CanBuildMobile:            true,
 				CanUseAnalytics:           true,
 				CanAccessCode:             true,
 				CanBuyDomain:              true,
@@ -398,7 +342,6 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		}
 
 		limits.MaximumCredentialCount = p.Limits.MaximumCredentialCount
-		limits.MontlyBuildCount = p.Limits.MontlyBuildCount
 		limits.MontlyNotificationCount = p.Limits.MontlyNotificationCount
 		limits.MonthlyAICredits = p.Limits.MonthlyAICredits
 		limits.MaxSeats = p.Limits.MaxSeats
@@ -418,12 +361,8 @@ func seedPlans(db *database.Database, sm secret.SecretManager) {
 		limits.DeployDBComputeTimeSec = p.Limits.DeployDBComputeTimeSec
 		limits.MinMachinesRunning = p.Limits.MinMachinesRunning
 		limits.MonthlyBandwidthGB = p.Limits.MonthlyBandwidthGB
-		limits.MonthlyOTAPublishCount = p.Limits.MonthlyOTAPublishCount
 		limits.CanChooseRegion = p.Limits.CanChooseRegion
 		limits.CreditRolloverMonths = p.Limits.CreditRolloverMonths
-		limits.CanBuildToAndroid = p.Limits.CanBuildToAndroid
-		limits.CanBuildToIOS = p.Limits.CanBuildToIOS
-		limits.CanBuildMobile = p.Limits.CanBuildMobile
 		limits.CanUseAnalytics = p.Limits.CanUseAnalytics
 		limits.CanAccessCode = p.Limits.CanAccessCode
 		limits.CanBuyDomain = p.Limits.CanBuyDomain
@@ -489,12 +428,6 @@ func main() {
 		slog.Warn("Langfuse startup canary flush failed", "error", err)
 	}
 
-	// Idempotent: ensures the keystore-bundles/ prefix expires after 1 day.
-	// Failure-soft — log+continue so a missing IAM permission doesn't block startup.
-	if err := storage.EnsureKeystoreBundlesLifecycle(context.Background(), controller.AssetsStorage.Client, controller.AssetsStorage.Bucket); err != nil {
-		slog.Warn("keystore-bundles lifecycle bootstrap failed (non-fatal)", "err", err)
-	}
-
 	// Schema migrations run in main only — workers and migration scripts share
 	// the same BootstrapController but each decides independently whether to run
 	// createSchema / seedPlans / backfills.
@@ -529,10 +462,6 @@ func main() {
 		slog.Warn("failed to backfill project status", "error", err)
 	} else if n > 0 {
 		slog.Info("backfilled draft projects with completed runs to ready", "count", n)
-	}
-
-	if err := database.SeedBuildAnnotations(context.Background(), bundb); err != nil {
-		slog.Error("seed build annotations failed", "err", err)
 	}
 
 	sm := controller.SecretManager
@@ -685,17 +614,6 @@ func main() {
 			// Fly machine state webhook (signature verified inside handler)
 			r.Post("/fly", httpViews.HandleFlyWebhook)
 		})
-		// <P1#16> webhook routes — store-side notifications for Release status.
-		// Mounted under /v2/webhooks (not /webhooks) to align with the v2 API
-		// surface; signature verification happens inside each handler.
-		r.Route("/v2/webhooks", func(r chi.Router) {
-			r.Post("/asc-notifications", httpViews.HandleASCNotification)
-			r.Post("/play-rtdn", httpViews.HandlePlayRTDN)
-			// <P2#25> RevenueCat v2 webhook — bearer-token auth, see
-			// internal/views/revenuecat_webhook_view.go. Powers the
-			// Subscriptions panel in Studio + dashboard-side churn fires.
-			r.Post("/revenuecat", httpViews.HandleRevenueCatWebhook)
-		})
 		r.Route("/v1", func(r chi.Router) {
 			// OAuth begin/callback are pre-auth, so UserKey falls back to IPKey
 			// and they share the /v1 bucket. A busy household NAT (or a buggy
@@ -715,14 +633,6 @@ func main() {
 			})
 			r.Handle("/static/*", http.StripPrefix("/v1/static/", http.FileServer(utils.NoDirFileSystem{FS: staticDir})))
 			r.Route("/storage", func(r chi.Router) {
-				r.Route("/credentials", func(r chi.Router) {
-					r.Route("/apple", func(r chi.Router) {
-						r.Post("/", httpViews.PutP8KeyToS3Presign)
-					})
-					r.Route("/google", func(r chi.Router) {
-						r.Post("/", httpViews.PutServiceAccountToS3Presign)
-					})
-				})
 				r.Route("/users", func(r chi.Router) {
 					r.Get("/me/photo", httpViews.GetProfilePhotoFromS3Presign)
 					r.Post("/me/photo", httpViews.PutProfilePhotoToS3Presign)
@@ -740,10 +650,6 @@ func main() {
 						r.Get("/{iconId}", httpViews.GetIconFromS3Presign)
 						r.Post("/", httpViews.PutIconToS3Presign)
 					})
-				})
-				r.Route("/builds", func(r chi.Router) {
-					r.Get("/aab/{buildId}", httpViews.DownloadAABFromS3Presign)
-					r.Get("/ipa/{buildId}", httpViews.DownloadIPAFromS3Presign)
 				})
 				r.Route("/projects", func(r chi.Router) {
 					r.Route("/icons", func(r chi.Router) {
@@ -783,9 +689,6 @@ func main() {
 				r.Get("/auth/{provider}", httpViews.OAuthBegin)
 				r.Post("/auth/google/mobile", httpViews.GoogleMobileLogin)
 			})
-			r.Get("/tasks", httpViews.GetAllTasks)
-			r.Post("/tasks/{taskId}/cancel", httpViews.CancelBuildTask)
-			r.Get("/ship", httpViews.GetShipItems)
 			r.Route("/projects", func(r chi.Router) {
 				r.Get("/", httpViews.GetProjects)
 				r.Route("/{projectId}", func(r chi.Router) {
@@ -818,59 +721,9 @@ func main() {
 							r.Get("/js", httpViews.GetJSInjectionData)
 						})
 					})
-					r.Route("/keystore/download", func(r chi.Router) {
-						r.Post("/request", httpViews.RequestKeystoreDownload)
-						r.Post("/redeem", httpViews.RedeemKeystoreDownload)
-					})
 				})
 				r.Route("/autofill", func(r chi.Router) {
 					r.Post("/navbar", httpViews.NavBarAutoFillWithAI)
-				})
-			})
-			// New route names (preferred from Phase 1 onward)
-			r.Route("/connections", func(r chi.Router) {
-				r.Route("/google-play", func(r chi.Router) {
-					r.Get("/", httpViews.ListGooglePlayConnections)
-					r.Post("/", httpViews.CreateGooglePlayConnection)
-					r.Post("/validate", httpViews.ValidateGooglePlayConnection)
-					r.Route("/{connectionId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetGooglePlayConnection)
-						r.Put("/", httpViews.UpdateGooglePlayConnection)
-						r.Delete("/", httpViews.DeleteGooglePlayConnection)
-					})
-				})
-				r.Route("/apple", func(r chi.Router) {
-					r.Get("/", httpViews.ListAppleConnections)
-					r.Post("/", httpViews.CreateAppleConnection)
-					r.Post("/validate", httpViews.ValidateAppleConnection)
-					r.Route("/{connectionId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppleConnection)
-						r.Put("/", httpViews.UpdateAppleConnection)
-						r.Delete("/", httpViews.DeleteAppleConnection)
-					})
-				})
-			})
-
-			// Legacy aliases — kept for 2 releases so existing frontend keeps working.
-			// Remove after Phase 2 ships the updated dashboard.
-			r.Route("/credentials", func(r chi.Router) {
-				r.Route("/google", func(r chi.Router) {
-					r.Get("/", httpViews.ListGooglePlayConnections)
-					r.Post("/", httpViews.CreateGooglePlayConnection)
-					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetGooglePlayConnection)
-						r.Put("/", httpViews.UpdateGooglePlayConnection)
-						r.Delete("/", httpViews.DeleteGooglePlayConnection)
-					})
-				})
-				r.Route("/appstore", func(r chi.Router) {
-					r.Get("/", httpViews.ListAppleConnections)
-					r.Post("/", httpViews.CreateAppleConnection)
-					r.Route("/{credentialId}", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppleConnection)
-						r.Put("/", httpViews.UpdateAppleConnection)
-						r.Delete("/", httpViews.DeleteAppleConnection)
-					})
 				})
 			})
 			r.Route("/billing", func(r chi.Router) {
@@ -1034,18 +887,6 @@ func main() {
 
 			r.Get("/integrations/providers", httpViews.GetV2IntegrationProviders)
 
-			r.Route("/mobile/{projectId}", func(r chi.Router) {
-				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
-				r.Get("/config", httpViews.GetPublicMobileConfig)
-			})
-
-			// Force-update gate: the mobile app cold-start hits this with the
-			// project slug (typical case) or UUID (fallback). Un-authenticated
-			// — the response only exposes operator-controlled values.
-			r.Route("/mobile/{slugOrID}/min-version", func(r chi.Router) {
-				r.Use(rateLimiter.RateLimit(120, time.Minute, appMiddleware.IPKey))
-				r.Get("/", httpViews.GetMinVersion)
-			})
 		})
 		// AI Gateway — separate from /v2 to avoid inheriting UserKey rate limiter
 		r.Route("/v2/gateway", func(r chi.Router) {
@@ -1174,21 +1015,9 @@ func main() {
 						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
 							Post("/web", httpViews.DeployAppWeb)
 						r.Delete("/web", httpViews.UndeployAppWeb)
-						r.With(rateLimiter.RateLimit(3, time.Minute, appMiddleware.UserKey)).
-							Post("/mobile", httpViews.DeployAppMobile)
-						r.Delete("/mobile", httpViews.UndeployAppMobile)
 						r.Get("/status", httpViews.GetDeployStatus)
 						r.Get("/history", httpViews.GetDeployHistory)
 					})
-
-					// <P2#22> ota rollback + promote — project-owner-authenticated
-					// recovery + staged-rollout controls. Rate limit is intentionally
-					// tight (10/min) since these are operator actions, not anything
-					// triggered by automation.
-					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.UserKey)).
-						Post("/ota/rollback", httpViews.RollbackOTA)
-					r.With(rateLimiter.RateLimit(10, time.Minute, appMiddleware.UserKey)).
-						Post("/ota/promote", httpViews.PromoteOTA)
 
 					// GitHub export
 					r.Route("/github", func(r chi.Router) {
@@ -1198,64 +1027,6 @@ func main() {
 						r.Post("/pull", httpViews.PullFromGitHub)
 						r.Delete("/", httpViews.RemoveGitHubExport)
 					})
-
-					// Mobile builds (Expo / mobile_app_native only)
-					r.Route("/build", func(r chi.Router) {
-						// Expo (mobile_app_native) — request shape + permission
-						// gate route through BuildExpoMobile.
-						r.Post("/expo", httpViews.BuildAppExpo)
-					})
-
-					// Compose-push (P2.2) — dashboard-driven push notifications
-					// for mobile_app_native projects. 5/min/user rate limit
-					// stops a malicious admin from spamming OneSignal's per-app
-					// rate limit (T8.3 audit fix).
-					r.Route("/push", func(r chi.Router) {
-						r.With(rateLimiter.RateLimit(5, time.Minute, appMiddleware.UserKey)).
-							Post("/compose", httpViews.ComposePush)
-						r.Get("/history", httpViews.GetComposePushHistory)
-					})
-
-					// <P2#25> Subscriptions panel — backend mirror of RC state.
-					// Reads only; the RC v2 webhook does the writes.
-					r.Route("/subscriptions", func(r chi.Router) {
-						r.Get("/summary", httpViews.GetSubscriptionsSummary)
-					})
-
-					// Mobile submissions (P1.2 — Codemagic publishing blocks).
-					// POST /v2/apps/{appId}/submit/{platform} — submits the latest
-					// successful Expo build to TestFlight (iOS) or the configured
-					// Play track (Android).
-					r.Route("/submit", func(r chi.Router) {
-						r.Post("/{platform}", httpViews.SubmitAppExpo)
-					})
-
-					// Releases (P1#16) — store-side lifecycle for each submission.
-					// CreateReleaseFromSubmit writes the row from submit_expo_mobile;
-					// these routes expose the resulting Release lifecycle to the dashboard.
-					//   GET  /releases                     — list (?platform= filter)
-					//   GET  /releases/current?platform=   — current live release
-					//   POST /releases/{releaseID}/halt    — pause iOS phased rollout
-					//   POST /releases/rollback            — rollback live → previous
-					r.Route("/releases", func(r chi.Router) {
-						r.Get("/", httpViews.ListReleases)
-						r.Get("/current", httpViews.GetCurrentLiveRelease)
-						r.Post("/rollback", httpViews.RollbackRelease)
-						r.Post("/{releaseID}/halt", httpViews.HaltPhasedRollout)
-					})
-
-					// Persistent store listing — replaces the per-wizard form
-					// state so icon/title/description/screenshots survive
-					// refresh, re-submission, and future multi-locale work.
-					r.Route("/store-listing", func(r chi.Router) {
-						r.Get("/", httpViews.GetAppStoreListing)
-						r.Put("/", httpViews.UpdateAppStoreListing)
-					})
-
-					// Force-update min_build_number (P3.2) — admin/owner-only;
-					// bumping the floor locks out users on older builds, so
-					// non-admins are rejected at the controller layer with 403.
-					r.Patch("/min-version", httpViews.UpdateMinVersion)
 
 					r.Post("/capture-screenshot", httpViews.CaptureAppScreenshot)
 
@@ -1347,10 +1118,6 @@ func main() {
 					// the Wemob AI Gateway on behalf of the project.
 					r.Get("/ai-usage", httpViews.GetProjectAIUsage)
 
-					// Ship tab — Launchpad aggregate
-					r.Get("/launchpad", httpViews.GetLaunchpad)
-					r.Post("/listing/draft", httpViews.DraftListing)
-
 					// Ecommerce admin — proxies to the per-tenant Neon DB.
 					// Apps without a Neon integration get 404 from each handler.
 					r.Route("/store", func(r chi.Router) {
@@ -1395,70 +1162,6 @@ func main() {
 					})
 				})
 			})
-
-			r.Route("/mobile/{projectId}", func(r chi.Router) {
-				r.Use(appMiddleware.RequireAuth(controller))
-				r.Use(appMiddleware.RequireSubscription(controller, "active", "trial", "free"))
-
-				r.Get("/config", httpViews.GetMobileAppConfig)
-				r.Put("/config", httpViews.UpdateMobileAppConfig)
-			})
-
-			// Connection validation status — requires auth, no subscription gate.
-			r.Route("/connections/{kind}/{connectionId}", func(r chi.Router) {
-				r.Use(appMiddleware.RequireAuth(controller))
-				r.Get("/latest-validation", httpViews.GetLatestConnectionValidation)
-			})
-
-			// <P1#13> build events list + SSE — exposes the granular Codemagic
-			// event stream captured by /v2/reports/expo-build to the frontend so
-			// publish surfaces drive their build-stage ladder off the actual
-			// stream instead of string-matching on a coarse status field.
-			r.Route("/tasks/{taskId}/events", func(r chi.Router) {
-				r.Use(appMiddleware.RequireAuth(controller))
-				r.Get("/", httpViews.GetBuildEvents)
-				r.Get("/stream", httpViews.StreamBuildEvents)
-			})
-
-			// Expo build status webhook — no user auth, HMAC-signed by Codemagic worker.
-			// Per-build secret derived as HMAC(master, task_id); the keystore endpoints
-			// at /v2/codemagic/keystore[/fetch] use the same master with HMAC(master, project_id).
-			workerHMACKey := controller.SecretManager.GetSecret("WEMOB_WORKER_HMAC_KEY")
-			if workerHMACKey == "" {
-				slog.Error("WEMOB_WORKER_HMAC_KEY secret is required (generate with: openssl rand -hex 32, then set in Infisical)")
-				os.Exit(1)
-			}
-			expoReportsHandler := views.NewExpoReportsHandler(controller.DB, workerHMACKey).
-				WithReleaseStore(controller)
-			r.Post("/reports/expo-build", expoReportsHandler.UpdateExpoBuildStatus)
-
-			keystoreHandler := views.NewCodemagicKeystoreHandler(controller, workerHMACKey)
-			r.Post("/codemagic/keystore", keystoreHandler.RegisterKeystore)
-			r.Post("/codemagic/keystore/fetch", keystoreHandler.FetchKeystore)
-
-			// P0 #8a — OTA manifest signing: codemagic fetches the public cert
-			// to bake into the binary at build time. Cert is non-secret; the
-			// HMAC scheme just confirms the worker's identity (rate-limit /
-			// audit purposes; no secrets cross this wire).
-			otaCertHandler := views.NewCodemagicOTACertHandler(controller, workerHMACKey)
-			r.Post("/codemagic/ota-cert", otaCertHandler.FetchOTACert)
-
-			// <P1#14> apple-signing route — Codemagic worker fetches the
-			// auto-generated iOS distribution cert + profile + private key
-			// at build time. HMAC-protected; per-project AppleSigningAssets
-			// row is generated lazily on first call (or renewed if expiring).
-			appleSigningHandler := views.NewCodemagicAppleSigningHandler(controller, workerHMACKey)
-			r.Post("/codemagic/apple-signing", appleSigningHandler.FetchAppleSigning)
-
-			// P2.1: self-hosted expo-updates OTA.
-			//   POST /v2/apps/{appId}/ota/publish     — HMAC, worker-only
-			//   GET  /v2/apps/{appId}/ota/manifest    — un-authenticated, mobile client
-			//   GET  /v2/apps/{appId}/ota/assets      — un-authenticated, mobile client
-			otaPublishHandler := views.NewOTAPublishHandler(controller, workerHMACKey)
-			otaManifestHandler := views.NewOTAManifestHandler(controller)
-			r.Post("/apps/{appId}/ota/publish", otaPublishHandler.PublishOTA)
-			r.Get("/apps/{appId}/ota/manifest", otaManifestHandler.GetManifest)
-			r.Get("/apps/{appId}/ota/assets", otaManifestHandler.GetAsset)
 
 			// Admin template management
 			r.Route("/admin/templates", func(r chi.Router) {
@@ -1547,17 +1250,6 @@ func main() {
 		}
 	}()
 
-	// <P1#16> release status poll — once a minute, scan all releases in
-	// non-terminal status and ask App Store Connect / Google Play for the
-	// latest state. Replaces "Codemagic finished uploading" as the source of
-	// truth for "live on store".
-	releasePollCtx, cancelReleasePoll := context.WithCancel(context.Background())
-	releasePoller := &controllers.ReleaseStatusPoller{
-		Controller: controller,
-		PollEvery:  60 * time.Second,
-	}
-	go releasePoller.Run(releasePollCtx)
-
 	// Graceful shutdown on SIGINT/SIGTERM
 	go func() {
 		quit := make(chan os.Signal, 1)
@@ -1575,9 +1267,6 @@ func main() {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-
-		// Stop the release-status poller.
-		cancelReleasePoll()
 
 		// Shutdown main server first — in-flight requests need to complete
 		// (and the events they enqueue need to land in the PostHog buffer)

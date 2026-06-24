@@ -33,8 +33,8 @@ const (
 const (
 	DeploymentEventActorUser     = "user"      // the project owner
 	DeploymentEventActorWemob    = "wemob"     // Wemob team member (managed track)
-	DeploymentEventActorSystem   = "system"    // automated (Codemagic webhook, poll worker)
-	DeploymentEventActorStoreAPI = "store_api" // Apple/Google API pushed a state change
+	DeploymentEventActorSystem   = "system"    // automated worker
+	DeploymentEventActorStoreAPI = "store_api" // legacy external store callback
 )
 
 // DeploymentEvent is an append-only log entry for a deployment.

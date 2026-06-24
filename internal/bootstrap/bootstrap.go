@@ -18,12 +18,10 @@ import (
 	awsCreds "github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/hibiken/asynq"
-	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/controllers"
 	"github.com/knid/wemob/internal/database"
 	"github.com/knid/wemob/internal/services"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
-	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
@@ -33,7 +31,6 @@ import (
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
-	"github.com/knid/wemob/internal/services/revenuecat"
 	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 	daytonaSandbox "github.com/knid/wemob/internal/services/sandbox/daytona"
 	"github.com/knid/wemob/internal/services/secret"
@@ -171,10 +168,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	if err != nil {
 		panic(fmt.Errorf("bootstrap: failed to initialize user API keys S3 storage: %w", err))
 	}
-	androidKeysStorage, err := storage.NewS3Storage(sm.GetSecret("AWS_REGION"), sm.GetSecret("S3_ANDROID_KEYS_BUCKET"), sm.GetSecret("AWS_ACCESS_KEY_ID"), sm.GetSecret("AWS_SECRET_ACCESS_KEY"))
-	if err != nil {
-		panic(fmt.Errorf("bootstrap: failed to initialize android keys S3 storage: %w", err))
-	}
 
 	// CredStore — envelope-encryption-at-rest for stored credentials.
 	// Two modes:
@@ -193,29 +186,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 	}
 	gitRepoService := gitrepo.NewService(repoBasePath)
 	slog.Info("Git repo service initialized", "base_path", repoBasePath)
-
-	// Codemagic CI/CD for mobile builds (optional — nil if not configured)
-	var codemagicService *codemagic.Service
-	if cmToken := sm.GetSecret("CODEMAGIC_API_TOKEN"); cmToken != "" {
-		codemagicService = codemagic.NewService(cmToken, sm.GetSecret("CODEMAGIC_APP_ID"))
-		slog.Info("Codemagic service initialized")
-	}
-
-	// RevenueCat REST v2 — IAP auto-provisioning per tenant (P2.3).
-	// Gracefully degrades when REVENUECAT_API_KEY is unset: provisioning
-	// skips, mobile builds proceed with empty EXPO_PUBLIC_REVENUECAT_KEY_*
-	// env vars, and the template's lib/iap.ts initIAP() already no-ops +
-	// warns on missing keys. Set REVENUECAT_API_KEY in Infisical with
-	// scopes project_configuration:projects:read_write +
-	// project_configuration:apps:read_write before shipping IAP-enabled
-	// mobile_app_native projects to production.
-	var revenueCatService *revenuecat.Service
-	if rcKey := sm.GetSecret("REVENUECAT_API_KEY"); rcKey != "" {
-		revenueCatService = revenuecat.NewService(rcKey)
-		slog.Info("RevenueCat service initialized")
-	} else {
-		slog.Warn("REVENUECAT_API_KEY not set — IAP auto-provisioning disabled (mobile_app_native projects will build with empty IAP keys)")
-	}
 
 	// Meta Conversions API — server-side ad-conversion events. Returns nil
 	// when either secret is unset; downstream calls become no-ops.
@@ -392,7 +362,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 
 	controller := controllers.NewController(
 		db,
-		make(chan struct{}, constants.MAX_CONCURRENT_BUILDS),
 		services.NewSlackService(sm.GetSecret("SLACK_API_KEY")),
 		eventService,
 		asynq.NewClient(redisOpts),
@@ -400,7 +369,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		redisClient,
 		assetsStorage,
 		userApiKeysStorage,
-		androidKeysStorage,
 		credStore,
 		sm,
 		flyService,
@@ -409,8 +377,6 @@ func BootstrapController() (*controllers.Controller, asynq.RedisClientOpt) {
 		neonRegistry,
 		posthogClient,
 		gitRepoService,
-		codemagicService,
-		revenueCatService,
 		metaCAPI,
 		remoteConfigService,
 		sandboxManager,

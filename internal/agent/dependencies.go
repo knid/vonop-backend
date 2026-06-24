@@ -57,42 +57,6 @@ type DatabaseProvisioner func(ctx context.Context, project *models.AppProject, t
 // SetupAIGatewayTool checks the existing flag before invoking this callback.
 type AIEnabler func(ctx context.Context, project *models.AppProject) error
 
-// LocalDatabaseEnabler marks a project as having an on-device SQLite database
-// wired (mobile/lib/db.ts + schema + migrations) and persists the flag so
-// the LocalDatabaseAddendum is appended to subsequent runs. Bound by the
-// controller layer to Controller.enableProjectLocalDatabaseForAgent.
-// Idempotent at the tool layer — ProvisionLocalDatabaseTool checks the
-// flag before invoking this callback.
-type LocalDatabaseEnabler func(ctx context.Context, project *models.AppProject) error
-
-// BackendAutoDeployer queues a Fly deploy for the project's backend/ subtree
-// when the agent run touched it. mobile_app_native projects rely on this to
-// avoid the "user describes an AI feature but nothing works because they
-// didn't click Deploy" UX gap — the agent commits the backend code AND
-// queues the deploy in one shot. Bound by the controller layer to
-// Controller.autoDeployBackendForAgent. The agent runner calls this AFTER
-// FinaliseRun so the just-committed code is what ships.
-//
-// Best-effort by design: implementations should swallow ErrDeployInProgress
-// (a manual deploy was already running) and log other errors. The chat run
-// must not fail because a background deploy failed to enqueue.
-type BackendAutoDeployer func(ctx context.Context, project *models.AppProject) error
-
-// MobileBuildTrigger kicks off a fresh Expo (mobile_app_native) build for
-// the project, on behalf of the chat agent. Used by trigger_build_after_fix
-// so the agent can close the read-fix-rebuild loop without forcing the
-// user back to the build tab. Returns the build ID + the per-platform
-// task IDs so the tool result can include status URLs.
-//
-// platforms is a (possibly empty) slice of "android" / "ios". Empty means
-// "rebuild whatever the last build targeted" — the controller layer
-// resolves this from MobileAppConfig.BuildFor* flags.
-//
-// Best-effort by design: implementations must NOT panic on partial
-// failures (single-platform trigger errors). The tool reports the status
-// to the model so it can react.
-type MobileBuildTrigger func(ctx context.Context, project *models.AppProject, user *models.User, platforms []string) (buildID string, taskIDs map[string]string, err error)
-
 // WebDeployTrigger queues a fresh Fly web deploy for the project, on behalf
 // of the chat agent. Used by trigger_web_deploy so the agent can close the
 // read-fix-redeploy loop after diagnosing a failed deployment. Returns the
@@ -241,16 +205,12 @@ type RunDependencies struct {
 	DB      *database.Database
 	GitRepo *gitrepo.Service
 
-	// mobileConfigFetcher overrides DB for GetMobileAppConfig lookups. Used in
-	// tests to inject a fake without a real database connection. When nil,
-	// context.go falls back to DB directly.
-	mobileConfigFetcher mobileConfigGetter
-	AssetsStorage       *storage.S3Storage
-	SecretManager       secret.SecretManager
-	NeonService         *neon.Service
-	LLMProvider         *utils.LLMProvider
-	PostHog             posthog.Client
-	RemoteConfig        *remoteconfig.Service
+	AssetsStorage  *storage.S3Storage
+	SecretManager  secret.SecretManager
+	NeonService    *neon.Service
+	LLMProvider    *utils.LLMProvider
+	PostHog        posthog.Client
+	RemoteConfig   *remoteconfig.Service
 
 	// UserPlanName is the lowercased personal subscription plan
 	// (starter, hobby, pro, max). Used by creditsBilled as a fallback when
@@ -270,10 +230,7 @@ type RunDependencies struct {
 	NeonConnString        NeonConnResolver
 	ProvisionDatabase     DatabaseProvisioner
 	EnableAI              AIEnabler
-	EnableLocalDatabase   LocalDatabaseEnabler
-	AutoDeployBackend     BackendAutoDeployer
 	GatewayAllowedModels  GatewayAllowedModelsFn
-	TriggerMobileBuild    MobileBuildTrigger
 	TriggerWebDeploy      WebDeployTrigger
 	SandboxControl        SandboxControlFn
 	SetPreviewURL         PreviewURLSetter

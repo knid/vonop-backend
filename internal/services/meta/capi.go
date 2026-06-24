@@ -40,8 +40,8 @@ type Service struct {
 }
 
 // NewService constructs a Service. Returns nil when pixelID or accessToken is
-// empty so callers can graceful-degrade (matches the RevenueCat service
-// pattern). testEventCode is optional; when set, events are tagged for Meta's
+// empty so callers can gracefully degrade. testEventCode is optional; when set,
+// events are tagged for Meta's
 // Test Events tab.
 func NewService(pixelID, accessToken, testEventCode string) *Service {
 	if pixelID == "" || accessToken == "" {

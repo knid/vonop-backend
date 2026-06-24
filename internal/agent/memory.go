@@ -97,7 +97,7 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 		} else {
 			m.Completed = appendLimited(m.Completed, fmt.Sprintf("%s completed", name), 40)
 		}
-	case "read_files", "read_attachment", "read_mobile_config", "read_build_logs", "read_deploy_logs", "list_files", "grep":
+	case "read_files", "read_attachment", "read_deploy_logs", "list_files", "grep":
 		m.FilesRead = appendUniqueLimited(m.FilesRead, paths, 80)
 		if len(paths) > 0 {
 			m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Inspected %s via %s", strings.Join(paths, ", "), name), 30)
@@ -110,7 +110,7 @@ func (m *AgentRunMemory) RecordTool(name, args, result string, isError bool) {
 			m.SkillIDs = appendUniqueLimited(m.SkillIDs, []string{id}, 40)
 			m.Decisions = appendLimited(m.Decisions, fmt.Sprintf("Loaded skill %s.", id), 30)
 		}
-	case "trigger_build_after_fix", "trigger_web_deploy":
+	case "trigger_web_deploy":
 		m.Completed = appendLimited(m.Completed, firstNonEmpty(firstLine(result, 180), name+" completed"), 40)
 	}
 	m.NextAction = "Use the latest file tree, TODO state, and recent tool results to finish the current user request."

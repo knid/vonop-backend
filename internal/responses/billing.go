@@ -14,9 +14,8 @@ type PlansListResponse struct {
 
 type PlanLimitsResponse struct {
 	// Credits
-	MonthlyAICredits     int            `json:"monthly_ai_credits"`
-	CreditRolloverMonths int            `json:"credit_rollover_months"`
-	BuildCreditCosts     map[string]int `json:"build_credit_costs"`
+	MonthlyAICredits     int `json:"monthly_ai_credits"`
+	CreditRolloverMonths int `json:"credit_rollover_months"`
 	// Org / plan caps
 	MaxSeats               int `json:"max_seats"`
 	MaximumCredentialCount int `json:"maximum_credential_count"`
@@ -25,14 +24,9 @@ type PlanLimitsResponse struct {
 	MaxMobileApps         int `json:"max_mobile_apps"`
 	MaxDeployedWebApps    int `json:"max_deployed_web_apps"`
 	MaxDeployedMobileApps int `json:"max_deployed_mobile_apps"`
-	// Build / notification quotas (legacy — credits gate now, but values still reported)
-	MontlyBuildCount        int `json:"montly_build_count"`
+	// Notification quota is legacy; credits gate most modern usage.
 	MontlyNotificationCount int `json:"montly_notification_count"`
-	MonthlyOTAPublishCount  int `json:"monthly_ota_publish_count"`
 	// Capability flags
-	CanBuildToAndroid  bool `json:"can_build_to_android"`
-	CanBuildToIOS      bool `json:"can_build_to_ios"`
-	CanBuildMobile     bool `json:"can_build_mobile"`
 	CanDeployMobile    bool `json:"can_deploy_mobile"`
 	CanDeployWeb       bool `json:"can_deploy_web"`
 	CanUseAnalytics    bool `json:"can_use_analytics"`
@@ -59,13 +53,13 @@ type PlanLimitsResponse struct {
 }
 
 type PlanResponse struct {
-	ID            string             `json:"id"`
-	Name          string             `json:"name"`
-	Description   string             `json:"description"`
-	MonthlyPrice  int                `json:"monthly_price"`
-	AnnualPrice   int                `json:"annual_price"`
-	PriceID       string             `json:"price_id"`
-	AnnualPriceID string             `json:"annual_price_id,omitempty"`
+	ID               string             `json:"id"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	MonthlyPrice     int                `json:"monthly_price"`
+	AnnualPrice      int                `json:"annual_price"`
+	PriceID          string             `json:"price_id"`
+	AnnualPriceID    string             `json:"annual_price_id,omitempty"`
 	AnnualSavings    int                `json:"annual_savings"`
 	IntroPrice       int                `json:"intro_price,omitempty"`
 	IntroPriceMonths int                `json:"intro_price_months,omitempty"`
@@ -85,13 +79,13 @@ type AICreditsBalanceResponse struct {
 // can render "X of Y sub credits used" next to "N extra credits remaining"
 // instead of the broken total-minus-balance formula.
 type CreditBreakdownResponse struct {
-	Balance             int    `json:"balance"`
-	SubBalance          int    `json:"sub_balance"`
-	SubLimit            int    `json:"sub_limit"`
-	SubUsedThisPeriod   int    `json:"sub_used_this_period"`
-	PurchasedBalance    int    `json:"purchased_balance"`
-	PeriodStart         string `json:"period_start"`
-	PeriodEnd           string `json:"period_end"`
+	Balance           int    `json:"balance"`
+	SubBalance        int    `json:"sub_balance"`
+	SubLimit          int    `json:"sub_limit"`
+	SubUsedThisPeriod int    `json:"sub_used_this_period"`
+	PurchasedBalance  int    `json:"purchased_balance"`
+	PeriodStart       string `json:"period_start"`
+	PeriodEnd         string `json:"period_end"`
 }
 
 type TokenUsageEntry struct {

@@ -44,7 +44,7 @@ func (c *Controller) classifyProjectType(ctx context.Context, prompt string, use
 Categories:
 - ecommerce — The user wants to sell products or services online. This includes stores, shops, marketplaces, boutiques, or any site with products, catalog, cart, checkout, payments, orders, inventory, shipping. Even if the description is short, vague, or in another language, classify as ecommerce when the intent is clearly commercial selling.
 - app — Any web application that is NOT primarily for selling products: blogs, dashboards, portfolios, SaaS tools, landing pages, booking systems, social networks, content sites.
-- mobile_app_native — Native mobile app for iOS or Android (React Native, Expo, Swift, Kotlin). Look for explicit mobile signals: push notifications, biometric auth, in-app purchases, deep links, offline mode, App Store, Play Store.
+- mobile_app_native — Native mobile app for iOS or Android (React Native, Expo, Swift, Kotlin). Look for explicit mobile signals: native iOS/Android, React Native, Expo, device-sized screens, or installable mobile app.
 
 Classification rules:
 1. Default to ecommerce when the user mentions selling, products, shopping, or store-related activity — even if the wording is casual or in Turkish/another language.

@@ -68,9 +68,6 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	if req.MontlyNotificationCount != nil {
 		limits.MontlyNotificationCount = *req.MontlyNotificationCount
 	}
-	if req.MontlyBuildCount != nil {
-		limits.MontlyBuildCount = *req.MontlyBuildCount
-	}
 	if req.MonthlyAICredits != nil {
 		limits.MonthlyAICredits = *req.MonthlyAICredits
 	}
@@ -88,12 +85,6 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	}
 	if req.CanDeployMobile != nil {
 		limits.CanDeployMobile = *req.CanDeployMobile
-	}
-	if req.CanBuildToAndroid != nil {
-		limits.CanBuildToAndroid = *req.CanBuildToAndroid
-	}
-	if req.CanBuildToIOS != nil {
-		limits.CanBuildToIOS = *req.CanBuildToIOS
 	}
 	if req.CanUseAnalytics != nil {
 		limits.CanUseAnalytics = *req.CanUseAnalytics
@@ -119,17 +110,11 @@ func (c *Controller) AdminUpdateSubscription(subID string, req requests.AdminUpd
 	if req.CanUseEmailService != nil {
 		limits.CanUseEmailService = *req.CanUseEmailService
 	}
-	if req.CanBuildMobile != nil {
-		limits.CanBuildMobile = *req.CanBuildMobile
-	}
 	if req.MinMachinesRunning != nil {
 		limits.MinMachinesRunning = *req.MinMachinesRunning
 	}
 	if req.MonthlyBandwidthGB != nil {
 		limits.MonthlyBandwidthGB = *req.MonthlyBandwidthGB
-	}
-	if req.MonthlyOTAPublishCount != nil {
-		limits.MonthlyOTAPublishCount = *req.MonthlyOTAPublishCount
 	}
 	if req.CanChooseRegion != nil {
 		limits.CanChooseRegion = *req.CanChooseRegion

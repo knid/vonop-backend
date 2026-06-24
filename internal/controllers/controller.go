@@ -12,7 +12,6 @@ import (
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/services"
 	caddyService "github.com/knid/wemob/internal/services/caddy"
-	"github.com/knid/wemob/internal/services/codemagic"
 	"github.com/knid/wemob/internal/services/events"
 	"github.com/knid/wemob/internal/services/fly"
 	"github.com/knid/wemob/internal/services/gitea"
@@ -21,7 +20,6 @@ import (
 	"github.com/knid/wemob/internal/services/meta"
 	"github.com/knid/wemob/internal/services/neon"
 	"github.com/knid/wemob/internal/services/remoteconfig"
-	"github.com/knid/wemob/internal/services/revenuecat"
 	sandboxService "github.com/knid/wemob/internal/services/sandbox"
 	"github.com/knid/wemob/internal/services/secret"
 	"github.com/knid/wemob/internal/services/storage"
@@ -31,23 +29,16 @@ import (
 )
 
 type Controller struct {
-	DB                     *database.Database
-	SecretManager          secret.SecretManager
-	SlackService           *services.SlackService
-	EventService           events.EventService
-	TaskService            *asynq.Client
-	AsynqInspector         *asynq.Inspector
-	RedisPubSub            *redis.Client // raw client for pub/sub channels (job events, cancel signals from worker ↔ API)
-	AssetsStorage          *storage.S3Storage
-	UserApiKeysStorage     *storage.S3Storage
-	AndroidKeysStorage     *storage.S3Storage
-	CredStore              *storage.CredStore
-	ConcurrentBuildLimiter chan struct{}
-	CodemagicService       *codemagic.Service
-	// RevenueCatService is nil when REVENUECAT_API_KEY is unset (graceful
-	// degrade: IAP auto-provisioning skips, builds proceed with empty IAP
-	// keys, the template's lib/iap.ts initIAP() no-ops + warns).
-	RevenueCatService *revenuecat.Service
+	DB                 *database.Database
+	SecretManager      secret.SecretManager
+	SlackService       *services.SlackService
+	EventService       events.EventService
+	TaskService        *asynq.Client
+	AsynqInspector     *asynq.Inspector
+	RedisPubSub        *redis.Client // raw client for pub/sub channels (job events, cancel signals from worker ↔ API)
+	AssetsStorage      *storage.S3Storage
+	UserApiKeysStorage *storage.S3Storage
+	CredStore          *storage.CredStore
 	// MetaCAPI is nil when META_PIXEL_ID or META_CAPI_ACCESS_TOKEN is unset.
 	// Conversion events skip silently in that case; client-side Pixel still
 	// fires PageView from the front-end if NEXT_PUBLIC_META_PIXEL_ID is set.
@@ -77,13 +68,12 @@ type Controller struct {
 	CaddyAdmin            *caddyService.Admin
 }
 
-func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
+func NewController(db *database.Database,
 	slackService *services.SlackService, eventService events.EventService,
 	taskService *asynq.Client, asynqInspector *asynq.Inspector,
 	redisClient *redis.Client,
 	assetsStorage *storage.S3Storage,
 	userApiKeysStorage *storage.S3Storage,
-	androidKeysStorage *storage.S3Storage,
 	credStore *storage.CredStore,
 	secretManager secret.SecretManager,
 	flyService *fly.Service, giteaService *gitea.Service,
@@ -91,8 +81,6 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	neonRegistry *neon.Registry,
 	posthogClient posthog.Client,
 	gitRepoService *gitrepo.Service,
-	codemagicService *codemagic.Service,
-	revenueCatService *revenuecat.Service,
 	metaCAPI *meta.Service,
 	remoteConfigService *remoteconfig.Service,
 	sandboxManager *sandboxService.Manager,
@@ -100,32 +88,28 @@ func NewController(db *database.Database, concurrentBuildLimiter chan struct{},
 	caddyAdmin *caddyService.Admin) *Controller {
 
 	return &Controller{
-		DB:                     db,
-		SlackService:           slackService,
-		EventService:           eventService,
-		ConcurrentBuildLimiter: concurrentBuildLimiter,
-		TaskService:            taskService,
-		AsynqInspector:         asynqInspector,
-		RedisPubSub:            redisClient,
-		AssetsStorage:          assetsStorage,
-		UserApiKeysStorage:     userApiKeysStorage,
-		AndroidKeysStorage:     androidKeysStorage,
-		CredStore:              credStore,
-		SecretManager:          secretManager,
-		CodemagicService:       codemagicService,
-		RevenueCatService:      revenueCatService,
-		MetaCAPI:               metaCAPI,
-		FlyService:             flyService,
-		FlyInspector:           flyService,
-		GiteaService:           giteaService,
-		NeonService:            neonService,
-		NeonRegistry:           neonRegistry,
-		GitRepoService:         gitRepoService,
-		PostHog:                posthogClient,
-		RemoteConfig:           remoteConfigService,
-		SandboxManager:         sandboxManager,
-		EdgeIPs:                edgeIPs,
-		CaddyAdmin:             caddyAdmin,
+		DB:                 db,
+		SlackService:       slackService,
+		EventService:       eventService,
+		TaskService:        taskService,
+		AsynqInspector:     asynqInspector,
+		RedisPubSub:        redisClient,
+		AssetsStorage:      assetsStorage,
+		UserApiKeysStorage: userApiKeysStorage,
+		CredStore:          credStore,
+		SecretManager:      secretManager,
+		MetaCAPI:           metaCAPI,
+		FlyService:         flyService,
+		FlyInspector:       flyService,
+		GiteaService:       giteaService,
+		NeonService:        neonService,
+		NeonRegistry:       neonRegistry,
+		GitRepoService:     gitRepoService,
+		PostHog:            posthogClient,
+		RemoteConfig:       remoteConfigService,
+		SandboxManager:     sandboxManager,
+		EdgeIPs:            edgeIPs,
+		CaddyAdmin:         caddyAdmin,
 	}
 }
 

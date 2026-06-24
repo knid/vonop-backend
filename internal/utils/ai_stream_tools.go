@@ -74,7 +74,7 @@ func sanitizeToolError(toolName string, err error) string {
 func isParallelSafeTool(name string) bool {
 	switch name {
 	case "read_files", "list_files", "grep", "read_attachment", "generate_image",
-		"read_build_logs", "read_deploy_logs", "read_mobile_config":
+		"read_deploy_logs":
 		return true
 	default:
 		return false

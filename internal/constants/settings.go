@@ -1,8 +1,6 @@
 package constants
 
 const (
-	MAX_CONCURRENT_BUILDS = 1
-
 	// WEMOB_API_BASE_URL is the public base URL for the Wemob API (used for storefront API references)
 	WEMOB_API_BASE_URL = "https://api.wemob.io"
 
@@ -44,19 +42,17 @@ const (
 	PermChatViewHistory = "chat.view_history"
 	PermCodeExport      = "code.export"
 
-	// Build, deploy, release actions
+	// Deploy actions
 	PermBuildTrigger = "build.trigger"
 
-	// Secrets / connections / signing materials
+	// Secrets / connections
 	PermCredentialsManage = "credentials.manage"
 
 	// Push / email / notification automation
 	PermNotificationSend = "notification.send"
 
 	// Other admin actions
-	PermMinVersionUpdate = "minversion.update"
-	PermKeystoreAccess   = "keystore.access" // download/signing material access
-	PermProjectCreate    = "project.create"  // creating new projects inside the org
+	PermProjectCreate = "project.create" // creating new projects inside the org
 )
 
 // AllOrgPermissions is the exhaustive list of known capabilities (useful for
@@ -75,8 +71,6 @@ var AllOrgPermissions = []string{
 	PermBuildTrigger,
 	PermCredentialsManage,
 	PermNotificationSend,
-	PermMinVersionUpdate,
-	PermKeystoreAccess,
 	PermProjectCreate,
 }
 
@@ -104,8 +98,6 @@ func DefaultPermissionsForRole(role string) []string {
 			PermBuildTrigger,
 			PermCredentialsManage,
 			PermNotificationSend,
-			PermMinVersionUpdate,
-			PermKeystoreAccess,
 			PermProjectCreate,
 		}
 	case "member":
@@ -121,7 +113,7 @@ func DefaultPermissionsForRole(role string) []string {
 			PermBuildTrigger,
 			PermNotificationSend,
 			PermProjectCreate,
-			// Intentionally no: member.*, org.settings, credentials.*, org.transfer, keystore, minversion
+			// Intentionally no: member.*, org.settings, credentials.*, org.transfer
 		}
 	default:
 		// Unknown role -> very restricted (only basic read via membership)

@@ -12,7 +12,7 @@ This replaces the current situation where store data can only be managed through
 ## Non-goals
 
 - No changes to `StreamChatStoreManagement` or its wiring in `internal/views/ecommerce_views.go`.
-- No changes to existing agent tools (`read_file`, `write_file`, `edit_file`, `delete_file`, `list_files`, `generate_image`, `web_search`, `execute_sql`, `configure_mobile_bridge`).
+- No changes to existing agent tools (`read_file`, `write_file`, `edit_file`, `delete_file`, `list_files`, `generate_image`, `web_search`, `execute_sql`).
 - No changes to agent system prompts beyond each new tool's own description — no upfront store-state dump.
 - No new controller CRUD paths for store data. All tools reuse the existing helpers in `ecommerce_controller.go` (`createProductFromChat`, `updateProductFromChat`, …).
 - No separate per-tool credit deduction. The existing `TokenTracker`-based deduction at run end continues to cover all tool calls.

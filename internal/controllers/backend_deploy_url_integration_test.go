@@ -61,8 +61,8 @@ func TestBackendDeployURL_UsesRuntimeAppDefaultDomain(t *testing.T) {
 }
 
 // TestBackendDeployURL_RuntimeAppWithCustomDomain verifies that a user-
-// configured custom domain on the RuntimeApp is what BuildExpoMobile bakes
-// into the binary, not the canonical wemob.app fallback.
+// configured custom domain on the RuntimeApp wins over the canonical
+// wemob.app fallback.
 func TestBackendDeployURL_RuntimeAppWithCustomDomain(t *testing.T) {
 	db := database.NewTestDB(t,
 		(*models.User)(nil),

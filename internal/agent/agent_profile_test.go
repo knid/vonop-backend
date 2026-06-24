@@ -42,11 +42,21 @@ func TestBuildRegistryFor_ProfileToolSeparation(t *testing.T) {
 
 	mobile := BuildRegistryFor(&models.AppProject{ProjectType: models.ProjectTypeMobileAppNative, Status: "ready"}, nil, "")
 	mobileNames := mobile.Names()
-	if !slices.Contains(mobileNames, "read_mobile_config") {
-		t.Fatal("mobile builder registry should expose mobile config tool")
+	removedMobileTools := []string{
+		"read_mobile_config",
+		"provision_local_database",
+		"read_build_logs",
+		"trigger_build_after_fix",
+		"read_deploy_logs",
+		"trigger_web_deploy",
+		"provision_database",
+		"execute_sql",
+		"setup_wemob_ai_gateway",
 	}
-	if !slices.Contains(mobileNames, "trigger_build_after_fix") {
-		t.Fatal("mobile builder registry should expose build trigger outside draft")
+	for _, name := range removedMobileTools {
+		if slices.Contains(mobileNames, name) {
+			t.Fatalf("mobile builder registry must not expose removed tool %q", name)
+		}
 	}
 }
 

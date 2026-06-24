@@ -113,39 +113,26 @@ func TestBuildSystemMessages_IncludesProjectTypeBoundary(t *testing.T) {
 	}
 }
 
-func TestBuildSystemMessages_MobileNativeIncludesConfigAddendum(t *testing.T) {
+func TestBuildSystemMessages_MobileNativeDoesNotIncludeConfigAddendum(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	cfg := &models.MobileAppConfig{
-		BridgeMethods:       []string{"camera.takePhoto", "biometric"},
-		URLScheme:           "myapp",
-		UniversalLinkDomain: "example.com",
-		BiometricEnabled:    true,
-		PushEnabled:         true,
-		DarkModeEnabled:     true,
-		OfflineEnabled:      false,
-		Permissions:         []string{"camera", "location"},
-	}
-	deps := newDepsWithMobileConfig(t, project, cfg)
-	msgs := BuildSystemMessages(project, deps, nil, false)
+	msgs := BuildSystemMessages(project, &RunDependencies{}, nil, false)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "camera.takePhoto") {
-		t.Error("expected enabled bridge methods listed in addendum")
-	}
-	if !strings.Contains(joined, "myapp") {
-		t.Error("expected URL scheme listed in addendum")
-	}
-	if !strings.Contains(joined, "example.com") {
-		t.Error("expected universal link domain listed in addendum")
-	}
-	if !strings.Contains(joined, "Biometric enabled: true") {
-		t.Error("expected biometric flag listed")
-	}
-	if !strings.Contains(joined, "Permissions:") || !strings.Contains(joined, "camera, location") {
-		t.Error("expected permissions list")
+	for _, removed := range []string{
+		"Current native capability config",
+		"camera.takePhoto",
+		"myapp",
+		"example.com",
+		"Biometric enabled",
+		"Permissions:",
+		"configure_mobile_bridge",
+	} {
+		if strings.Contains(joined, removed) {
+			t.Fatalf("mobile prompts must not include removed config/native capability guidance %q", removed)
+		}
 	}
 }
 
@@ -154,12 +141,11 @@ func TestBuildSystemMessages_MobileNativeNoConfigSkipsAddendum(t *testing.T) {
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{},
 	}
-	deps := newDepsWithMobileConfig(t, project, nil) // explicitly no config
-	msgs := BuildSystemMessages(project, deps, nil, false)
+	msgs := BuildSystemMessages(project, &RunDependencies{}, nil, false)
 	joined := concatMessages(msgs)
 
-	if strings.Contains(joined, "Current MobileAppConfig") {
-		t.Error("expected no MobileAppConfig addendum when config is nil")
+	if strings.Contains(joined, "Current native capability config") {
+		t.Error("expected no native capability addendum when config is nil")
 	}
 	// The base prompt should still be present
 	if !strings.Contains(joined, "Expo Router") {
@@ -167,25 +153,7 @@ func TestBuildSystemMessages_MobileNativeNoConfigSkipsAddendum(t *testing.T) {
 	}
 }
 
-// fakeMobileConfigGetter is a test double for mobileConfigGetter.
-type fakeMobileConfigGetter struct {
-	cfg *models.MobileAppConfig
-}
-
-func (f *fakeMobileConfigGetter) GetMobileAppConfig(projectID string) (*models.MobileAppConfig, error) {
-	return f.cfg, nil
-}
-
-// newDepsWithMobileConfig constructs RunDependencies with a fake mobileConfigGetter
-// so T20 tests run without a real database connection.
-func newDepsWithMobileConfig(t *testing.T, project *models.AppProject, cfg *models.MobileAppConfig) *RunDependencies {
-	t.Helper()
-	return &RunDependencies{
-		mobileConfigFetcher: &fakeMobileConfigGetter{cfg: cfg},
-	}
-}
-
-func TestBuildSystemMessages_NativeWithDatabaseUsesNativeAddendum(t *testing.T) {
+func TestBuildSystemMessages_NativeWithDatabaseSkipsDatabaseAddendum(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_database": true},
@@ -193,11 +161,10 @@ func TestBuildSystemMessages_NativeWithDatabaseUsesNativeAddendum(t *testing.T) 
 	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
-		t.Error("expected DatabaseAddendumNative on native project with has_database=true")
-	}
-	if strings.Contains(joined, "export const dynamic") {
-		t.Error("native project must NOT receive the web-shaped DatabaseAddendum")
+	for _, removed := range []string{"DATABASE ADDENDUM (native + backend)", "DATABASE ADDENDUM", "export const dynamic"} {
+		if strings.Contains(joined, removed) {
+			t.Fatalf("mobile prompts must not include server database guidance %q", removed)
+		}
 	}
 }
 
@@ -214,7 +181,7 @@ func TestBuildSystemMessages_WebWithDatabaseUsesGenericAddendum(t *testing.T) {
 	}
 }
 
-func TestBuildSystemMessages_LocalDatabaseAddendumOnFlag(t *testing.T) {
+func TestBuildSystemMessages_LocalDatabaseAddendumRemoved(t *testing.T) {
 	project := &models.AppProject{
 		ProjectType: models.ProjectTypeMobileAppNative,
 		Settings:    map[string]any{"has_local_database": true},
@@ -222,8 +189,8 @@ func TestBuildSystemMessages_LocalDatabaseAddendumOnFlag(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
-		t.Error("expected LocalDatabaseAddendum on native project with has_local_database=true")
+	if strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
+		t.Error("mobile prompts must not include persistence addendum")
 	}
 }
 
@@ -248,11 +215,10 @@ func TestBuildSystemMessages_BothAddendaForSyncedNative(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "DATABASE ADDENDUM (native + backend)") {
-		t.Error("expected DatabaseAddendumNative")
-	}
-	if !strings.Contains(joined, "LOCAL DATABASE ADDENDUM") {
-		t.Error("expected LocalDatabaseAddendum")
+	for _, removed := range []string{"DATABASE ADDENDUM (native + backend)", "DATABASE ADDENDUM", "LOCAL DATABASE ADDENDUM"} {
+		if strings.Contains(joined, removed) {
+			t.Errorf("mobile prompts must not contain removed database guidance %q", removed)
+		}
 	}
 }
 

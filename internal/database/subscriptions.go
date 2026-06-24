@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/knid/wemob/internal/models"
@@ -202,95 +201,4 @@ func (db *Database) GetDeployedWebAppsByOrgID(orgID string) ([]DeployedWebAppInf
 		Where("d.status = 'deployed'").
 		Scan(context.Background(), &apps)
 	return apps, err
-}
-
-// "Mobile-deployed" means a mobile_app_native project with a live OTA
-// deployment in app_deployments (platform='ota').
-func (db *Database) CountDeployedMobileAppsByUserID(userID string) (int, error) {
-	var count int
-	err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		ColumnExpr("COUNT(DISTINCT d.app_project_id)").
-		Where("d.user_id = ?", userID).
-		Where("d.status = 'deployed'").
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Scan(context.Background(), &count)
-	return count, err
-}
-
-// CountDeployedMobileAppsByOrgID — org-scoped sibling for plan limit gating.
-func (db *Database) CountDeployedMobileAppsByOrgID(orgID string) (int, error) {
-	var count int
-	err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		ColumnExpr("COUNT(DISTINCT d.app_project_id)").
-		Where("p.organization_id = ?", orgID).
-		Where("d.status = 'deployed'").
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Scan(context.Background(), &count)
-	return count, err
-}
-
-func (db *Database) GetDeployedMobileAppsByUserID(userID string) ([]DeployedWebAppInfo, error) {
-	var apps []DeployedWebAppInfo
-	err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		ColumnExpr("DISTINCT d.app_project_id, p.name").
-		Where("d.user_id = ?", userID).
-		Where("d.status = 'deployed'").
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Scan(context.Background(), &apps)
-	return apps, err
-}
-
-// CountOTAPublishesByOrgInPeriod counts every OTA deploy attempt across an
-// org's mobile_app_native projects within [start, end). Includes failed
-// attempts because each one consumed publish-pipeline work. Used by the
-// MonthlyOTAPublishCount enforcement gate (F4).
-func (db *Database) CountOTAPublishesByOrgInPeriod(ctx context.Context, orgID string, start, end time.Time) (int, error) {
-	var count int
-	err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		ColumnExpr("COUNT(*)").
-		Where("p.organization_id = ?", orgID).
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Where("d.created_at >= ?", start).
-		Where("d.created_at < ?", end).
-		Scan(ctx, &count)
-	return count, err
-}
-
-// GetDeployedMobileAppsByOrgID — org-scoped sibling for the over-quota error payload.
-func (db *Database) GetDeployedMobileAppsByOrgID(orgID string) ([]DeployedWebAppInfo, error) {
-	var apps []DeployedWebAppInfo
-	err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		ColumnExpr("DISTINCT d.app_project_id, p.name").
-		Where("p.organization_id = ?", orgID).
-		Where("d.status = 'deployed'").
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Scan(context.Background(), &apps)
-	return apps, err
-}
-
-func (db *Database) IsAppAlreadyDeployedMobile(appProjectID string) (bool, error) {
-	count, err := db.DB.NewSelect().
-		TableExpr("app_deployments AS d").
-		Join("JOIN app_projects AS p ON p.id = d.app_project_id").
-		Where("d.app_project_id = ?", appProjectID).
-		Where("d.status = 'deployed'").
-		Where("p.project_type = ?", "mobile_app_native").
-		Where("d.platform = ?", "ota").
-		Count(context.Background())
-	return count > 0, err
 }

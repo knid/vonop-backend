@@ -22,11 +22,9 @@ const (
 	PromptAgentDatabaseMobileLocal   = "wemob-agent-database-mobile-local"
 	PromptAgentAINextJS              = "wemob-agent-ai-nextjs"
 	PromptAgentAISplitWeb            = "wemob-agent-ai-split-web"
-	PromptAgentMobileConfigAddendum  = "wemob-agent-mobile-config-addendum"
 	PromptAgentAttachmentsAddendum   = "wemob-agent-attachments-addendum"
 	PromptProjectClassify            = "wemob-project-classify"
 	PromptProjectName                = "wemob-project-name"
-	PromptListingDraft               = "wemob-listing-draft"
 	PromptValidation                 = "wemob-typescript-validation"
 )
 
