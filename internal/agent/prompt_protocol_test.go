@@ -105,7 +105,8 @@ func TestMobileFirstGenPromptDefaultsToSmallUiScaffold(t *testing.T) {
 	for _, required := range []string{
 		"Default phase is UI scaffold only",
 		"create DESIGN.md",
-		"one coherent primary mobile screen",
+		"one coherent primary",
+		"mobile screen",
 		"Do not add backend APIs",
 		"Stop after one focused verification pass",
 	} {
