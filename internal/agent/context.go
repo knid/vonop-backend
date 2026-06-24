@@ -29,9 +29,16 @@ func depsWithoutLangfuse(deps *RunDependencies) *RunDependencies {
 // churn. The compact base prompt covers basic tool protocol; this block keeps
 // batching-specific guidance close to the registry's batch tool surface.
 const planningDiscipline = `## Planning Discipline
-Read relevant code before editing. Prefer targeted patches over rewrites.
-Plan briefly, batch obvious reads and edits, recover once from failed edits,
-verify once, then stop calling tools. Keep narration brief and act with tools.`
+Read relevant code before editing. Prefer targeted patches over rewrites. Batch
+obvious independent edits when the next action is clear.
+
+For new file sets, batch many small new files in one write_files call. Wire new
+components into existing entrypoints with multi_edit instead of rewriting whole
+existing files. Keep write_files arguments as real JSON arrays.
+
+If an edit fails because file state is stale, inspect the current file once and
+retry with a narrower edit. Never use sandbox_exec to manage files; use
+Git-backed file tools for source files.`
 
 const projectTypeBoundary = `## Project Type Boundary
 This project was created with project_type=%q (%s).

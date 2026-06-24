@@ -422,8 +422,24 @@ func TestBuildSystemMessages_FirstGenMobileIncludesWorkOrders(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, true)
 	joined := concatMessages(msgs)
 
-	if !strings.Contains(joined, "home screen first") {
-		t.Error("expected first-gen mobile to include home screen first work order")
+	for _, required := range []string{
+		"Default phase is UI scaffold only",
+		"create DESIGN.md",
+		"one coherent primary",
+		"Stop after one focused verification pass",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Errorf("expected first-gen mobile to include %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"home screen first",
+		"finish the entire visible UI surface",
+		"Every other screen + component with stubs",
+	} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("first-gen mobile still includes runaway work order %q", forbidden)
+		}
 	}
 	if strings.Contains(joined, "EDITING DISCIPLINE") {
 		t.Error("first-gen mobile must NOT include chat editing discipline")
@@ -438,8 +454,8 @@ func TestBuildSystemMessages_ChatMobileIncludesEditingDiscipline(t *testing.T) {
 	msgs := BuildSystemMessages(project, nil, nil, false)
 	joined := concatMessages(msgs)
 
-	if strings.Contains(joined, "home screen first") {
-		t.Error("chat mobile must NOT include home screen first work order")
+	if strings.Contains(joined, "Default phase is UI scaffold only") {
+		t.Error("chat mobile must NOT include first-gen UI scaffold work order")
 	}
 	if !strings.Contains(joined, "EDITING DISCIPLINE") {
 		t.Error("expected chat mobile to include editing discipline")
