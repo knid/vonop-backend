@@ -530,7 +530,7 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 			return
 		}
 		if requests == 2 {
-			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"multi_edit","arguments":"{\"path\":\"app/page.tsx\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"ok\"}]}"}}]}}]}`)
+			fmt.Fprintln(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_2","type":"function","function":{"name":"write_files","arguments":"{\"files\":[{\"path\":\"app/page.tsx\",\"content\":\"ok\"}]}"}}]}}]}`)
 			fmt.Fprintln(w, `data: {"choices":[{"finish_reason":"tool_calls","delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18}}`)
 			fmt.Fprintln(w, "data: [DONE]")
 			return
@@ -568,11 +568,11 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 			if ctx == nil || !trace.SpanFromContext(ctx).SpanContext().IsValid() {
 				t.Fatal("executor did not receive an active tracing context")
 			}
-			if name != "multi_edit" {
-				t.Fatalf("executor tool = %s, want multi_edit after write_files recovery", name)
+			if name != "write_files" {
+				t.Fatalf("executor tool = %s, want write_files after write_files recovery", name)
 			}
 			executedArgs = arguments
-			return "edited app/page.tsx", nil
+			return "created app/page.tsx", nil
 		},
 		nil,
 		nil,
@@ -592,8 +592,8 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 	if !sawRecoveryPrompt {
 		t.Fatal("second request did not include recovery prompt")
 	}
-	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
-		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
+	if !strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
+		t.Fatalf("recovery request hid write_files tool: %s", recoveryRequestBody)
 	}
 	if strings.Contains(recoveryRequestBody, "BEGIN_WEMOB_FILE") || strings.Contains(recoveryRequestBody, "END_WEMOB_FILE") {
 		t.Fatalf("recovery request referenced removed raw file block protocol: %s", recoveryRequestBody)
@@ -611,7 +611,7 @@ func TestStreamWithToolsRecoversIncompleteStreamedToolCall(t *testing.T) {
 		t.Fatalf("executor received invalid JSON args: %s", executedArgs)
 	}
 	if !strings.Contains(executedArgs, "app/page.tsx") {
-		t.Fatalf("executor args = %s, want recovered edit payload", executedArgs)
+		t.Fatalf("executor args = %s, want recovered write payload", executedArgs)
 	}
 }
 
@@ -778,8 +778,8 @@ func TestStreamWithToolsRecoversInvalidJSONToolCallRound(t *testing.T) {
 	if recoveryRequestBody == "" {
 		t.Fatal("missing recovery prompt after invalid JSON tool call")
 	}
-	if strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
-		t.Fatalf("recovery request still exposed write_files tool: %s", recoveryRequestBody)
+	if !strings.Contains(recoveryRequestBody, `"name":"write_files"`) {
+		t.Fatalf("recovery request hid write_files tool: %s", recoveryRequestBody)
 	}
 	if len(executed) != 1 || executed[0] != "multi_edit" {
 		t.Fatalf("executed tools = %#v, want only recovered multi_edit", executed)
