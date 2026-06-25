@@ -116,8 +116,17 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 	if got := runtime.Port("expo"); got != 19000 {
 		t.Fatalf("expo port = %d, want 19000", got)
 	}
-	if !strings.HasPrefix(runtime.Processes[1].Command, "export EXPO_GO_MODE=1 && export NODE_OPTIONS=") {
+	if !strings.HasPrefix(runtime.Processes[1].Command, "export EXPO_GO_MODE=1 EXPO_PACKAGER_PROXY_URL=") {
 		t.Fatalf("expo command should export env before starting, got %q", runtime.Processes[1].Command)
+	}
+	for _, want := range []string{
+		"-expo.preview.wemob.app",
+		"REACT_NATIVE_PACKAGER_HOSTNAME=",
+		"--host lan --port 19000",
+	} {
+		if !strings.Contains(runtime.Processes[1].Command, want) {
+			t.Fatalf("expo command missing %q: %q", want, runtime.Processes[1].Command)
+		}
 	}
 	if !runtime.Processes[1].Optional {
 		t.Fatalf("expo go process should be optional in web preview supervisor")
@@ -128,6 +137,9 @@ func TestBuildPreviewRuntimeMobileNative(t *testing.T) {
 		}
 		if strings.Contains(process.Command, "--host 0.0.0.0") {
 			t.Fatalf("expo command uses invalid host mode: %q", process.Command)
+		}
+		if process.Name == "expo" && strings.Contains(process.Command, "127.0.0.1") {
+			t.Fatalf("expo go command should not advertise localhost: %q", process.Command)
 		}
 	}
 }

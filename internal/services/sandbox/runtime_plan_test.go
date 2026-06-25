@@ -120,6 +120,21 @@ func TestRuntimePlanMobileNative(t *testing.T) {
 		if strings.Contains(process.Command, "CI=1") {
 			t.Fatalf("expo preview command should allow Metro reloads, got %q", process.Command)
 		}
+		if process.Name == ProcessExpoGo {
+			for _, want := range []string{
+				"EXPO_PACKAGER_PROXY_URL=",
+				"-expo.preview.wemob.app",
+				"REACT_NATIVE_PACKAGER_HOSTNAME=",
+				"--host lan --port 19000",
+			} {
+				if !strings.Contains(process.Command, want) {
+					t.Fatalf("expo go command missing %q: %q", want, process.Command)
+				}
+			}
+			if strings.Contains(process.Command, "127.0.0.1") {
+				t.Fatalf("expo go command should not advertise localhost: %q", process.Command)
+			}
+		}
 	}
 }
 

@@ -47,7 +47,7 @@ func BuildPreviewRuntime(project *models.AppProject) PreviewRuntime {
 			Main:        "web",
 			Processes: []PreviewProcess{
 				{Name: "web", Cwd: ProjectRoot, Port: 8081, Command: nodeHeapFlag + "npx expo start --web --clear --port 8081"},
-				{Name: "expo", Cwd: ProjectRoot, Port: 19000, Command: "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "npx expo start --clear --port 19000", Optional: true},
+				{Name: "expo", Cwd: ProjectRoot, Port: 19000, Command: expoGoCommand(project), Optional: true},
 			},
 		}
 	case project.FrontendRuntime == models.FrontendRuntimeNone &&
