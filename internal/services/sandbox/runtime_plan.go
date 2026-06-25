@@ -1,6 +1,10 @@
 package sandbox
 
-import "github.com/knid/wemob/internal/models"
+import (
+	"net/url"
+
+	"github.com/knid/wemob/internal/models"
+)
 
 const (
 	ProjectRoot   = "/workspace/project"
@@ -43,7 +47,7 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 			},
 			ProcessSpec{
 				Name:        ProcessExpoGo,
-				Command:     "export EXPO_GO_MODE=1 && " + nodeHeapFlag + "npx expo start --clear --port 19000",
+				Command:     expoGoCommand(project),
 				Cwd:         ProjectRoot,
 				Port:        19000,
 				Probe:       ReadinessProbe{Type: "http", URL: "http://localhost:19000"},
@@ -99,6 +103,18 @@ func BuildRuntimePlan(project *models.AppProject) RuntimePlan {
 		AutoRestart: false,
 	})
 	return plan
+}
+
+func expoGoCommand(project *models.AppProject) string {
+	command := "export EXPO_GO_MODE=1"
+	publicURL := StablePreviewBaseURL(project, PreviewExpo)
+	if publicURL != "" {
+		command += " EXPO_PACKAGER_PROXY_URL=" + shellQuoteForBash(publicURL)
+		if u, err := url.Parse(publicURL); err == nil && u.Hostname() != "" {
+			command += " REACT_NATIVE_PACKAGER_HOSTNAME=" + shellQuoteForBash(u.Hostname())
+		}
+	}
+	return command + " && " + nodeHeapFlag + "npx expo start --clear --host lan --port 19000"
 }
 
 func backendProcess() ProcessSpec {
