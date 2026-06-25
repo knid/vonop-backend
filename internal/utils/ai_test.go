@@ -408,6 +408,38 @@ func TestBuildLLMRequestBodyAppliesOpenRouterDefaultReasoning(t *testing.T) {
 	}
 }
 
+func TestBuildLLMRequestBodyAppliesOpenRouterProviderPin(t *testing.T) {
+	body, err := buildLLMRequestBody(ChatRequest{
+		Model:    "z-ai/glm-5.2",
+		Stream:   true,
+		Messages: []Message{{Role: "user", Content: "hi"}},
+	}, &LLMProvider{
+		Name:                  "openrouter",
+		BaseURL:               "https://openrouter.ai/api/v1",
+		APIKey:                "test-key",
+		OpenRouterProviderPin: "gmicloud/fp8",
+	})
+	if err != nil {
+		t.Fatalf("buildLLMRequestBody returned error: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("request body is not JSON: %v", err)
+	}
+	provider, ok := got["provider"].(map[string]any)
+	if !ok {
+		t.Fatalf("request body missing provider object: %s", body)
+	}
+	order, ok := provider["order"].([]any)
+	if !ok || len(order) != 1 || order[0] != "gmicloud/fp8" {
+		t.Fatalf("provider.order = %#v, want [gmicloud/fp8]; body=%s", provider["order"], body)
+	}
+	if provider["allow_fallbacks"] != false {
+		t.Fatalf("provider.allow_fallbacks = %#v, want false; body=%s", provider["allow_fallbacks"], body)
+	}
+}
+
 func TestBuildLLMRequestBodyStripsReasoningContentFromMessages(t *testing.T) {
 	body, err := buildLLMRequestBody(ChatRequest{
 		Model:  "test-model",

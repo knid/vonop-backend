@@ -928,23 +928,29 @@ type StreamOptionsConfig struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
+type OpenRouterProviderRouting struct {
+	Order          []string `json:"order,omitempty"`
+	AllowFallbacks *bool    `json:"allow_fallbacks,omitempty"`
+}
+
 type ChatRequest struct {
-	Model               string               `json:"model"`
-	Messages            []Message            `json:"messages"`
-	Stream              bool                 `json:"stream,omitempty"`
-	StreamOptions       *StreamOptionsConfig `json:"stream_options,omitempty"`
-	MaxTokens           int                  `json:"max_tokens,omitempty"`
-	MaxCompletionTokens int                  `json:"max_completion_tokens,omitempty"`
-	Temperature         *float64             `json:"temperature,omitempty"`
-	TopP                *float64             `json:"top_p,omitempty"`
-	ResponseFormat      *ResponseFormat      `json:"response_format,omitempty"`
-	Tools               []Tool               `json:"tools,omitempty"`
-	ToolChoice          any                  `json:"tool_choice,omitempty"`
-	Reasoning           *ReasoningConfig     `json:"reasoning,omitempty"`
-	Thinking            *ThinkingConfig      `json:"thinking,omitempty"`
-	DisablePromptCache  bool                 `json:"-"`                          // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
-	PromptCacheKey      string               `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
-	SessionID           string               `json:"session_id,omitempty"`       // OpenRouter sticky routing session ID for multi-turn caching
+	Model               string                     `json:"model"`
+	Messages            []Message                  `json:"messages"`
+	Stream              bool                       `json:"stream,omitempty"`
+	StreamOptions       *StreamOptionsConfig       `json:"stream_options,omitempty"`
+	MaxTokens           int                        `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int                        `json:"max_completion_tokens,omitempty"`
+	Temperature         *float64                   `json:"temperature,omitempty"`
+	TopP                *float64                   `json:"top_p,omitempty"`
+	ResponseFormat      *ResponseFormat            `json:"response_format,omitempty"`
+	Tools               []Tool                     `json:"tools,omitempty"`
+	ToolChoice          any                        `json:"tool_choice,omitempty"`
+	Reasoning           *ReasoningConfig           `json:"reasoning,omitempty"`
+	Thinking            *ThinkingConfig            `json:"thinking,omitempty"`
+	Provider            *OpenRouterProviderRouting `json:"provider,omitempty"`
+	DisablePromptCache  bool                       `json:"-"`                          // skip Anthropic cache_control on system blocks (for one-shot calls with no follow-up)
+	PromptCacheKey      string                     `json:"prompt_cache_key,omitempty"` // Moonshot K2.6 session-level prompt cache key
+	SessionID           string                     `json:"session_id,omitempty"`       // OpenRouter sticky routing session ID for multi-turn caching
 }
 
 type Message struct {
@@ -1159,6 +1165,16 @@ func prepareChatRequest(req ChatRequest, provider *LLMProvider) (ChatRequest, er
 		// was explicitly requested.
 		if req.Reasoning == nil && req.Thinking == nil && provider.DefaultReasoning == nil {
 			req.Thinking = &ThinkingConfig{Type: "disabled"}
+		}
+	}
+
+	if provider.IsOpenRouter() {
+		if providerPin := strings.TrimSpace(provider.OpenRouterProviderPin); providerPin != "" {
+			allowFallbacks := false
+			req.Provider = &OpenRouterProviderRouting{
+				Order:          []string{providerPin},
+				AllowFallbacks: &allowFallbacks,
+			}
 		}
 	}
 

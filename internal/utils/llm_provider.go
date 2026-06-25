@@ -39,7 +39,8 @@ type LLMProvider struct {
 	// ConfiguredModel is set when the provider was resolved per-user from a
 	// PostHog feature flag (e.g. rc-builder-provider-model-starter). When set,
 	// it overrides the global WEBSITE_BUILDER_LLM_MODEL secret.
-	ConfiguredModel string
+	ConfiguredModel       string
+	OpenRouterProviderPin string // exact OpenRouter provider endpoint slug, e.g. "gmicloud/fp8"
 }
 
 // Endpoint returns the full chat completions URL for this provider.
