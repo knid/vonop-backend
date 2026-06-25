@@ -175,7 +175,7 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 		return c.llmProvider()
 	}
 
-	providerName, model, flagReasoning := c.parseProviderModel(providerModel)
+	providerName, model, flagReasoning, providerPin := c.parseProviderModel(providerModel)
 	reasoning := c.reasoningConfig()
 	if flagReasoning != nil {
 		reasoning = flagReasoning
@@ -193,7 +193,10 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 		}
 		p = &utils.LLMProvider{Name: "moonshot", BaseURL: "https://api.moonshot.ai/v1", APIKey: c.SecretManager.GetSecret("MOONSHOT_API_KEY"), DefaultReasoning: moonshotReasoning, FastModelOverride: fastModel, ConfiguredModel: model}
 	default:
-		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: reasoning, FastModelOverride: fastModel, ConfiguredModel: model}
+		p = &utils.LLMProvider{Name: "openrouter", BaseURL: "https://openrouter.ai/api/v1", APIKey: c.SecretManager.GetSecret("OPENROUTER_API_KEY"), DefaultReasoning: reasoning, FastModelOverride: fastModel, ConfiguredModel: model, OpenRouterProviderPin: providerPin}
+	}
+	if providerPin != "" && !p.IsOpenRouter() {
+		slog.Warn("Ignoring OpenRouter provider pin for non-OpenRouter builder model", "provider", p.Name, "model", model, "provider_pin", providerPin)
 	}
 
 	// Every non-OpenRouter primary gets an OpenRouter fallback.
@@ -205,37 +208,45 @@ func (c *Controller) llmProviderForUser(user *models.User) *utils.LLMProvider {
 	if reasoning != nil {
 		reasoningEffort = reasoning.Effort
 	}
-	slog.Info("LLM provider resolved per user", "user_id", user.ID, "tier", tier, "provider", p.Name, "model", model, "reasoning_effort", reasoningEffort)
+	slog.Info("LLM provider resolved per user", "user_id", user.ID, "tier", tier, "provider", p.Name, "model", model, "reasoning_effort", reasoningEffort, "provider_pin", providerPin)
 	return p
 }
 
-// parseProviderModel splits a "provider/model[;reasoning_effort]" string into
-// provider name, bare model ID, and an optional reasoning override. Known
+// parseProviderModel splits a "provider/model[;reasoning_effort][;openrouter_provider_pin]"
+// string into provider name, bare model ID, and optional OpenRouter controls. Known
 // providers: anthropic, moonshot, openrouter.
 // If the first segment is not a known provider, the whole string is treated as
 // an OpenRouter model ID (e.g. "deepseek/deepseek-v4-flash", "google/gemini-2.5-flash-lite").
-func (c *Controller) parseProviderModel(providerModel string) (provider, model string, reasoning *utils.ReasoningConfig) {
+func (c *Controller) parseProviderModel(providerModel string) (provider, model string, reasoning *utils.ReasoningConfig, providerPin string) {
 	providerModel = strings.TrimSpace(strings.ToLower(providerModel))
-	if base, suffix, ok := strings.Cut(providerModel, ";"); ok {
-		providerModel = strings.TrimSpace(base)
-		effort := strings.TrimSpace(suffix)
+	segments := strings.Split(providerModel, ";")
+	if len(segments) > 1 {
+		providerModel = strings.TrimSpace(segments[0])
+		effort := strings.TrimSpace(segments[1])
 		if isReasoningEffort(effort) {
 			reasoning = &utils.ReasoningConfig{Effort: effort}
 		} else if effort != "" {
 			slog.Warn("Ignoring invalid builder model reasoning effort", "provider_model", providerModel, "reasoning_effort", effort)
 		}
 	}
+	if len(segments) > 2 {
+		providerPin = strings.TrimSpace(segments[2])
+	}
+	if len(segments) > 3 {
+		slog.Warn("Ignoring extra builder model config segments", "provider_model", providerModel, "extra_segments", len(segments)-3)
+	}
+
 	parts := strings.SplitN(providerModel, "/", 2)
 	if len(parts) != 2 {
-		return "openrouter", providerModel, reasoning
+		return "openrouter", providerModel, reasoning, providerPin
 	}
 
 	switch parts[0] {
 	case "anthropic", "moonshot", "openrouter":
-		return parts[0], parts[1], reasoning
+		return parts[0], parts[1], reasoning, providerPin
 	default:
 		// First segment is a vendor namespace on OpenRouter (e.g. "deepseek/...")
-		return "openrouter", providerModel, reasoning
+		return "openrouter", providerModel, reasoning, providerPin
 	}
 }
 
