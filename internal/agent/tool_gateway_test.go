@@ -82,6 +82,8 @@ func TestToolGatewayUpdatesAssistantParts(t *testing.T) {
 	assert.Equal(t, "tool_call", parts[0].Type)
 	assert.Equal(t, "test_tool", parts[0].Name)
 	assert.JSONEq(t, `{"x":1}`, string(parts[0].Input))
+	assert.JSONEq(t, `{"x":1}`, string(parts[0].InputPreview))
 	assert.Contains(t, parts[0].Result, "ok")
+	assert.Contains(t, parts[0].ResultPreview, "ok")
 	assert.False(t, parts[0].IsError)
 }

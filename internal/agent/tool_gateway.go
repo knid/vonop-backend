@@ -45,15 +45,17 @@ func (g *ToolGateway) Execute(ctx context.Context, name string, argsJSON string)
 	}
 
 	partIdx := -1
+	inputPreview := stripToolInputForPreview(name, argsJSON)
 	if g.Parts != nil {
 		if g.PartsMu != nil {
 			g.PartsMu.Lock()
 		}
 		*g.Parts = append(*g.Parts, models.ChatMessagePart{
-			Type:       "tool_call",
-			ToolCallID: toolCallID,
-			Name:       name,
-			Input:      json.RawMessage(argsJSON),
+			Type:         "tool_call",
+			ToolCallID:   toolCallID,
+			Name:         name,
+			Input:        json.RawMessage(argsJSON),
+			InputPreview: inputPreview,
 		})
 		partIdx = len(*g.Parts) - 1
 		if g.PartsMu != nil {
@@ -68,7 +70,7 @@ func (g *ToolGateway) Execute(ctx context.Context, name string, argsJSON string)
 			ToolCallID:   toolCallID,
 			ToolName:     name,
 			RiskLevel:    ClassifyToolRisk(name),
-			InputPreview: stripToolInputForPreview(name, argsJSON),
+			InputPreview: inputPreview,
 		})
 	}
 
@@ -108,6 +110,7 @@ func (g *ToolGateway) Execute(ctx context.Context, name string, argsJSON string)
 		}
 		if partIdx < len(*g.Parts) {
 			(*g.Parts)[partIdx].Result = result
+			(*g.Parts)[partIdx].ResultPreview = firstLine(result, 140)
 			(*g.Parts)[partIdx].IsError = isFailure
 			(*g.Parts)[partIdx].DurationMs = durationMs
 		}

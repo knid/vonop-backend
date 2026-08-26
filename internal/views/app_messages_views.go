@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/knid/wemob/internal/agent"
 	"github.com/knid/wemob/internal/constants"
 	"github.com/knid/wemob/internal/models"
 	"github.com/knid/wemob/internal/utils"
@@ -50,6 +51,7 @@ func (v *HttpViews) GetAppMessages(w http.ResponseWriter, r *http.Request) {
 	if msgs == nil {
 		msgs = []models.AppChatMessage{}
 	}
+	msgs = agent.SanitizeChatMessagesForDisplay(msgs)
 	utils.JSONResponse(w, map[string]any{"messages": msgs}, http.StatusOK)
 }
 

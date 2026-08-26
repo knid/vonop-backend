@@ -45,10 +45,9 @@ type AppChatMessage struct {
 // ChatMessagePart is one chronological block inside an assistant turn.
 // Text parts carry user-visible narration the model wrote; reasoning parts
 // carry provider thinking that must render separately from the assistant
-// answer; tool_call parts carry a snapshot of one tool invocation (name,
-// input, result). The dashboard renders parts top-to-bottom — reasoning →
-// thinking block, text → MarkdownText, tool_call → tool / file card — so the
-// on-screen order matches what the model actually did.
+// answer; tool_call parts carry one tool invocation. Input/Result are the raw
+// backend record used for LLM history reconstruction; InputPreview/ResultPreview
+// are the safe display fields chat UIs should render.
 type ChatMessagePart struct {
 	Type string `json:"type"` // "reasoning" | "text" | "tool_call"
 
@@ -56,12 +55,14 @@ type ChatMessagePart struct {
 	Text string `json:"text,omitempty"`
 
 	// type=tool_call
-	ToolCallID string          `json:"tool_call_id,omitempty"`
-	Name       string          `json:"name,omitempty"`
-	Input      json.RawMessage `json:"input,omitempty"`
-	Result     string          `json:"result,omitempty"`
-	IsError    bool            `json:"is_error,omitempty"`
-	DurationMs int             `json:"duration_ms,omitempty"`
+	ToolCallID    string          `json:"tool_call_id,omitempty"`
+	Name          string          `json:"name,omitempty"`
+	Input         json.RawMessage `json:"input,omitempty"`
+	InputPreview  json.RawMessage `json:"input_preview,omitempty"`
+	Result        string          `json:"result,omitempty"`
+	ResultPreview string          `json:"result_preview,omitempty"`
+	IsError       bool            `json:"is_error,omitempty"`
+	DurationMs    int             `json:"duration_ms,omitempty"`
 }
 
 // ChatMessageAttachment is one entry inside AppChatMessage.Attachments.
